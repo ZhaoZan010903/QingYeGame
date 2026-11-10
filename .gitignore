@@ -1,0 +1,41 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets/
+
+# Dependencies and build outputs
+node_modules/
+dist/
+build/
+coverage/
+vendor/
+bin/
+*.exe
+*.test
+
+# Runtime data and exports
+*.log
+logs/
+tmp/
+temp/
+uploads/
+backups/
+data-exports/
+*.dump
+*.sql.gz
+*.sqlite
+*.sqlite3
+
+# Local tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+__pycache__/
+*.pyc

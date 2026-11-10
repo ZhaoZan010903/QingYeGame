@@ -1,0 +1,159 @@
+# 接口清单
+
+## 1 约定
+
+本稿定义接口职责及主要字段，供开发前评审，尚未实现。完整 OpenAPI、请求校验和接口测试在开发阶段补齐。
+
+- 路径前缀统一为 `/api/v1`，以下表格省略前缀。
+- 请求和响应以 JSON 为主。图片文件通过受限签名参数直接上传至对象存储。
+- 使用服务端 Cookie 会话；管理接口检查管理员角色，本人接口检查数据归属。
+- 列表采用 `cursor` 和 `limit`；建议默认20条、上限50条。排序需带稳定的最终次序。
+- 时间按 ISO 8601 传输，报价采用十进制字符串或空值，避免浮点误差。
+- 成功返回 `data`；分页附 `next_cursor`。错误返回 `code`、`message`、必要的字段错误及 `request_id`。
+
+## 2 注册登录
+
+| 方法 | 路径 | 权限 | 主要参数 | 结果与限制 |
+| --- | --- | --- | --- | --- |
+| POST | `/auth/sms` | 游客 | phone、purpose | 发送验证码；频控和用途隔离 |
+| POST | `/auth/register` | 游客 | phone、challenge_id、code、password、agreement | 注册成功建立会话 |
+| POST | `/auth/login` | 游客 | method=sms/password 与对应凭据 | 建立 HttpOnly Cookie 会话 |
+| POST | `/auth/password-reset` | 游客 | phone、challenge_id、code、new_password | 修改密码并撤销旧会话 |
+| POST | `/auth/logout` | 会员 | — | 退出 |
+
+## 3 公开展示
+
+| 方法 | 路径 | 权限 | 主要参数 | 结果与限制 |
+| --- | --- | --- | --- | --- |
+| GET | `/categories` | 公开 | — | 分类、筛选配置 |
+| GET | `/products` | 公开 | category、trade_type、price_unit、q、filters、min_price、max_price、sort、cursor、limit | 仅返回当前版本已审核、已展示且分类启用的商品 |
+| GET | `/products/{id}` | 公开 | — | 公开详情与首批图集；下架只返回状态，不返回原资料 |
+| GET | `/home` | 公开 | — | 横幅、精选、热门、新品；无重复商品 |
+| POST | `/products/{id}/view` | 访客 | 服务端签发的访客标识随 Cookie 携带 | 记录有效浏览，同商品/访客/日期去重 |
+| GET | `/contacts` | 公开 | purpose | 客服配置 |
+| GET | `/pages/{slug}` | 公开 | — | 已发布说明页 |
+| GET | `/products/{id}/images` | 公开 | cursor、limit | 按顺序读取后续展示图片；每次检查商品公开条件 |
+
+## 4 个人中心与发布
+
+| 方法 | 路径 | 权限 | 主要参数 | 结果与限制 |
+| --- | --- | --- | --- | --- |
+| GET | `/me` | 会员 | — | 本人资料 |
+| PATCH | `/me` | 会员 | nickname | 只能改允许字段 |
+| GET | `/me/favorites` | 会员 | cursor、limit | 本人收藏 |
+| PUT | `/me/favorites/{product_id}` | 会员 | — | 重复收藏仍只有一条 |
+| DELETE | `/me/favorites/{product_id}` | 会员 | — | 取消收藏，保留首次收藏时间 |
+| GET | `/me/products` | 会员 | status、cursor、limit | 本人发布及最近审核原因 |
+| GET | `/me/products/{id}` | 所属会员 | — | 包括非公开的本人商品资料 |
+| POST | `/me/products` | 会员 | ProductWrite | 保存新草稿，source/owner_id 由后端写入 |
+| PATCH | `/me/products/{id}` | 所属会员 | ProductWrite、expected_version | 更新内容；待审编辑撤回为草稿；已展示编辑停止公开并需重新提交 |
+| POST | `/me/products/{id}/submit` | 所属会员 | expected_version | 校验资料后进入待审核 |
+| POST | `/me/products/{id}/withdraw` | 所属会员 | expected_version | 待审核转草稿，已展示转下架；保留审核记录 |
+
+## 5 图片上传与预览
+
+| 方法 | 路径 | 权限 | 主要参数 | 结果与限制 |
+| --- | --- | --- | --- | --- |
+| POST | `/uploads` | 会员/管理员 | filename、mime_type、byte_size | 返回受限签名上传参数和 media_id |
+| POST | `/uploads/{id}/complete` | 上传者 | — | 服务端核验实际文件、处理图片 |
+| GET | `/media/{id}/preview` | 上传者/管理员 | — | 私有素材短期预览；先检查归属 |
+
+## 6 管理后台
+
+| 方法 | 路径 | 权限 | 主要参数 | 结果与限制 |
+| --- | --- | --- | --- | --- |
+| GET | `/admin/products` | 管理员 | status、source、q、cursor、limit | 全部商品和待审列表 |
+| GET | `/admin/products/{id}` | 管理员 | — | 完整审核资料、当前版本及审核历史；私有图片仍需授权预览 |
+| POST | `/admin/products` | 管理员 | ProductWrite | 平台商品草稿 |
+| PATCH | `/admin/products/{id}` | 管理员 | ProductWrite、expected_version | 维护商品并保存为草稿；展示中编辑需停止公开，保留操作记录 |
+| POST | `/admin/products/{id}/review` | 管理员 | decision=approve/reject、reason、expected_version | 只审核当前待审版本，通过则公开 |
+| POST | `/admin/products/{id}/status` | 管理员 | action=submit/offline、expected_version、reason | 进入待审或管理员下架；下架必须有原因 |
+| PUT | `/admin/products/{id}/featured` | 管理员 | manual_rank | 只对已展示商品生效 |
+| GET | `/admin/categories` | 管理员 | — | 全部分类及筛选配置，包含已停用项目 |
+| PUT | `/admin/categories/{id}` | 管理员 | name、price_units、filter_config、sort_order、enabled | 编辑筛选配置；引用中的选项停用而非直接删除 |
+| POST | `/admin/categories` | 管理员 | code、name、trade_type、price_units、filter_config | 新增分类 |
+| GET | `/admin/contacts` | 管理员 | — | 查看含停用客服的列表 |
+| POST | `/admin/contacts` | 管理员 | name、purpose、channel、contact_value、qr_media_id | 新增客服 |
+| PUT | `/admin/contacts/{id}` | 管理员 | 客服字段、enabled | 维护二维码和联系方式 |
+| GET | `/admin/pages` | 管理员 | — | 说明页含草稿 |
+| PUT | `/admin/pages/{slug}` | 管理员 | title、body、published | 保存页面 |
+| GET | `/admin/settings` | 管理员 | — | 品牌和推荐等配置 |
+| PUT | `/admin/settings/{key}` | 管理员 | value | 按 key 校验结构并保存 |
+| GET | `/admin/users` | 管理员 | q、cursor、limit | 会员查询、手机号最少展示 |
+| PATCH | `/admin/users/{id}` | 管理员 | enabled | 停用立即撤销会话；已发布商品需管理员明确处理 |
+| GET | `/admin/recommendations` | 管理员 | — | 排名、分数构成和更新时间 |
+| POST | `/admin/recommendations/refresh` | 管理员 | — | 触发可重复执行的榜单计算 |
+| POST | `/admin/products/{id}/publish` | 管理员 | expected_version | 平台录入或旧数据核对后直接校验发布；写入审核记录，不用于绕过会员投稿审核 |
+
+## 7 主要数据结构
+
+### 7.1 ProductWrite
+
+| 字段 | 含义 | 校验要求 |
+| --- | --- | --- |
+| category_id | 分类编号 | 分类已启用，与交易类型一致 |
+| title | 标题 | 提交审核时必填，最多100字 |
+| trade_type | 出售或出租 | sale / rent |
+| price_amount | 展示报价 | 非负十进制字符串，或空值表示联系客服报价 |
+| price_unit | 报价单位 | 出售为 account；出租为 hour/day/week/month |
+| attributes | 账号属性 | 按分类配置校验编码、类型、单选或多选 |
+| description | 商品介绍 | 不包含密码、验证码或身份认证资料 |
+| image_ids | 有序图片编号数组 | 均已完成文件校验，归属正确；提交时至少一张 |
+
+保存草稿允许业务资料未填全；分类、交易类型及字段类型等基础结构仍需有效。完整必填检查在提交审核或管理员发布时执行。
+
+`owner_id`、`source`、`status`、`approved_version`、`manual_rank`、`published_at` 不属于会员可写字段。请求出现不允许字段时返回明确错误，不能照单写入数据库。
+
+### 7.2 商品列表筛选
+
+filters 按分类配置的分组编码与选项编码传递。同组多选为 OR，不同组为 AND。后端拒绝未知分组和选项，不把参数拼接成 SQL。
+
+公开商品列表还应支持 `trade_type` 与 `price_unit`。价格范围和价格排序必须在同一报价单位下使用；缺少单位且结果包含多种租赁单位时返回参数错误，并由前端提示选择单位。
+
+sort 可选择最新、热度、价格升序和价格降序。客服报价商品不参与价格范围筛选，价格排序时排在有数值报价之后。
+
+### 7.3 登录凭据与协议
+
+短信登录提交手机号、challenge_id 和 code；密码登录提交手机号和密码。注册需提交当前协议版本及已同意状态，服务端核验，不仅依赖前端勾选。短信登录未注册的手机号应引导注册，不在用户未确认协议时自动建号。
+
+注册及登录失败的提示避免暴露验证码、内部异常或不必要的用户资料。密码重置完成后要求重新登录。
+
+## 8 状态操作
+
+| 操作 | 允许来源 | 结果 |
+| --- | --- | --- |
+| 会员保存编辑 | 本人草稿、退回、下架、待审、已展示 | 内容版本增加，保存为草稿；待审撤回，已展示停止公开 |
+| 会员提交 | 本人草稿、退回、下架 | 完整校验后转待审核 |
+| 会员撤回 | 本人待审核 | 转草稿 |
+| 会员下架 | 本人已展示 | 转已下架 |
+| 管理员审核 | 当前待审核版本 | 通过转已展示；退回记录原因并转 rejected |
+| 管理员直接发布 | 平台录入或旧站导入的草稿、退回、下架 | 完整校验，写入审核通过记录并公开 |
+| 管理员下架 | 已展示 | 记录原因并停止公开 |
+
+会员投稿必须经过待审核及管理员审核，不能调用平台直接发布接口。状态不满足时返回409；已下架再次下架等重复操作可返回当前状态，不能重复产生不一致记录。
+
+状态处理按[待确认事项 R02](09-review-items.md)的最终结论调整。涉及审核的写操作在同一事务中检查 `expected_version` 和状态；版本变化返回409。
+
+## 9 公开数据与失效状态
+
+- 未审核商品、用户私人联系方式、审核快照和私有对象键不得进入公开响应。
+- 下架商品详情返回410及简要状态，页面据此展示“已下架”；未公开或不存在的商品统一返回404。
+- 本人收藏可返回已下架的占位记录与取消收藏操作，不返回已撤回的图片和介绍。
+- 下架、撤回或停用分类后，列表、详情、后续图片页和推荐均检查最新可见条件。
+- 管理员查看完整资料也应通过授权的图片预览地址，不把私有对象直接改为永久公开。
+
+## 10 错误状态
+
+| HTTP 状态 | 场景 |
+| --- | --- |
+| 400 / 422 | 参数或业务校验失败，标明具体字段 |
+| 401 | 未登录或会话失效 |
+| 403 | 无权使用管理功能；本人资源越权查询可统一按404处理 |
+| 404 | 资源不存在或无权查看 |
+| 409 | 内容版本、状态或唯一性冲突 |
+| 410 | 原公开商品已下架，返回简要状态 |
+| 413 | 上传超出大小限制 |
+| 429 | 短信、登录、浏览或上传请求超过限制 |
+| 500 / 503 | 服务异常或暂不可用；前端保留已填内容并允许重试 |
+
+上传完成通知、收藏和推荐刷新应可安全重试。产生新商品的请求需使用请求去重标识或等效方式，避免网络重试产生重复草稿。
