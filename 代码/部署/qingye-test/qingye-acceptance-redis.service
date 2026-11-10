@@ -1,0 +1,16 @@
+[Unit]
+Description=QingYe isolated acceptance Redis on loopback port 6382
+After=network.target
+
+[Service]
+User=qingye-acceptance
+Group=qingye-acceptance
+ExecStart=/usr/bin/redis-server /etc/qingye-test/acceptance-redis.conf
+Restart=on-failure
+RestartSec=3
+MemoryMax=96M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/qingye-acceptance/redis
+PrivateTmp=true

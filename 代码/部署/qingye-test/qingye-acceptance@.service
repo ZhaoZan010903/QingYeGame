@@ -1,0 +1,24 @@
+[Unit]
+Description=QingYe isolated acceptance %i API
+After=network.target postgresql.service qingye-acceptance-redis.service
+Wants=qingye-acceptance-redis.service
+
+[Service]
+Type=simple
+User=qingye-acceptance
+Group=qingye-acceptance
+WorkingDirectory=/opt/qingye-test/acceptance-current
+EnvironmentFile=/etc/qingye-test/acceptance-%i.env
+Environment=GOMEMLIMIT=160MiB
+Environment=GOGC=75
+ExecStart=/opt/qingye-test/acceptance-current/qingye-api serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+MemoryMax=256M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/qingye-acceptance/media
+PrivateTmp=true
+UMask=0027

@@ -1,0 +1,128 @@
+# 152服务器：前后端测试联调
+
+此目录部署 `0.7.0-test.1` 测试环境，不切换现有生产站，也不覆盖5178前端原型。主机上的其他数据库、Redis及网站继续使用原有配置。
+
+| 组件 | 地址或路径 |
+| --- | --- |
+| React 用户站 | `http://152.136.252.204:5179`，源码`代码/前端/用户端` |
+| React 管理站 | `http://152.136.252.204:5181`，源码`代码/前端/管理端`，独立构建与登录 |
+| public API | `127.0.0.1:5180`，`APP_SURFACE=public`，仅本机监听 |
+| admin API | `127.0.0.1:5182`，`APP_SURFACE=admin`，仅本机监听 |
+| 浏览器接口 | 用户站`/api/`只代理5180，管理站`/api/`只代理5182；就绪检查在API的`/healthz` |
+| PostgreSQL | 复用本机15服务，独立角色 `qingye_test`、业务库 `qingye_test` |
+| 自动化检查库 | `qingye_test_checks`；测试独立schema并自动清理 |
+| Redis | 独立实例 `127.0.0.1:6381`，独立认证、AOF、64MB上限 |
+| 业务系统用户 | `qingye-test`，两个API进程共享业务数据库和受控媒体 |
+| 原图与上传 | `/var/lib/qingye-test/media`，不映射为Nginx静态目录 |
+| 私有原始快照 | `/var/lib/qingye-test/import` |
+| public配置 | `/etc/qingye-test/app.env`（root 0600），不进入源码包 |
+| admin配置 | `/etc/qingye-test/admin.env`（root 0600），不进入源码包 |
+| API版本 | `/opt/qingye-test/releases/<release>/qingye-api`，`current`符号链接 |
+| 用户静态版本 | `/var/www/qingye-test/releases/<release>`，`current`符号链接 |
+| 管理静态版本 | `/var/www/qingye-admin/releases/<release>`，`current`符号链接 |
+| 私有发布资料 | `/root/qingye-private/integration` |
+
+历史HTML与React原型在`文档/原型代码/HTML`、`文档/原型代码/React`，5178仍运行旧原型。当前`代码/前端/用户端`与`代码/前端/管理端`是两个业务前端项目；原型的本机数据和模拟会话不导入业务环境。
+
+## 入口与配置隔离
+
+两个API共用一个构建产物，以不同环境文件启动。public只开放公开及会员业务，admin提供管理员业务入口。用户站不打包管理模块，也不代理管理API。
+
+| 配置 | public | admin |
+| --- | --- | --- |
+| `APP_SURFACE` | `public` | `admin` |
+| `QINGYE_ADDR` | `127.0.0.1:5180` | `127.0.0.1:5182` |
+| `ALLOWED_ORIGINS` | `http://152.136.252.204:5179` | `http://152.136.252.204:5181` |
+| `PUBLIC_BASE_URL` | `http://152.136.252.204:5179` | `http://152.136.252.204:5181` |
+| 会话Cookie | `qingye_session` | `qingye_admin_session` |
+| 数据库会话audience | `public` | `admin` |
+
+Cookie名、audience、角色、账户状态及写请求来源由服务端联合校验；上传票据也限制在创建它的入口。**同一IP的不同端口不是不同Cookie域**，不能把端口或前端角色判断当作会话隔离保证。当前按用户确认使用IP/HTTP测试，`SECURE_COOKIES=false`；后续域名HTTPS启用Secure Cookie并复核域名、Origin和网络访问策略。API5180、5182及PostgreSQL、Redis均不开放外网。
+
+## 首次配置
+
+先检查可用端口、内存、磁盘及已有服务。创建系统用户 `qingye-test` 与上述目录；媒体和Redis数据由该用户持有。Nginx临时目录使用 `nginx` 用户。不得对已有其他项目目录递归修改权限。
+
+`bootstrap-services.py --secrets <私有JSON>` 创建专用数据库及Redis。JSON包含 `db_password`、`redis_password`、`session_secret`，值使用足够长度的随机URL安全字符串。另有 `accounts` 数组用于专用测试账户，每项含 `phone`、`nickname`、`password`、`role`。密码不作为命令行参数。
+
+脚本仅为清叶两库、专用角色及本机IPv4添加SCRAM认证规则，先备份 `pg_hba.conf.before-qingye-test`，不改变其他应用的规则，也不开放5432或6381到外网。
+
+`provision-isolation.py --acceptance-secrets <验收专用私有JSON>`读取已有业务配置，将public改为本机监听，生成独立admin配置，并创建下述验收资源。验收JSON含独立的`db_password`、`redis_password`和`session_secret`，不要复用业务凭据。脚本不会自动切换正在运行的API；安装服务配置后需明确重启相应清叶服务。
+
+将API、用户/管理web、Redis和媒体任务的systemd配置放入 `/etc/systemd/system`。业务public API以非root用户运行，内存上限384MB、Go目标256MiB；admin上限256MB、Go目标180MiB。新上传与缩略图解码在各自进程内使用单并发队列；原始迁移文件不被缩略图处理覆盖。Nginx的用户与管理站分别使用`nginx.conf`、`admin-nginx.conf`及独立临时目录。
+
+## 构建与切换
+
+用户端在`代码/前端/用户端`安装锁定依赖，构建时设置：
+
+```sh
+VITE_DATA_MODE=api
+VITE_API_BASE_URL=/api/v1
+VITE_ENVIRONMENT_LABEL='测试环境 · 旧站商品快照'
+VITE_SMS_ENABLED=false
+```
+
+管理端在`代码/前端/管理端`独立执行`pnpm install --frozen-lockfile`，构建配置使用`VITE_API_BASE_URL=/api/v1`、`VITE_PUBLIC_SITE_URL=http://152.136.252.204:5179`。所有`VITE_`变量都是浏览器可见内容，不能放服务器凭据。两个前端分别执行`pnpm test`、`pnpm build`，分别发布各自`dist`，不混用依赖或构建目录。
+
+后端执行单元和真实数据库/Redis检查、`go vet ./...`，再以`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o qingye-api ./cmd/qingye`构建。具体本地启动及测试变量见[后端说明](../../后端/README--后端开发说明.md)。先在独立验收环境完成业务、并发、安全验证，再发布业务测试站。
+
+上传产物到新的版本目录并核对SHA256，分别验证用户与管理Nginx配置。API、用户静态页、管理静态页各自切换`current`链接；每个链接用原子替换，三个链接不是一个跨目录事务，需按接口兼容性安排顺序并完成切换后核验。首次业务部署执行`maintenance.py migrate`、`seed-users`、`import-legacy`、`reconcile-media`；随后启动`qingye-test-api`、`qingye-test-admin-api`、`qingye-test-web`、`qingye-test-admin-web`。导入以旧站源ID去重，重复执行不会覆盖管理员后续修改。
+
+维护脚本默认读取业务环境`app.env`。操作验收资源必须显式传入验收`--env`及`--binary`，避免误用业务库。定时推荐只由public进程执行，admin保留人工刷新；两个进程不得分别启动周期重算。
+
+2026年11月11日确认的报价规则随R5迁移应用：出售元、时日租号元/日、周月租号元/月。先备份并在独立环境验证，再用新二进制执行 `migrate`；有序迁移记录会阻止重复回填，不覆盖人工报价、重分类、原始载荷或历史审核快照。发布后按三类分别核对价格、单位、预算筛选和排序。已部署R4与R5补发的散列、迁移数量和复验状态以[发布记录](../../../文档/计划/RELEASE--测试环境发布记录.md)为准，不能仅凭文档里的新规则认为服务器已完成迁移。
+
+构建产物不是源码交接。GitHub保存源码、依赖锁、配置示例、测试和文档；私有源数据、真实配置、日志和图片不提交。
+
+## 独立验收资源与执行顺序
+
+| 资源 | 配置 |
+| --- | --- |
+| API | `127.0.0.1:5184` public、`127.0.0.1:5185` admin，仅本机 |
+| 入口Origin | `http://127.0.0.1:5186` public、`http://127.0.0.1:5187` admin；仅供受控本地浏览器或验收脚本，不对外发布 |
+| PostgreSQL | 数据库及角色`qingye_acceptance`，与`qingye_test`、`qingye_test_checks`分开 |
+| Redis | 独立认证实例`127.0.0.1:6382`，32MB上限；目录`/var/lib/qingye-acceptance/redis` |
+| 系统用户 | `qingye-acceptance` |
+| 媒体 | `/var/lib/qingye-acceptance/media`，不共享业务图库 |
+| 配置 | `/etc/qingye-test/acceptance-public.env`、`acceptance-admin.env`；root 0600 |
+| API产物 | `/opt/qingye-test/acceptance-current/qingye-api`，独立于业务`current` |
+| 服务 | `qingye-acceptance@public`、`qingye-acceptance@admin`、`qingye-acceptance-redis` |
+
+验收环境使用专用账户和测试商品，并导入576件公开商品快照供查询规模验证；原图不重复复制到验收媒体目录。首次先使用验收环境文件执行数据库迁移和专用账户初始化，再启动两个验收API。隔离的是数据库、Redis实例、操作系统用户和媒体路径，仍与业务环境同机共享CPU、内存和磁盘，不能视为独立机器的性能结果。
+
+`代码/工具/acceptance_suite.py`按`functional`→`concurrency`→`security`执行，三阶段共用私有`--state`文件，分别输出`--output`报告。调用时明确指定`--public-url http://127.0.0.1:5184`、`--admin-url http://127.0.0.1:5185`、对应Origin和`--account-file`。脚本拒绝非本机目标及5178—5182业务端口，安全阶段要求并发阶段已完成；不要绕过目标校验在业务站执行写测试。
+
+每轮修复后重建验收产物，复核业务路径，再进行受控并发与安全验证。记录请求成功率、响应延迟、服务器资源和失败原因；本机接口计时与外网链路计时分开，外网测试注明gzip与并发条件。至少三轮代码/业务审阅记录保留发现、修复、复测及尚未覆盖的范围，不以“无已知问题”承诺绝对无缺陷。最终结果另记开发进度和验收报告。
+
+## 原图迁移
+
+当前已导入576条旧商品及48,332条有序图片关联，**原图已全量完成，逐文件SHA256和逐商品有序关联核验通过**。应分别核对源引用数、本地文件校验成功数和数据库ready数；pending文件的存在不改变商品原始图集总数。
+
+`qingye-media-migration.service` 从已授权的旧站图片CDN读取，先封面后图集，默认24个下载线程、总请求速率上限12次/秒。图片原始字节写入 `media/legacy/<URL的SHA256>`；进度、失败和内容SHA256写入私有清单。保留至少5GiB磁盘余量，触及阈值退出75并等待空间处理；不会删除其他项目、自动改成压缩图或清除已完成文件。
+
+```sh
+systemctl start --no-block qingye-media-migration
+systemctl status qingye-media-migration
+journalctl -u qingye-media-migration -n 10
+```
+
+进度文件为 `import/media-status.json`，逐文件清单为 `import/media-manifest.jsonl`。恢复时同一文件大小匹配已完成记录才跳过，不完整文件重新下载。失败项保留来源，可重跑修复。
+
+`qingye-test-media-reconcile.timer` 每两分钟核验新增本地文件的类型、尺寸信息和内容SHA256，更新数据库可用状态；不会从外部回源。网站图片始终经过Go权限校验，下架、撤回或分类停用后不能通过旧图片地址继续读取。
+
+本次48,332张原图全量完成并核验后，已停止并禁用此轮询timer，避免继续空扫描；后续新一批迁移可按需要重新启动。常规会员上传在完成接口中直接核验，不依赖此timer。
+
+小图使用 `?variant=thumb`，原图仍可在详情查看。小图是额外的派生缓存，不替代原始迁移文件。
+
+## 检查、备份和回退
+
+首次在systemd服务启动前手动执行 `nginx -t`，需先创建 `/run/qingye-test-web` 与 `/run/qingye-test-admin-web`；正常服务启动由unit的 `RuntimeDirectory` 创建。缺少目录导致配置校验失败时，不切换current。发布版本与校验值见[当前发布记录](../../../文档/计划/RELEASE--测试环境发布记录.md)。
+
+- `/healthz` 同时检查数据库和Redis。服务进程active不等于接口可用。
+- 发布后只读核对目录总量、原始字段保留及已确认的元/元每日/元每月报价、图片顺序及就绪情况、同单位搜索筛选排序和前端资源；异常报价单独核对。会话跨入口、上传提交审核、下架、配置保存和安全写测试使用独立验收环境。
+- 使用专用测试会员，不迁移旧会员密码，不发送短信；短信未接入返回明确503。
+- 备份 `qingye_test` 数据库、完整媒体目录和私有导入清单；凭据单独加密保管。图片约数十GB，服务器磁盘内复制一份不适合作为完整异地备份。
+- 回退应用时分别将API、用户端和管理端`current`指向已验证的兼容版本，再重启对应测试服务。数据库结构变更需单独评审，不自动用旧库覆盖新数据。
+- 停止业务测试环境仅操作对应`qingye-test-*`及`qingye-media-migration`服务；停止验收只操作`qingye-acceptance@public`、`qingye-acceptance@admin`与`qingye-acceptance-redis`。不停止系统PostgreSQL、6379 Redis、5178原型或其他站点。
+
+当前为HTTP测试环境。正式业务切换仍需域名HTTPS、短信服务、经营规则确认、备份恢复演练和生产验收。

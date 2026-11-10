@@ -1,0 +1,21 @@
+[Unit]
+Description=QingYe React integration frontend on port 5179
+After=network.target qingye-test-api.service
+
+[Service]
+Type=simple
+RuntimeDirectory=qingye-test-web
+RuntimeDirectoryMode=0755
+ExecStartPre=/usr/sbin/nginx -t -c /etc/qingye-test/nginx.conf
+ExecStart=/usr/sbin/nginx -c /etc/qingye-test/nginx.conf -g "daemon off;"
+ExecReload=/usr/sbin/nginx -c /etc/qingye-test/nginx.conf -s reload
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/qingye-test-web /var/lib/qingye-test-web /var/log/qingye-test-web
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

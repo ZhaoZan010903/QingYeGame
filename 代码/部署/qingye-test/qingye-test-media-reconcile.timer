@@ -1,0 +1,10 @@
+[Unit]
+Description=QingYe reconcile newly downloaded originals every two minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=2min
+Unit=qingye-test-media-reconcile.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=QingYe resumable legacy original image migration
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=qingye-test
+Group=qingye-test
+ExecStart=/usr/bin/python3 /opt/qingye-test/migrate_legacy_media.py --source /var/lib/qingye-test/import/products.raw.json --media-root /var/lib/qingye-test/media --manifest /var/lib/qingye-test/import/media-manifest.jsonl --status /var/lib/qingye-test/import/media-status.json --workers 24 --rate 12 --reserve-gib 5
+TimeoutStartSec=infinity
+MemoryMax=384M
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/qingye-test/media /var/lib/qingye-test/import
+PrivateTmp=true

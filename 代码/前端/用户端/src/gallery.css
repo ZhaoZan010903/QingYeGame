@@ -1,0 +1,45 @@
+.gallery-main .artwork img,
+.zoom-art .artwork img {
+  object-fit: contain;
+}
+
+.zoom-art {
+  aspect-ratio: auto;
+  height: min(65dvh, 720px);
+}
+
+.gallery-progress {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #bdb6a9;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 18px 0 10px;
+}
+.gallery-progress strong {
+  color: #ece2c8;
+  font-weight: 500;
+}
+.gallery-thumbs > button {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+.gallery-thumbs > button:focus-visible {
+  content-visibility: visible;
+}
+.gallery-sentinel {
+  min-height: 1px;
+}
+.gallery-load-actions {
+  margin: 18px 0;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.gallery-load-actions p {
+  color: #aaa398;
+  font-size: 12px;
+  line-height: 1.7;
+}

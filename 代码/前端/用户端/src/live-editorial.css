@@ -1,0 +1,135 @@
+/* Live inventory includes long titles and annotated collages. Give each its own space. */
+.live-editorial .editorial-carousel {
+  height: auto;
+}
+.live-editorial .carousel-slides {
+  height: auto;
+  display: grid;
+}
+.live-editorial .editorial-slide {
+  position: relative;
+  inset: auto;
+  grid-area: 1 / 1;
+  display: grid;
+  grid-template-columns: minmax(0, 44%) minmax(0, 56%);
+  min-height: 370px;
+}
+.live-editorial .slide-visual {
+  position: relative;
+  inset: auto;
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+  height: 100%;
+  background: #09090b;
+}
+.live-editorial .slide-visual::after {
+  display: none;
+}
+.live-editorial .slide-visual img {
+  object-fit: contain;
+  background: #09090b;
+}
+.live-editorial .slide-copy {
+  position: relative;
+  inset: auto;
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+  padding: 32px 34px;
+  background: #121215;
+}
+.live-editorial .slide-copy h3 {
+  font-size: clamp(20px, 1.9vw, 27px);
+  line-height: 1.5;
+  letter-spacing: 0;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.live-editorial .slide-description {
+  margin-top: 13px;
+  font-size: 13px;
+  color: #b9b5ac;
+  line-height: 1.7;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.live-editorial .slide-meta {
+  color: #b8b3a8;
+  flex-wrap: wrap;
+  line-height: 1.6;
+}
+.live-editorial .slide-action-row {
+  gap: 18px;
+  width: 100%;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.live-editorial .slide-action-row .price-unit {
+  color: #cfc09a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.live-editorial .carousel-bottom {
+  position: relative;
+  min-height: 60px;
+}
+@media (max-width: 767px) {
+  .live-editorial .editorial-slide {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .live-editorial .slide-visual {
+    height: auto;
+    aspect-ratio: 16 / 10;
+  }
+  .live-editorial .slide-copy {
+    flex: 1;
+    padding: 22px 20px 24px;
+    justify-content: flex-start;
+  }
+  .live-editorial .slide-copy h3 {
+    font-size: 19px;
+    line-height: 1.55;
+    -webkit-line-clamp: 3;
+  }
+  .live-editorial .slide-copy h3 > span {
+    font-size: inherit;
+    margin-left: 0;
+  }
+  .live-editorial .slide-description {
+    margin-top: 10px;
+    font-size: 12px;
+  }
+  .live-editorial .slide-meta {
+    margin-top: 14px;
+    font-size: 11px;
+    gap: 7px;
+  }
+  .live-editorial .slide-action-row {
+    margin-top: auto;
+    padding-top: 20px;
+    gap: 12px;
+    align-items: center;
+  }
+  .live-editorial .slide-action-row .button-white {
+    min-height: 42px;
+    font-size: 12px;
+    padding: 0 14px;
+  }
+  .live-editorial .slide-action-row .price {
+    font-size: 27px;
+  }
+  .live-editorial .carousel-bottom {
+    min-height: 54px;
+  }
+}

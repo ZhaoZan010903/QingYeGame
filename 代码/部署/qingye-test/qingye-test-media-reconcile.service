@@ -1,0 +1,20 @@
+[Unit]
+Description=QingYe verify locally migrated originals and update media metadata
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=qingye-test
+Group=qingye-test
+WorkingDirectory=/opt/qingye-test/current
+EnvironmentFile=/etc/qingye-test/app.env
+Environment=GOMEMLIMIT=192MiB
+ExecStart=/opt/qingye-test/current/qingye-api reconcile-media
+TimeoutStartSec=20min
+MemoryMax=256M
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

@@ -1,0 +1,27 @@
+[Unit]
+Description=QingYe isolated admin API on loopback port 5182
+After=network.target postgresql.service qingye-test-redis.service
+Wants=qingye-test-redis.service
+
+[Service]
+Type=simple
+User=qingye-test
+Group=qingye-test
+WorkingDirectory=/opt/qingye-test/current
+EnvironmentFile=/etc/qingye-test/admin.env
+Environment=GOMEMLIMIT=180MiB
+Environment=GOGC=75
+ExecStart=/opt/qingye-test/current/qingye-api serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+MemoryMax=256M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/qingye-test/media
+PrivateTmp=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

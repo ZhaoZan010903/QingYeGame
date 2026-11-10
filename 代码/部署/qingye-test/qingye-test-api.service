@@ -1,0 +1,27 @@
+[Unit]
+Description=QingYe Go integration API on port 5180
+After=network.target postgresql.service qingye-test-redis.service
+Wants=qingye-test-redis.service
+
+[Service]
+Type=simple
+User=qingye-test
+Group=qingye-test
+WorkingDirectory=/opt/qingye-test/current
+EnvironmentFile=/etc/qingye-test/app.env
+Environment=GOMEMLIMIT=256MiB
+Environment=GOGC=75
+ExecStart=/opt/qingye-test/current/qingye-api serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+MemoryMax=384M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/qingye-test/media
+PrivateTmp=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

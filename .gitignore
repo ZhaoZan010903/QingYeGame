@@ -11,6 +11,7 @@ secrets/
 
 # Dependencies and build outputs
 node_modules/
+.vite/
 dist/
 build/
 coverage/
@@ -42,4 +43,4 @@ __pycache__/
 *.tsbuildinfo
 
 # HTML preview generated check script
-frontend/home-preview/src/compiled.js
+文档/原型代码/HTML/src/compiled.js
