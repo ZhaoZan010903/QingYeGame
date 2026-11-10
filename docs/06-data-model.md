@@ -4,6 +4,8 @@
 
 本稿为 PostgreSQL 数据模型建议，用于开发评审，未创建或修改任何生产数据库。业务含义以[功能需求](02-functional-requirements.md)和[业务流程](03-business-flows.md)为准；本稿不包含订单、余额、支付或结算模型。
 
+Redis 保存可重建的缓存和运行期频率计数；商品、审核、会话、收藏及统计记录仍由 PostgreSQL 保存。图片文件及审核图集清单位于独立对象存储，数据库保存其引用。
+
 字段类型与约束将在开发阶段形成正式迁移文件。主键原则上由后端生成 UUID；时间使用 timestamptz，按 UTC 存储和传输，页面按北京时间显示。浏览统计日期单独按北京时间生成。
 
 报价使用 numeric(12,2)，不使用浮点数。币种按待确认事项 R01 统一配置；旧积分报价需先确认含义，不直接换算。
@@ -25,7 +27,7 @@
 | `content_pages` | 关于我们、流程说明、客服验证说明、协议等静态内容。 |
 | `site_settings` | 少量网站设置，按固定 key 的结构校验。 |
 | `product_views_daily` | 近期有效浏览去重记录，仅用于热门排序，不做复杂用户画像。 |
-| `product_hot_scores` | 热门榜计算缓存，随时可从浏览和收藏重算。 |
+| `product_hot_scores` | 最近一批热门计算快照，供排名解释、数据库回查及 Redis 重建。 |
 | `admin_logs` | 商品、审核、二维码和配置的基本管理操作记录。 |
 
 ## 3 主要关联
@@ -140,7 +142,7 @@ erDiagram
 | `version` | `integer` | 否 | 内容版本，修改时递增 |
 | `approved_version` | `integer` | 是 | 最后审核通过的内容版本 |
 | `manual_rank` | `integer` | 否 | 后台手动推荐序号；0 为不推荐 |
-| `published_at` | `timestamptz` | 是 | 首次通过审核并公开的时间；编辑不刷新 |
+| `published_at` | `timestamptz` | 是 | 首次公开时间；编辑及重新发布不刷新；旧数据时间未知时为空，不享受新品加分 |
 | `legacy_id` | `text` | 是 | 旧商品编号映射 |
 | `submitted_at` | `timestamptz` | 是 | 最近提交审核时间；重新提交时更新 |
 | `created_at` | `timestamptz` | 否 | 创建时间，UTC |
@@ -173,9 +175,11 @@ erDiagram
 | --- | --- | --- | --- |
 | `product_id` | `uuid` | 否 | 商品；关联 products.id |
 | `media_id` | `uuid` | 否 | 图片；关联 media_files.id |
-| `sort_order` | `integer` | 否 | 图集顺序 |
+| `sort_order` | `bigint` | 否 | 图集顺序；通过增量移动调整，不要求前端回传完整图集 |
 
 联合主键为 product_id、media_id；media_id 另设唯一约束，每条商品媒体记录仅绑定一个商品，不与客服或首页配置复用。需要复用图片时生成独立媒体记录及展示对象。商品内 sort_order 唯一，排序最小的图片作为封面；提交时至少有一张校验完成的图片。图片不可被其他会员引用。
+
+每张图片独立关联，不设置每商品200条或其他固定条数约束。按 product_id、sort_order 分页查询；追加和移除只修改本次涉及的记录。商品版本与图集变更在同一事务中更新。
 
 ### 4.8 product_reviews
 
@@ -192,7 +196,7 @@ erDiagram
 | `snapshot` | `jsonb` | 否 | 审核时标题、图片、报价、属性的快照 |
 | `created_at` | `timestamptz` | 否 | 创建时间，UTC |
 
-审核记录追加保存。退回、管理员下架必须有原因；通过时记录内容版本。snapshot 包含当时资料及图片对象引用，不保存账号密码或私人认证资料。
+审核记录追加保存。退回、管理员下架必须有原因；通过时记录内容版本。snapshot 包含当时资料、私有图集清单对象键与内容摘要，完整图片清单按审核版本独立保存，避免在每次详情响应中内嵌整个大图集。不保存账号密码或私人认证资料。
 
 ### 4.9 favorites
 
@@ -251,7 +255,7 @@ slug 唯一。正文采用受限富文本或 Markdown，渲染前处理危险内
 | `value` | `jsonb` | 否 | 不同 key 使用不同 JSON 结构 |
 | `updated_at` | `timestamptz` | 否 | 最近修改时间，由应用更新 |
 
-key 为主键，仅支持后端明确允许的配置。hot_rules 存权重、刷新周期及规则版本；home_banners 引用自有媒体编号，不存任意外部脚本。
+key 为主键，仅支持后端明确允许的配置。hot_rules 存权重、刷新周期及规则版本；home_banners 引用自有媒体编号，不存任意外部脚本。内部键 recommendation_state 保存最近成功计算的 batch_id、rule_version、calculated_at 和候选总数，由计算任务写入，普通配置接口不得修改。
 
 ### 4.13 product_views_daily
 
@@ -268,11 +272,12 @@ key 为主键，仅支持后端明确允许的配置。hot_rules 存权重、刷
 
 ### 4.14 product_hot_scores
 
-热门榜计算缓存，随时可从浏览和收藏重算。
+最近一批热门计算快照，供排名解释、数据库回查及 Redis 重建。
 
 | 字段 | 类型 | 可空 | 说明 |
 | --- | --- | --- | --- |
 | `product_id` | `uuid` | 否 | 商品；关联 products.id |
+| `batch_id` | `uuid` | 否 | 本次计算批次，与 recommendation_state 一致 |
 | `views_7d` | `integer` | 否 | 7 个自然日的去重浏览合计 |
 | `favorites_7d` | `integer` | 否 | 统计窗口内首次收藏且当前仍有效的人数 |
 | `fresh_bonus` | `integer` | 否 | 新发布加分 |
@@ -280,7 +285,7 @@ key 为主键，仅支持后端明确允许的配置。hot_rules 存权重、刷
 | `rule_version` | `integer` | 否 | 规则版本 |
 | `calculated_at` | `timestamptz` | 否 | 最近计算时间 |
 
-product_id 同时为主键和外键。结果按最新规则覆盖计算，不在历史分数上反复累加；公开查询仍检查商品状态、审核版本和分类。
+product_id 同时为主键和外键。每批结果与 recommendation_state 在事务中整体替换，删除本批已不在候选范围内的旧记录；空结果也更新批次元数据。结果从原始统计重算，不在历史分数上累加。缓存中保留同一 batch_id，公开查询仍检查商品状态、审核版本和分类。
 
 ### 4.15 admin_logs
 
@@ -336,4 +341,4 @@ product_id 同时为主键和外键。结果按最新规则覆盖计算，不在
 
 ## 8 尚待开发阶段确定
 
-数据库及驱动版本、连接池、正式迁移文件、索引细节、记录保留期、备份频率及恢复目标，在业务审阅后结合部署环境确定。不得把本稿直接当作已运行数据库的说明。
+数据库及驱动版本、Redis 运行参数、连接池、正式迁移文件、索引细节、记录保留期、备份频率及恢复目标，在业务审阅后结合部署环境确定。不得把本稿直接当作已运行数据库的说明。

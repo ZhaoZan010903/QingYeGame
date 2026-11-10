@@ -32,7 +32,7 @@
 | POST | `/products/{id}/view` | 访客 | 服务端签发的访客标识随 Cookie 携带 | 记录有效浏览，同商品/访客/日期去重 |
 | GET | `/contacts` | 公开 | purpose | 客服配置 |
 | GET | `/pages/{slug}` | 公开 | — | 已发布说明页 |
-| GET | `/products/{id}/images` | 公开 | cursor、limit | 按顺序读取后续展示图片；每次检查商品公开条件 |
+| GET | `/products/{id}/images` | 公开 | cursor、limit、expected_version | 按顺序读取后续展示图片；每次检查公开条件和图集版本 |
 
 ## 4 个人中心与发布
 
@@ -44,11 +44,15 @@
 | PUT | `/me/favorites/{product_id}` | 会员 | — | 重复收藏仍只有一条 |
 | DELETE | `/me/favorites/{product_id}` | 会员 | — | 取消收藏，保留首次收藏时间 |
 | GET | `/me/products` | 会员 | status、cursor、limit | 本人发布及最近审核原因 |
-| GET | `/me/products/{id}` | 所属会员 | — | 包括非公开的本人商品资料 |
+| GET | `/me/products/{id}` | 所属会员 | — | 本人资料、图集总数和首批图片；后续分批获取 |
 | POST | `/me/products` | 会员 | ProductWrite | 保存新草稿，source/owner_id 由后端写入 |
 | PATCH | `/me/products/{id}` | 所属会员 | ProductWrite、expected_version | 更新内容；待审编辑撤回为草稿；已展示编辑停止公开并需重新提交 |
 | POST | `/me/products/{id}/submit` | 所属会员 | expected_version | 校验资料后进入待审核 |
 | POST | `/me/products/{id}/withdraw` | 所属会员 | expected_version | 待审核转草稿，已展示转下架；保留审核记录 |
+| GET | `/me/products/{id}/images` | 所属会员 | cursor、limit、expected_version | 读取当前图集，返回上传处理状态及有权访问的预览 |
+| POST | `/me/products/{id}/images` | 所属会员 | media_ids、expected_version、request_id | 分批追加已校验的本人图片；重复请求不重复关联 |
+| PATCH | `/me/products/{id}/images/{media_id}` | 所属会员 | before_media_id、expected_version | 移至指定图片之前；before_media_id 为空时移至末尾 |
+| DELETE | `/me/products/{id}/images/{media_id}` | 所属会员 | expected_version | 移除本商品关联，不删除仍被审核记录引用的文件 |
 
 ## 5 图片上传与预览
 
@@ -63,7 +67,7 @@
 | 方法 | 路径 | 权限 | 主要参数 | 结果与限制 |
 | --- | --- | --- | --- | --- |
 | GET | `/admin/products` | 管理员 | status、source、q、cursor、limit | 全部商品和待审列表 |
-| GET | `/admin/products/{id}` | 管理员 | — | 完整审核资料、当前版本及审核历史；私有图片仍需授权预览 |
+| GET | `/admin/products/{id}` | 管理员 | — | 商品资料、当前版本、审核摘要、图集数量及首批图片；私有图集分批读取 |
 | POST | `/admin/products` | 管理员 | ProductWrite | 平台商品草稿 |
 | PATCH | `/admin/products/{id}` | 管理员 | ProductWrite、expected_version | 维护商品并保存为草稿；展示中编辑需停止公开，保留操作记录 |
 | POST | `/admin/products/{id}/review` | 管理员 | decision=approve/reject、reason、expected_version | 只审核当前待审版本，通过则公开 |
@@ -84,6 +88,10 @@
 | GET | `/admin/recommendations` | 管理员 | — | 排名、分数构成和更新时间 |
 | POST | `/admin/recommendations/refresh` | 管理员 | — | 触发可重复执行的榜单计算 |
 | POST | `/admin/products/{id}/publish` | 管理员 | expected_version | 平台录入或旧数据核对后直接校验发布；写入审核记录，不用于绕过会员投稿审核 |
+| GET | `/admin/products/{id}/images` | 管理员 | cursor、limit、expected_version 或 review_id | 读取当前图集或指定审核版本的图片清单，逐批授权预览 |
+| POST | `/admin/products/{id}/images` | 管理员 | media_ids、expected_version、request_id | 分批追加可用于该商品的媒体，记录操作人 |
+| PATCH | `/admin/products/{id}/images/{media_id}` | 管理员 | before_media_id、expected_version | 增量移动图片，保持商品内排序唯一 |
+| DELETE | `/admin/products/{id}/images/{media_id}` | 管理员 | expected_version | 移除关联并保留必要的历史素材 |
 
 ## 7 主要数据结构
 
@@ -98,9 +106,10 @@
 | price_unit | 报价单位 | 出售为 account；出租为 hour/day/week/month |
 | attributes | 账号属性 | 按分类配置校验编码、类型、单选或多选 |
 | description | 商品介绍 | 不包含密码、验证码或身份认证资料 |
-| image_ids | 有序图片编号数组 | 均已完成文件校验，归属正确；提交时至少一张 |
 
 保存草稿允许业务资料未填全；分类、交易类型及字段类型等基础结构仍需有效。完整必填检查在提交审核或管理员发布时执行。
+
+图集不作为 ProductWrite 中的完整数组传递。先创建草稿，再通过图集接口分批追加、移除或排序；提交审核时至少有一张有效图片。图集接口成功后返回最新商品版本，前端串行提交同一商品的图集变更，避免上传并发导致版本冲突。
 
 `owner_id`、`source`、`status`、`approved_version`、`manual_rank`、`published_at` 不属于会员可写字段。请求出现不允许字段时返回明确错误，不能照单写入数据库。
 
@@ -117,6 +126,24 @@ sort 可选择最新、热度、价格升序和价格降序。客服报价商品
 短信登录提交手机号、challenge_id 和 code；密码登录提交手机号和密码。注册需提交当前协议版本及已同意状态，服务端核验，不仅依赖前端勾选。短信登录未注册的手机号应引导注册，不在用户未确认协议时自动建号。
 
 注册及登录失败的提示避免暴露验证码、内部异常或不必要的用户资料。密码重置完成后要求重新登录。
+
+### 7.4 大图集
+
+不设置商品图片总张数上限。建议追加请求每批20张、图片页默认20张且单页最多50张；这些是单次传输参数，客户端可持续请求下一批。
+
+返回 `total`、`next_cursor` 和商品版本，编辑端显示已保存数量。分页时携带初次返回的版本，图集发生变化则返回409，前端重新加载并保留尚未上传的队列，不把不同版本拼成同一图集。
+
+会员和管理员追加、移除、排序图片均视为内容编辑：检查归属和当前版本、增加版本号，并按复审规则转为草稿；修改已展示商品时停止公开。管理员可在完成修改后发布平台商品，会员投稿仍需提交审核。
+
+`request_id` 用于追加请求去重；已使用的同一请求编号若携带不同内容应拒绝。移除未提交引用前检查商品归属，已关联他人商品的媒体不能复用。处理中或失败的图片不能在提交时被当作可展示图片。
+
+### 7.5 推荐响应与缓存
+
+`/home` 附带推荐规则版本、计算批次和计算时间；补位商品标明来源为新发布，不伪造热度。后台推荐接口返回每项分数构成、`batch_id`、实际生效的 `rule_version` 和最近计算状态。
+
+`/admin/recommendations/refresh` 触发同一计算任务，已有任务运行时返回其状态，不并行生成重复批次。Redis 超时后使用数据库快照或新发布补位，公开接口仍检查商品当前版本和状态，不直接返回整页旧缓存。
+
+`/admin/settings` 仅返回可管理配置；内部 recommendation_state 不接受管理配置接口写入。权重修改产生规则版本，计算完成后才更新实际生效批次。
 
 ## 8 状态操作
 
