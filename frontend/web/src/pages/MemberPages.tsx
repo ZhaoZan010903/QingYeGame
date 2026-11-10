@@ -1,0 +1,447 @@
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { api, isDemo, ApiError } from '../lib/api';
+import type { Product } from '../types';
+import { useSession, useUi } from '../context';
+import '../member.css';
+
+export const listingStatus: Record<Product['status'], string> = {
+  draft: '草稿',
+  pending: '审核中',
+  published: '已展示',
+  rejected: '退回修改',
+  offline: '已下架',
+};
+const message = (e: unknown) => (e instanceof Error ? e.message : '操作失败，请重试。');
+const units = { account: '', hour: ' / 小时', day: ' / 日', week: ' / 周', month: ' / 月' };
+function MemberArt({ product }: { product: Product }) {
+  const first = product.images[0];
+  const [failed, setFailed] = useState(false);
+  return (
+    <div
+      className={`member-item-art ${!first?.url && isDemo ? `asset-art art-${first?.art ?? product.art}` : ''}`}
+    >
+      {first?.url && !failed ? (
+        <img
+          src={first.url}
+          alt={first.alt || product.title}
+          loading="lazy"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        (!isDemo || failed) && <span className="image-unavailable">图片暂不可用</span>
+      )}
+    </div>
+  );
+}
+function Empty({
+  title,
+  text,
+  action = '去浏览账号',
+  href = '/accounts',
+}: {
+  title: string;
+  text: string;
+  action?: string;
+  href?: string;
+}) {
+  return (
+    <div className="member-empty">
+      <span className="empty-symbol" aria-hidden="true">
+        ◇
+      </span>
+      <h3>{title}</h3>
+      <p>{text}</p>
+      <Link className="button-white" to={href}>
+        {action} <span aria-hidden="true">↗</span>
+      </Link>
+    </div>
+  );
+}
+
+export function MemberPage() {
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const { user, refresh } = useSession();
+  const { notify, contact } = useUi();
+  const tab = pathname.endsWith('/favorites')
+    ? 'favorites'
+    : pathname.endsWith('/listings')
+      ? 'listings'
+      : pathname.endsWith('/history')
+        ? 'history'
+        : 'profile';
+  const [nickname, setNickname] = useState(user?.nickname ?? '');
+  const [items, setItems] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('all');
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    setNickname(user?.nickname ?? '');
+  }, [user?.nickname]);
+  const readHistory = useCallback(async () => {
+    let ids: string[] = [];
+    try {
+      const stored = JSON.parse(localStorage.getItem('qingye-history') || '[]');
+      if (Array.isArray(stored)) ids = stored;
+    } catch {
+      /* An unavailable device store has an empty history. */
+    }
+    const settled = await Promise.allSettled(
+      ids.filter((id) => typeof id === 'string').map((id) => api.product(id)),
+    );
+    const failed = settled.find(
+      (result) =>
+        result.status === 'rejected' &&
+        !(result.reason instanceof ApiError && [404, 410].includes(result.reason.status)),
+    );
+    if (failed?.status === 'rejected') throw failed.reason;
+    return settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
+  }, []);
+  useEffect(() => {
+    let active = true;
+    setError('');
+    setItems([]);
+    if (tab === 'profile') return;
+    setLoading(true);
+    const request =
+      tab === 'favorites'
+        ? api.favorites()
+        : tab === 'listings'
+          ? api.myProducts(status === 'all' ? undefined : status)
+          : readHistory();
+    request
+      .then((data) => {
+        if (active) setItems(data);
+      })
+      .catch((e) => {
+        if (active) setError(message(e));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [tab, status, reload, readHistory]);
+  async function saveProfile(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (!nickname.trim()) {
+      setError('请填写昵称。');
+      return;
+    }
+    setBusy('profile');
+    try {
+      await api.updateProfile(nickname.trim());
+      await refresh();
+      notify(isDemo ? '演示昵称已保存在此设备。' : '昵称已更新。');
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy('');
+    }
+  }
+  async function logout() {
+    setBusy('logout');
+    setError('');
+    try {
+      await api.logout();
+      await refresh();
+      navigate('/');
+      notify('已退出登录。');
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy('');
+    }
+  }
+  async function removeFavorite(id: string) {
+    setBusy(id);
+    setError('');
+    try {
+      await api.favorite(id, false);
+      setItems((previous) => previous.filter((item) => item.id !== id));
+      notify('已取消收藏。');
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy('');
+    }
+  }
+  async function withdraw(product: Product) {
+    const verb = product.status === 'pending' ? '撤回审核' : '下架';
+    if (
+      !window.confirm(
+        `确认${verb}「${product.title}」？${product.status === 'published' ? '下架后将不再公开展示。' : '撤回后可继续编辑草稿。'}`,
+      )
+    )
+      return;
+    setBusy(product.id);
+    setError('');
+    try {
+      await api.withdrawProduct(product.id, product.version);
+      setReload((v) => v + 1);
+      notify(isDemo ? `演示记录已${verb}。` : `已${verb}。`);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy('');
+    }
+  }
+  function clearHistory() {
+    try {
+      localStorage.removeItem('qingye-history');
+      setItems([]);
+      notify('已清空此设备的浏览记录。');
+    } catch {
+      setError('浏览器不允许清除本地存储。');
+    }
+  }
+  return (
+    <section className="member-shell page-width mx-auto" aria-label="我的清叶">
+      <div className="member-header">
+        <div>
+          <span className="section-eyebrow mono">YOUR QINGYE</span>
+          <h1>{user?.nickname || '我的清叶'}</h1>
+          <p>{isDemo ? '演示账户 · 数据仅保存在当前设备' : '收藏热爱，整理属于你的珍藏。'}</p>
+        </div>
+        <button className="button-outline" onClick={logout} disabled={!!busy}>
+          {busy === 'logout' ? '正在退出…' : '退出登录'}
+        </button>
+      </div>
+      <div className="member-layout">
+        <nav className="member-sidebar" aria-label="个人中心导航">
+          {[
+            ['/me', '01', '基本资料'],
+            ['/me/favorites', '02', '我的收藏'],
+            ['/me/listings', '03', '我的发布'],
+            ['/me/history', '04', '最近浏览'],
+          ].map(([to, n, label]) => (
+            <NavLink key={to} to={to} end>
+              <span>{n}</span>
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <section
+          className="member-content"
+          aria-label={
+            {
+              profile: '基本资料',
+              favorites: '我的收藏',
+              listings: '我的发布',
+              history: '最近浏览',
+            }[tab]
+          }
+        >
+          {error && (
+            <div className="member-error">
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+              {tab !== 'profile' && (
+                <button className="button-outline" onClick={() => setReload((v) => v + 1)}>
+                  重新加载
+                </button>
+              )}
+            </div>
+          )}
+          {tab === 'profile' ? (
+            <div className="panel">
+              <div className="profile-avatar" aria-hidden="true">
+                {user?.nickname?.slice(0, 1) || '叶'}
+              </div>
+              <h2>基本资料</h2>
+              <form className="member-form profile-form" onSubmit={saveProfile}>
+                <label className="form-field">
+                  昵称
+                  <input
+                    value={nickname}
+                    onChange={(e) => setNickname(e.target.value)}
+                    maxLength={24}
+                    required
+                    placeholder="怎样称呼你"
+                  />
+                  <small>最多 24 个字符，用于个人中心展示。</small>
+                </label>
+                <label className="form-field">
+                  手机号
+                  <input value={user?.phone || '演示账户未绑定手机号'} disabled />
+                </label>
+                <button type="submit" className="button-white" disabled={!!busy}>
+                  {busy === 'profile' ? '正在保存…' : '保存修改'}
+                </button>
+              </form>
+              <p className="profile-note">
+                账号密码、验证码和身份材料无需出现在公开资料中。
+                <br />
+                如需帮助，可
+                <button className="text-button" onClick={() => contact(undefined, 'general')}>
+                  联系平台客服
+                </button>
+                。
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="member-toolbar">
+                <h2>{{ favorites: '我的收藏', listings: '我的发布', history: '最近浏览' }[tab]}</h2>
+                {tab === 'listings' ? (
+                  <div className="member-toolbar" style={{ marginBottom: 0 }}>
+                    <select
+                      className="member-select"
+                      aria-label="按发布状态筛选"
+                      value={status}
+                      onChange={(e) => setStatus(e.target.value)}
+                    >
+                      <option value="all">全部状态</option>
+                      {Object.entries(listingStatus).map(([value, name]) => (
+                        <option key={value} value={value}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <Link className="text-button" to="/publish">
+                      ＋ 发布账号
+                    </Link>
+                  </div>
+                ) : (
+                  tab === 'history' && (
+                    <button className="text-button" disabled={!items.length} onClick={clearHistory}>
+                      清空记录
+                    </button>
+                  )
+                )}
+              </div>
+              {tab === 'history' && (
+                <p className="profile-note" style={{ margin: '0 0 20px' }}>
+                  仅记录此设备访问过的公开商品，失效商品不再展示。
+                </p>
+              )}
+              {loading ? (
+                <div className="member-loading" role="status">
+                  正在读取你的
+                  {tab === 'listings' ? '发布' : tab === 'favorites' ? '收藏' : '浏览记录'}…
+                </div>
+              ) : !error && !items.length ? (
+                <Empty
+                  title={
+                    tab === 'favorites'
+                      ? '还没有收藏的账号'
+                      : tab === 'listings'
+                        ? '这里还没有发布记录'
+                        : '还没有浏览记录'
+                  }
+                  text={
+                    tab === 'favorites'
+                      ? '遇到喜欢的账号，点击收藏，方便下次回来查看。'
+                      : tab === 'listings'
+                        ? '把账号资料整理成草稿，再提交审核。'
+                        : '去探索账号，最近看过的珍藏会出现在这里。'
+                  }
+                  href={tab === 'listings' ? '/publish' : '/accounts'}
+                  action={tab === 'listings' ? '发布第一个账号' : '去浏览账号'}
+                />
+              ) : (
+                <div className="member-list">
+                  {items.map((product) => (
+                    <article className="member-item" key={product.id}>
+                      {product.status === 'published' ? (
+                        <Link to={`/accounts/${product.id}`} aria-label={`查看${product.title}`}>
+                          <MemberArt product={product} />
+                        </Link>
+                      ) : (
+                        <MemberArt product={product} />
+                      )}
+                      <div className="member-item-body">
+                        <span className="member-item-id mono">{product.code || product.id}</span>
+                        <h3>
+                          {product.status === 'published' ? (
+                            <Link to={`/accounts/${product.id}`}>{product.title}</Link>
+                          ) : (
+                            product.title || '未命名草稿'
+                          )}
+                        </h3>
+                        <p>
+                          {product.server || '区服未填写'} ·{' '}
+                          {product.mode === 'sale' ? '出售' : '租赁'} ·{' '}
+                          <span className="mono">
+                            {product.price == null
+                              ? '联系客服报价'
+                              : `¥ ${product.price.toLocaleString()}${units[product.unit]}`}
+                          </span>
+                        </p>
+                        {product.reviewNote && tab === 'listings' && (
+                          <p className="review-note">审核意见：{product.reviewNote}</p>
+                        )}
+                      </div>
+                      <div className="member-item-actions">
+                        {tab === 'listings' ? (
+                          <>
+                            <span className={`status-badge status-${product.status}`}>
+                              {listingStatus[product.status]}
+                            </span>
+                            {product.status === 'published' ? (
+                              <button
+                                className="text-button"
+                                onClick={() => contact(product.id, 'publish')}
+                              >
+                                联系修改资料
+                              </button>
+                            ) : (
+                              product.status !== 'pending' && (
+                                <Link
+                                  className="text-button"
+                                  to={`/me/listings/${product.id}/edit`}
+                                >
+                                  {product.status === 'rejected' ? '修改后重新提交' : '继续编辑'} →
+                                </Link>
+                              )
+                            )}
+                            {['published', 'pending'].includes(product.status) && (
+                              <button
+                                className="text-button"
+                                disabled={!!busy}
+                                onClick={() => withdraw(product)}
+                              >
+                                {busy === product.id
+                                  ? '正在处理…'
+                                  : product.status === 'pending'
+                                    ? '撤回审核'
+                                    : '下架商品'}
+                              </button>
+                            )}
+                          </>
+                        ) : tab === 'favorites' ? (
+                          <>
+                            <span className={`status-badge status-${product.status}`}>
+                              {product.status === 'published' ? '公开展示中' : '商品已失效'}
+                            </span>
+                            <button
+                              className="text-button"
+                              onClick={() => removeFavorite(product.id)}
+                              disabled={!!busy}
+                            >
+                              {busy === product.id ? '正在移除…' : '取消收藏'}
+                            </button>
+                          </>
+                        ) : (
+                          <Link to={`/accounts/${product.id}`} className="text-button">
+                            再次查看 →
+                          </Link>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </div>
+    </section>
+  );
+}
