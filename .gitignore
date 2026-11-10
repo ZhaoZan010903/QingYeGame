@@ -39,3 +39,6 @@ Thumbs.db
 .vscode/
 __pycache__/
 *.pyc
+
+# HTML preview generated check script
+frontend/home-preview/src/compiled.js
