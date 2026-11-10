@@ -26,7 +26,7 @@ export function AuthPage() {
   const { notify } = useUi();
   const register = location.pathname === '/register';
   const reset = location.pathname === '/forgot-password';
-  const title = register ? '开启你的清叶之旅' : reset ? '找回账户密码' : '欢迎回到清叶';
+  const title = register ? '开启你的旅程' : reset ? '找回账户密码' : '欢迎回来';
   const returnTo = safeReturnTo(params.get('returnTo'));
   const suffix = `?returnTo=${encodeURIComponent(returnTo)}`;
   const [method, setMethod] = useState<'sms' | 'password'>('password');
@@ -160,7 +160,6 @@ export function AuthPage() {
   return (
     <section className="auth-page page-width mx-auto" aria-label="账户登录与注册">
       <section className="auth-story" aria-label="清叶会员">
-        <span className="section-eyebrow mono">A PLACE FOR YOUR COLLECTION</span>
         <h1>
           每一份热爱，
           <br />
@@ -172,13 +171,18 @@ export function AuthPage() {
           在清叶开启下一段故事。
         </p>
         <div className="auth-art asset-art art-0" aria-hidden="true" />
-        <span className="mono auth-art-caption">QINGYE / CONCEPT ART</span>
       </section>
       <section className="auth-panel panel">
-        <span className="section-eyebrow mono">
-          {register ? 'CREATE ACCOUNT' : reset ? 'RESET PASSWORD' : 'WELCOME BACK'}
-        </span>
-        <h2>{title}</h2>
+        <header className="auth-heading">
+          <p className="auth-welcome">{title}</p>
+          <h2 className="auth-brand">
+            <svg viewBox="0 0 33 32" fill="none" aria-hidden="true">
+              <path d="M23 6H11L5 16l6 10h12l5-10-5-10Z" />
+              <path d="m11 19 5-9 5 9h-10Zm7 3 5 5" />
+            </svg>
+            <span>清叶</span>
+          </h2>
+        </header>
         <p className="muted">
           {reset
             ? '验证手机号后设置新密码。'
@@ -317,7 +321,7 @@ export function AuthPage() {
         </div>
         {isDemo && (
           <div className="demo-account">
-            <span className="mono">FRONTEND PREVIEW</span>
+            <span>先体验，再开启你的收藏</span>
             <p>
               当前未连接业务后台。演示账户用于体验收藏、草稿和发布流程，不发送短信或提交真实审核。
             </p>

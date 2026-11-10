@@ -221,7 +221,6 @@ export function PublishPage() {
         ← 我的发布
       </Link>
       <div className="publish-heading">
-        <span className="section-eyebrow mono">YOUR NEXT CHAPTER</span>
         <h1>{id || product ? '整理你的账号资料' : '让珍藏，开启下一程。'}</h1>
         <p>
           填写资料并整理图片，保存草稿或提交平台审核。也可以

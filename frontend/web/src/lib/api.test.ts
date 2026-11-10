@@ -7,6 +7,36 @@ afterEach(() => {
 const response = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 describe('真实接口与演示边界', () => {
+  it('演示首页分区各有独立库存，保留热门及最新排序且跨区不重复', async () => {
+    vi.stubEnv('VITE_DATA_MODE', 'demo');
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const { api } = await import('./api');
+    const home = await api.home();
+    expect(home.featured).toHaveLength(3);
+    expect(home.hot).toHaveLength(6);
+    expect(home.newest).toHaveLength(6);
+    const all = [...home.featured, ...home.hot, ...home.newest];
+    expect(new Set(all.map((p) => p.id)).size).toBe(all.length);
+    expect(home.hot.map((p) => p.id)).toEqual([
+      'QY-02431',
+      'QY-02439',
+      'QY-02452',
+      'QY-02481',
+      'QY-02445',
+      'QY-02488',
+    ]);
+    // Equal publication dates use the stable product identifier as the tie-breaker.
+    expect(home.newest.map((p) => p.id)).toEqual([
+      'QY-02466',
+      'QY-02496',
+      'QY-02503',
+      'QY-02511',
+      'QY-02519',
+      'QY-02527',
+    ]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('真实服务失败不会回退到样例商品', async () => {
     vi.stubEnv('VITE_DATA_MODE', 'api');
     vi.stubGlobal(
@@ -49,6 +79,37 @@ describe('真实接口与演示边界', () => {
     await expect(api.me()).resolves.toBeNull();
     await expect(api.me()).rejects.toMatchObject({ status: 503 });
     expect(fetch.mock.calls[0][1].credentials).toBe('include');
+  });
+  it('读取可选首页展示配置，不在接口层截断或重排真实库存', async () => {
+    vi.stubEnv('VITE_DATA_MODE', 'api');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        response({
+          data: {
+            hot: [{ id: 'first' }, { id: 'second' }],
+            presentation: {
+              sections: [{ source: 'hot', title: '本周关注', limit: 1 }],
+              editorial: { intervalMs: 6000 },
+              shortcuts: [],
+            },
+          },
+        }),
+      ),
+    );
+    const { api } = await import('./api');
+    const home = await api.home();
+    expect(home.hot.map(({ id }) => id)).toEqual(['first', 'second']);
+    expect(home.presentation?.sections).toEqual([
+      {
+        source: 'hot',
+        title: '本周关注',
+        description: '此刻，值得关注的珍藏。',
+        limit: 1,
+      },
+    ]);
+    expect(home.presentation?.editorial.intervalMs).toBe(6000);
+    expect(home.presentation?.shortcuts).toEqual([]);
   });
   it('短信演示不会发送请求或伪造成功', async () => {
     vi.stubEnv('VITE_DATA_MODE', 'demo');

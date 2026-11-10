@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Link,
   NavLink,
@@ -12,6 +12,7 @@ import { isDemo, api } from '../lib/api';
 import { useSession, useUi } from '../context';
 import { Modal, StateView, Artwork } from './shared';
 import { useLoad } from '../lib-use';
+import { AmbientBackdrop } from './AmbientBackdrop';
 export function Brand() {
   return (
     <Link className="brand flex items-center" to="/" aria-label="清叶首页">
@@ -23,59 +24,6 @@ export function Brand() {
       <span className="brand-divider" />
       <span className="brand-en">QINGYE</span>
     </Link>
-  );
-}
-function AmbientBackdrop() {
-  const aura = useRef<HTMLDivElement>(null);
-  const progress = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    let frame = 0;
-    const motion = matchMedia('(prefers-reduced-motion: reduce)');
-    const pointer = (e: PointerEvent) => {
-      if (motion.matches || e.pointerType !== 'mouse') return;
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (aura.current)
-          aura.current.style.transform = `translate3d(${e.clientX}px,${e.clientY}px,0)`;
-      });
-    };
-    const scroll = () => {
-      const height = document.documentElement.scrollHeight - innerHeight;
-      if (progress.current)
-        progress.current.style.transform = `scaleX(${height > 0 ? scrollY / height : 0})`;
-    };
-    window.addEventListener('pointermove', pointer, { passive: true });
-    window.addEventListener('scroll', scroll, { passive: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener('pointermove', pointer);
-      window.removeEventListener('scroll', scroll);
-    };
-  }, []);
-  return (
-    <>
-      <div className="reading-progress" ref={progress} />
-      <div className="ambient-stage" aria-hidden="true">
-        <div className="ambient-wash" />
-        <div className="cursor-aura" ref={aura} />
-        <svg className="light-ribbons" viewBox="0 0 1440 1000" preserveAspectRatio="xMidYMin slice">
-          <defs>
-            <linearGradient id="ribbon-gold">
-              <stop stopColor="#D4AF37" stopOpacity="0" />
-              <stop offset=".45" stopColor="#BDA978" stopOpacity=".55" />
-              <stop offset=".68" stopColor="#FFF2CE" stopOpacity=".85" />
-              <stop offset="1" stopColor="#D4AF37" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          <path className="ribbon-base" d="M-160 710 C260 680 -20 70 490 140 S1020 680 1600 250" />
-          <path className="ribbon-trace" d="M-160 710 C260 680 -20 70 490 140 S1020 680 1600 250" />
-          <path
-            className="ribbon-secondary"
-            d="M-180 790 C230 690 170 220 590 235 S1160 750 1600 380"
-          />
-        </svg>
-      </div>
-    </>
   );
 }
 function SearchDialog({ onClose }: { onClose: () => void }) {
@@ -172,7 +120,8 @@ function ScrollRestoration() {
     const priorY = prior ? (positions.get(prior.key) ?? lastY.current) : 0;
     const samePath = prior?.pathname === location.pathname;
     const target = type === 'POP' ? (positions.get(location.key) ?? 0) : samePath ? priorY : 0;
-    const useAnchor = !!location.hash && prior?.hash !== location.hash;
+    const hasSavedPosition = type === 'POP' && positions.has(location.key);
+    const useAnchor = !!location.hash && prior?.hash !== location.hash && !hasSavedPosition;
     activeKey.current = location.key;
     previous.current = { key: location.key, pathname: location.pathname, hash: location.hash };
     restoring.current = true;
@@ -232,16 +181,20 @@ export function Layout() {
   const { user } = useSession();
   const { contact } = useUi();
   const location = useLocation();
-  useEffect(() => {
+  const isCatalog = location.pathname === '/accounts';
+  const isHome = location.pathname === '/';
+  useLayoutEffect(() => setSearch(false), [location.key]);
+  useLayoutEffect(() => {
     const key = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setSearch((v) => !v);
+        if (isCatalog) window.dispatchEvent(new Event('qingye:focus-catalog-search'));
+        else setSearch((v) => !v);
       }
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
-  }, []);
+  }, [isCatalog]);
   return (
     <>
       <ScrollRestoration />
@@ -250,7 +203,9 @@ export function Layout() {
         跳到主要内容
       </a>
       <div className="nav-wrap">
-        <header className="site-nav mx-auto flex items-center justify-between">
+        <header
+          className={`site-nav mx-auto flex items-center justify-between ${isCatalog ? 'catalog-nav' : ''}`}
+        >
           <Brand />
           <nav className="main-links" aria-label="主导航">
             <NavLink to="/" end>
@@ -258,30 +213,49 @@ export function Layout() {
             </NavLink>
             <NavLink to="/accounts">账号集市</NavLink>
           </nav>
-          <button className="nav-search flex items-center" onClick={() => setSearch(true)}>
-            <Search />
-            <span>搜索编号、区服或珍藏</span>
-            <kbd>⌘ K</kbd>
-          </button>
+          {isCatalog ? (
+            <div
+              id="catalog-search-dock"
+              className="nav-search catalog-search-dock"
+              aria-hidden="true"
+            />
+          ) : (
+            <button
+              className="nav-search flex items-center"
+              aria-label="搜索账号"
+              onClick={() => setSearch(true)}
+            >
+              <Search />
+              <span>搜索编号、区服或珍藏</span>
+              <kbd>⌘ K</kbd>
+            </button>
+          )}
           <div className="nav-actions flex items-center">
             <Link className="profile-button" to="/me" aria-label="个人中心">
               <UserRound />
             </Link>
-            <Link className="button-white publish-button" to="/publish">
+            <Link className="button-white publish-button" to="/publish" aria-label="发布账号">
               <Plus />
               <span>发布资产</span>
             </Link>
           </div>
         </header>
       </div>
-      {isDemo && (
+      <div id="catalog-search-layer" />
+      {isDemo && !isHome && (
         <div className="demo-ribbon">
           <span className="status-dot" />
           演示环境 · 商品与图片为样例，操作仅在当前设备保存
         </div>
       )}
-      <main id="main" key={location.pathname === '/accounts' ? 'catalog' : undefined}>
-        <Outlet />
+      <main
+        id="main"
+        className={isHome ? 'home-main' : undefined}
+        key={isCatalog ? 'catalog' : undefined}
+      >
+        <Suspense fallback={<StateView loading />}>
+          <Outlet />
+        </Suspense>
       </main>
       <footer className="site-footer page-width mx-auto">
         <div className="footer-top">
@@ -311,7 +285,6 @@ export function Layout() {
               ? '概念图仅作风格展示，不代表真实账号或保障承诺。'
               : '账号资料以核实结果为准，具体服务请咨询平台客服。'}
           </span>
-          <span className="mono edition">OBSIDIAN / REACT</span>
         </div>
       </footer>
       {search && <SearchDialog onClose={() => setSearch(false)} />}

@@ -1,6 +1,6 @@
 {
-  "name": "qingye-web",
-  "version": "0.4.0",
+  "name": "qingye-web-prototype",
+  "version": "0.6.0-prototype.1",
   "private": true,
   "type": "module",
   "scripts": {

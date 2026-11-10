@@ -1,7 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { fixtureProducts } from './fixtures';
-import { demoHot, filterProducts, paginate, toApiQuery } from './query';
+import { fixtureProducts as displayFixtures } from './fixtures';
+import { demoHot, filterProducts, paginate } from './demo-catalog';
+import { toApiQuery } from './query';
 import { productFrom, productToWire } from './api';
+
+// Keep query cases stable when visual previews gain additional demonstration inventory.
+const fixtureIds = new Set([
+  'QY-02418',
+  'QY-02426',
+  'QY-02431',
+  'QY-02439',
+  'QY-02445',
+  'QY-02452',
+  'QY-02466',
+  'QY-02473',
+]);
+const fixtureProducts = displayFixtures.filter((p) => fixtureIds.has(p.id));
 describe('商品浏览业务规则', () => {
   it('不混排不同报价单位，即使筛选为出售也要求明确计价单位', () => {
     expect(() => filterProducts(fixtureProducts, new URLSearchParams('sort=price-up'))).toThrow(

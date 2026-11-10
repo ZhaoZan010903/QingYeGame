@@ -1,10 +1,12 @@
-# QingYeGame
+# QingYeGame · 前端原型与项目方案
 
 qingyeyouxi.com 网站自主建设项目。
 
 项目采用 React 前端和 Go 后端，加入 Redis 缓存及独立图片存储，逐步替换现有 SaaS 建站，独立管理商品、会员、图片和运营配置。首期围绕商品展示、客服咨询和发布审核建设，新增首页热门推荐，并重新设计电脑端与移动端界面。
 
-React 用户前端位于 [frontend/web](frontend/web/)，沿用首页光效增强版，包含首页、商品列表与详情、登录注册、收藏、发布、我的发布、个人中心和说明页。启动、构建及配置见 [前端说明](frontend/web/README.md)，实现边界与检查记录见 [React 前端交接](docs/13-react-frontend.md)。
+当前代码属于 **React 前端原型（演示阶段）**，用于确认视觉、交互与接口边界；尚未交付可用于真实业务的正式前端。
+
+React 前端原型位于 [frontend/web](frontend/web/)，沿用首页光效增强版，包含首页、商品列表与详情、登录注册、收藏、发布、我的发布、个人中心和说明页。启动、构建及配置见 [前端说明](frontend/web/README.md)，实现边界与检查记录见 [React 前端交接](docs/13-react-frontend.md)。
 
 前端提供明确标识的本地演示模式与独立 API 模式。Go 接口、短信、对象存储、管理员审核和生产数据迁移尚未交付；API 模式失败不会回退为样例数据。页面完成不代表这些后端服务已经运行。
 
@@ -12,7 +14,9 @@ React 用户前端位于 [frontend/web](frontend/web/)，沿用首页光效增�
 
 本次对话的需求与决定已整理为[会话接续记录](docs/12-session-notes-2026-11-10.md)，不是逐字聊天导出，已排除密码等凭据。
 
-React 预览：[清叶用户前端](http://152.136.252.204:5178/)。该独立服务监听 TCP 5178，页面使用明确标识的演示数据，不连接业务后台。原 HTML 版本已保留供回退。发布目录、验证和回退见 [React 发布记录](deploy/qingye-preview/REACT-RELEASE.md)。
+最新界面改版、验证结果与接续开发顺序见[开发进度](docs/14-development-progress.md)，配置和扩展方式见[原型工程说明](docs/15-prototype-architecture.md)。
+
+React 预览：[清叶前端原型预览](http://152.136.252.204:5178/)。该独立服务监听 TCP 5178，页面使用明确标识的演示数据，不连接业务后台。原 HTML 版本已保留供回退。发布目录、验证和回退见 [React 发布记录](deploy/qingye-preview/REACT-RELEASE.md)。
 
 ## 阅读顺序
 
@@ -36,6 +40,7 @@ React 预览：[清叶用户前端](http://152.136.252.204:5178/)。该独立服
 | [待确认事项](docs/09-review-items.md) | 已确认需求、建议参数和审阅记录 |
 | [推荐算法说明](docs/10-recommendation-design.md) | 选型理由、热度公式、算例、Redis 榜单及运营调整 |
 | [React 前端交接](docs/13-react-frontend.md) | 实现范围、接口约定、页面验收与接入边界 |
+| [开发进度](docs/14-development-progress.md) | 0.6.0-prototype.1 原型优化、检查结果与后续任务 |
 
 ## 首期业务
 
@@ -49,7 +54,7 @@ React 预览：[清叶用户前端](http://152.136.252.204:5178/)。该独立服
 
 ## 文档管理
 
-React 前端与文档版本：`0.4`。更新日期：2026年11月10日。
+React 前端原型与文档版本：`0.6.0-prototype.1`。更新日期：2026年11月11日。
 
 已确认需求与建议方案在[待确认事项](docs/09-review-items.md)中分别记录。审阅时可直接指出文档名称、章节编号和希望调整的操作；确认后同步修改相关流程、页面、数据与验收要求。
 

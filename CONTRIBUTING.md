@@ -2,7 +2,7 @@
 
 ## 1 当前阶段
 
-本仓库已进入 React 用户前端实现阶段。React 工程在 frontend/web/，原单文件首页在 frontend/home-preview/。视觉要求见 docs/11-frontend-handoff.md，实现与检查记录见 docs/13-react-frontend.md。技术文档中的建议参数仍不等于已确认需求。
+本仓库处于 React 前端原型验证阶段，当前代码不作为正式业务前端交付。React 工程在 frontend/web/，原单文件首页在 frontend/home-preview/。视觉要求见 docs/11-frontend-handoff.md，实现与检查记录见 docs/13-react-frontend.md。技术文档中的建议参数仍不等于已确认需求。
 
 ## 2 文档修改
 

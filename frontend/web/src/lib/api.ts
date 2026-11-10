@@ -10,8 +10,11 @@ import type {
   ProductWrite,
   User,
 } from '../types';
-import { editorialIds, fixtureCategories, fixturePages, fixtureProducts } from './fixtures';
-import { ApiError, demoHot, filterProducts, paginate, stableNewest, toApiQuery } from './query';
+import { ApiError, toApiQuery } from './query';
+import { resolveHomePresentation } from './home-content';
+
+// The fixture module is loaded only by explicit demo branches, never as an API fallback.
+const loadDemoCatalog = () => import('./demo-catalog');
 export { ApiError } from './query';
 export const isDemo = (import.meta.env.VITE_DATA_MODE ?? 'demo') === 'demo';
 export function createRequestId(): string {
@@ -240,10 +243,10 @@ function requireDemo(): DemoState {
   return state;
 }
 const clone = <T>(value: T): T => structuredClone(value);
-function demoProduct(id: string, privateView = false): Product {
+async function demoProduct(id: string, privateView = false): Promise<Product> {
   const product = privateView
     ? requireDemo().products.find((p) => p.id === id)
-    : fixtureProducts.find((p) => p.id === id);
+    : (await loadDemoCatalog()).fixtureProducts.find((p) => p.id === id);
   if (!product) throw new ApiError('内容不存在或尚未公开。', 404, 'NOT_FOUND');
   return clone(product);
 }
@@ -483,7 +486,7 @@ async function uploadRemote(
 }
 export const api = {
   async categories(): Promise<Category[]> {
-    if (isDemo) return clone(fixtureCategories);
+    if (isDemo) return clone((await loadDemoCatalog()).fixtureCategories);
     const e = await request('/categories');
     return records(e).map((c) => ({
       id: String(c.id),
@@ -494,15 +497,7 @@ export const api = {
     }));
   },
   async home(): Promise<HomeData> {
-    if (isDemo) {
-      const candidates = fixtureProducts.filter((p) => !editorialIds.includes(p.id));
-      return clone({
-        featured: editorialIds.map((id) => fixtureProducts.find((p) => p.id === id)!),
-        hot: [...candidates].sort(demoHot).slice(0, 3),
-        newest: [...candidates].sort(stableNewest).slice(0, 3),
-        ruleVersion: 'demo-v3',
-      });
-    }
+    if (isDemo) return clone((await loadDemoCatalog()).demoHome());
     const d = unwrap(await request('/home'));
     return {
       featured: (d.featured ?? []).map(productFrom),
@@ -510,10 +505,14 @@ export const api = {
       newest: (d.newest ?? []).map(productFrom),
       ruleVersion: d.rule_version,
       computedAt: d.computed_at,
+      presentation: resolveHomePresentation(d.presentation),
     };
   },
   async products(params = new URLSearchParams()): Promise<ProductPage> {
-    if (isDemo) return clone(paginate(filterProducts(fixtureProducts, params), params));
+    if (isDemo) {
+      const { paginate, filterProducts, fixtureProducts } = await loadDemoCatalog();
+      return clone(paginate(filterProducts(fixtureProducts, params), params));
+    }
     return pageFrom(await request(`/products?${toApiQuery(params)}`));
   },
   async product(id: string): Promise<Product> {
@@ -526,7 +525,7 @@ export const api = {
   },
   async images(id: string, cursor?: string | null, version?: number): Promise<ImagePage> {
     if (isDemo) {
-      const p = demoProduct(id);
+      const p = await demoProduct(id);
       if (version && p.version !== version)
         throw new ApiError('图集已更新，请重新打开账号。', 409, 'VERSION_CONFLICT');
       return { items: p.images, total: p.imageTotal, nextCursor: null, version: p.version };
@@ -557,7 +556,7 @@ export const api = {
   },
   async page(slug: string): Promise<ContentPage> {
     if (isDemo) {
-      const p = fixturePages[slug];
+      const p = (await loadDemoCatalog()).fixturePages[slug];
       if (!p) throw new ApiError('该说明页面尚未发布。', 404, 'NOT_FOUND');
       return clone(p);
     }
@@ -632,7 +631,7 @@ export const api = {
     if (isDemo) {
       const state = requireDemo();
       return clone(
-        fixtureProducts
+        (await loadDemoCatalog()).fixtureProducts
           .filter((p) => state.favorites.includes(p.id))
           .map((p) => ({ ...p, favorite: true })),
       );
@@ -641,8 +640,8 @@ export const api = {
   },
   async favorite(id: string, selected: boolean): Promise<void> {
     if (isDemo) {
+      if (selected) await demoProduct(id);
       const state = requireDemo();
-      if (selected) demoProduct(id);
       state.favorites = selected
         ? [...new Set([...state.favorites, id])]
         : state.favorites.filter((x) => x !== id);
@@ -662,12 +661,12 @@ export const api = {
   },
   async myProduct(id: string): Promise<Product> {
     return isDemo
-      ? hydrateProduct(demoProduct(id, true))
+      ? hydrateProduct(await demoProduct(id, true))
       : productFrom(unwrap(await request(`/me/products/${encodeURIComponent(id)}`)));
   },
   async myImages(id: string, cursor?: string | null, version?: number): Promise<ImagePage> {
     if (isDemo) {
-      const p = demoProduct(id, true);
+      const p = await demoProduct(id, true);
       if (version && p.version !== version)
         throw new ApiError('图集已更新，请刷新资料。', 409, 'VERSION_CONFLICT');
       const start = Number(cursor) || 0;

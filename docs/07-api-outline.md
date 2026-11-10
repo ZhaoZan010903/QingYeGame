@@ -28,11 +28,17 @@
 | GET | `/categories` | 公开 | — | 分类、筛选配置 |
 | GET | `/products` | 公开 | category、trade_type、price_unit、q、filters、min_price、max_price、sort、cursor、limit | 仅返回当前版本已审核、已展示且分类启用的商品 |
 | GET | `/products/{id}` | 公开 | — | 公开详情与首批图集；下架只返回状态，不返回原资料 |
-| GET | `/home` | 公开 | — | 横幅、精选、热门、新品；无重复商品 |
+| GET | `/home` | 公开 | — | 横幅、精选、热门、新品；无重复商品；原型支持可选展示配置presentation，见下文 |
 | POST | `/products/{id}/view` | 访客 | 服务端签发的访客标识随 Cookie 携带 | 记录有效浏览，同商品/访客/日期去重 |
 | GET | `/contacts` | 公开 | purpose | 客服配置 |
 | GET | `/pages/{slug}` | 公开 | — | 已发布说明页 |
 | GET | `/products/{id}/images` | 公开 | cursor、limit、expected_version | 按顺序读取后续展示图片；每次检查公开条件和图集版本 |
+
+### 3.1 首页展示配置的原型扩展
+
+`data.presentation` 为可选对象，包含 `editorial`（标题、说明、轮播间隔）、`sections`（hot/newest来源、标题、说明、显示数量及数组顺序）、`shortcuts`（限定站内入口）与 `publishing`（发布区文案）。字段与校验见[原型工程说明](15-prototype-architecture.md)。缺省使用前端默认展示配置；显式空数组隐藏对应分区，库存为空不使用演示商品补足。接口商品次序由服务端决定。
+
+此字段是当前前端原型预留的扩展契约；后台配置保存、权限、发布与缓存更新仍需服务端实施和联调。
 
 ## 4 个人中心与发布
 

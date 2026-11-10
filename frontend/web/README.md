@@ -1,4 +1,6 @@
-# 清叶 React 用户前端
+# 清叶 React 前端原型
+
+包名 `qingye-web-prototype`，版本 `0.6.0-prototype.1`。此目录是可运行的交互原型，不是正式业务前端交付。保留 `frontend/web/` 路径以兼容已有构建与部署；原 `frontend/home-preview/` 为 HTML 视觉参考。
 
 React 19、TypeScript、Vite，沿用 `../home-preview/` 的黑曜石与香槟金视觉。图片、字体和样式在本地构建，不依赖 Tailwind CDN。
 
@@ -43,6 +45,8 @@ API 模式的请求失败会显示错误，不自动回退至样例。演示账�
 开发服务器将 `/api` 转发至 `http://127.0.0.1:8080`。后端接口契约见 [接口清单](../../docs/07-api-outline.md)，本轮实现及验收边界见 [React 前端交接](../../docs/13-react-frontend.md)。Go 服务、短信与对象存储需要独立提供；不将旧 SaaS 数据接口视为兼容的新后端。
 
 ## 静态部署要求
+
+首页内容、演示样例与真实接口的职责划分及可编辑扩展字段见[原型工程说明](../../docs/15-prototype-architecture.md)。默认首页配置可集中修改；API模式支持可选 `presentation`，目前尚未建设运营后台编辑页面。
 
 将 `dist/` 作为站点目录，为 React 路由配置刷新回退。`/api/` 必须单独转发，接口不存在或失败时不得返回 `index.html`。
 

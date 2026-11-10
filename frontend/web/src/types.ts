@@ -1,3 +1,5 @@
+import type { HomePresentation } from './lib/home-content';
+
 export type TradeType = 'sale' | 'rent';
 export type PriceUnit = 'account' | 'hour' | 'day' | 'week' | 'month';
 export type ProductStatus = 'draft' | 'pending' | 'published' | 'rejected' | 'offline';
@@ -58,6 +60,7 @@ export interface ImagePage {
   version: number;
 }
 export interface HomeData {
+  presentation?: HomePresentation;
   featured: Product[];
   hot: Product[];
   newest: Product[];

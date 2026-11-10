@@ -1,0 +1,160 @@
+.morph-experience {
+  position: relative;
+}
+.morph-experience .immersive-intro .hero-inner {
+  transform: none;
+  opacity: 1;
+  will-change: auto;
+}
+.morph-title {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  z-index: 4;
+  margin: 0;
+  pointer-events: none;
+  visibility: hidden;
+  font-family: var(--font-cn);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.04em;
+}
+.morph-title.is-ready {
+  visibility: visible;
+}
+.morph-title-piece {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  white-space: nowrap;
+  letter-spacing: -0.04em;
+  line-height: 1.35;
+  transform-origin: 0 0;
+  will-change: transform;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.morph-title-piece.ivory {
+  background-image: linear-gradient(105deg, #eee9dc, #fffdf6 48%, #d2c5a6);
+}
+.morph-title-piece.gold {
+  background-image: linear-gradient(110deg, #c2ad7f, #f7e9c7 48%, #c7b184);
+}
+.intro-title-template,
+.landing-title-template {
+  visibility: hidden;
+  font-family: var(--font-cn);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.35;
+}
+.morph-experience [data-title-piece] {
+  letter-spacing: -0.04em;
+  line-height: 1.35;
+}
+.intro-title-template {
+  font-size: clamp(54px, 6.7vw, 108px);
+}
+.intro-title-template > .hero-title-main {
+  display: inline-block;
+}
+.intro-title-template > .hero-title-trust {
+  display: block;
+  font-size: 0.67em;
+  margin-top: 15px;
+}
+.intro-title-template .title-phrase {
+  display: inline-block;
+  white-space: nowrap;
+}
+.landing-title-template {
+  font-size: clamp(28px, 3.6vw, 52px);
+}
+.landing-title-template > .hero-title-main {
+  display: table;
+  margin: 0 auto;
+}
+.landing-title-template > .hero-title-trust {
+  display: block;
+}
+.landing-title-template .title-phrase {
+  display: inline-block;
+  white-space: nowrap;
+}
+.morph-experience .intro-subtitle {
+  animation: none;
+  opacity: 1;
+}
+.morph-experience .intro-scroll[data-paused='true'] svg {
+  animation-play-state: paused;
+}
+.morph-experience .home-discover {
+  opacity: 1;
+}
+.morph-experience .home-demo-note {
+  opacity: 0;
+}
+@media (min-width: 1800px) {
+  .intro-title-template {
+    font-size: 118px;
+  }
+}
+@media (max-width: 760px) {
+  .intro-title-template {
+    font-size: clamp(40px, 7.5vw, 62px);
+  }
+  .intro-title-template > .hero-title-trust {
+    margin-top: 20px;
+  }
+}
+@media (max-width: 639px) {
+  .landing-title-template {
+    font-size: 28px;
+  }
+  .landing-title-template > .hero-title-trust {
+    font-size: 0.84em;
+    margin-top: 6px;
+  }
+}
+@media (max-width: 540px) {
+  .intro-title-template {
+    font-size: clamp(34px, 9.2vw, 49px);
+  }
+  .intro-title-template > .hero-title-trust {
+    font-size: 0.78em;
+  }
+  .intro-title-template .title-phrase {
+    display: table;
+    margin: 0 auto;
+  }
+}
+@media (max-height: 600px) {
+  .intro-title-template {
+    font-size: clamp(28px, min(8svh, 9.2vw), 48px);
+  }
+  .intro-title-template > .hero-title-trust {
+    margin-top: 10px;
+  }
+  .intro-title-template .title-phrase {
+    display: inline-block;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .morph-experience .immersive-intro {
+    display: none;
+  }
+  #main.home-main:has(.morph-experience) {
+    margin-top: 0;
+  }
+  .morph-title-piece {
+    will-change: auto;
+  }
+  .morph-experience .home-demo-note {
+    transform: none;
+    opacity: 1;
+  }
+}

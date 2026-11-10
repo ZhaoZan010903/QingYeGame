@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, X, Search, ShieldCheck, RefreshCw } from 'lucide-react';
 import { isDemo } from '../lib/api';
 import type { Product } from '../types';
+import '../card-readability.css';
 
 export const unitLabels: Record<string, string> = {
   account: '账号总价',
@@ -39,7 +40,7 @@ export function Artwork({ product: p, className = '' }: { product: Product; clas
       aria-label={`${p.title}${src ? '' : isDemo ? ' · 概念展示图' : ' · 图片暂不可用'}`}
     >
       {src && !failed ? (
-        <img src={src} alt={p.title} loading="lazy" onError={() => setFailed(true)} />
+        <img src={src} alt={p.title} loading="lazy" decoding="async" onError={() => setFailed(true)} />
       ) : isDemo ? (
         <div className={`asset-art art-${p.art ?? 0}`} />
       ) : (
@@ -50,6 +51,14 @@ export function Artwork({ product: p, className = '' }: { product: Product; clas
 }
 export function AssetCard({ product: p }: { product: Product }) {
   const location = useLocation();
+  const tradeKind =
+    p.mode === 'sale'
+      ? 'sale'
+      : p.unit === 'week' || p.unit === 'month'
+        ? 'long-rent'
+        : 'short-rent';
+  const tradeLabel =
+    tradeKind === 'sale' ? '账号出售' : tradeKind === 'long-rent' ? '周月租号' : '时日租号';
   return (
     <article className="asset-card">
       <Link
@@ -59,15 +68,11 @@ export function AssetCard({ product: p }: { product: Product }) {
       >
         <div className="asset-image">
           <Artwork product={p} />
-          <span className="image-bottom">
-            <span>{p.mode === 'sale' ? '账号出售' : '账号租赁'}</span>
-            <span>QQ X5 / QINGYE</span>
-          </span>
+          <span className={`trade-badge ${tradeKind}`}>{tradeLabel}</span>
         </div>
         <div className="asset-body">
           <div className="asset-topline">
             <span className="asset-id">{p.code ?? p.id}</span>
-            <span className="rarity">{p.mode === 'sale' ? '风格珍藏' : '租赁甄选'}</span>
           </div>
           <h3 className="asset-title">{p.title}</h3>
           <div className="asset-meta">
@@ -83,11 +88,7 @@ export function AssetCard({ product: p }: { product: Product }) {
             ))}
           </div>
           <div className="asset-bottom">
-            <span className="card-caption">
-              查看账号资料
-              <br />
-              <small>客服协助咨询</small>
-            </span>
+            <span className="card-caption">查看详情</span>
             <div className="asset-price-side">
               <Price product={p} />
               <span className="asset-arrow">
@@ -226,7 +227,6 @@ export function Modal({
     >
       <div className="dialog-header">
         <div>
-          <span className="section-eyebrow mono">QINGYE / PERSONAL COLLECTION</span>
           <h2 id={titleId}>{title}</h2>
         </div>
         <button className="icon-button" aria-label="关闭" onClick={onClose}>

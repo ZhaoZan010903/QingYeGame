@@ -1503,6 +1503,30 @@ main,
   }
 }
 @media (hover: none), (pointer: coarse) {
+  /* Preserve the gold composition without repainting animated SVG/filter layers on touch scroll. */
+  .ambient-wash,
+  .ambient-stage:before,
+  .ambient-stage:after,
+  .ribbon-trace {
+    animation: none;
+  }
+  .ribbon-trace {
+    filter: none;
+  }
+  .light-ribbons {
+    will-change: auto;
+  }
+  .site-nav,
+  .carousel-bottom {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background-color: #141416;
+  }
+  .slide-visual .asset-art,
+  .editorial-slide.active .slide-visual .asset-art {
+    transition: none;
+    transform: none;
+  }
   .cursor-aura {
     display: none;
   }

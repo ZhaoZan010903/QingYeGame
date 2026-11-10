@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import {
+  ArrowUpRight,
+  Heart,
+  History,
+  LayoutGrid,
+  LogOut,
+  MessageCircle,
+  Plus,
+  Settings2,
+  ShieldCheck,
+} from 'lucide-react';
 import { api, isDemo, ApiError } from '../lib/api';
 import type { Product } from '../types';
 import { useSession, useUi } from '../context';
@@ -14,6 +25,27 @@ export const listingStatus: Record<Product['status'], string> = {
 };
 const message = (e: unknown) => (e instanceof Error ? e.message : '操作失败，请重试。');
 const units = { account: '', hour: ' / 小时', day: ' / 日', week: ' / 周', month: ' / 月' };
+const memberLinks = [
+  { to: '/me', label: '账户概览', icon: LayoutGrid },
+  {
+    to: '/me/favorites',
+    label: '我的收藏',
+    icon: Heart,
+    description: '心动的账号，留待下次相见。',
+  },
+  {
+    to: '/me/listings',
+    label: '我的发布',
+    icon: Plus,
+    description: '整理草稿，查看发布与审核进度。',
+  },
+  {
+    to: '/me/history',
+    label: '最近浏览',
+    icon: History,
+    description: '回到看过的账号，继续挑选。',
+  },
+];
 function MemberArt({ product }: { product: Product }) {
   const first = product.images[0];
   const [failed, setFailed] = useState(false);
@@ -78,6 +110,7 @@ export function MemberPage() {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('all');
   const [reload, setReload] = useState(0);
+  const phone = user?.phone?.replace(/^(\d{3})\d{4}(\d{4})$/, '$1 ···· $2');
   useEffect(() => {
     setNickname(user?.nickname ?? '');
   }, [user?.nickname]);
@@ -204,25 +237,37 @@ export function MemberPage() {
     <section className="member-shell page-width mx-auto" aria-label="我的清叶">
       <div className="member-header">
         <div>
-          <span className="section-eyebrow mono">YOUR QINGYE</span>
-          <h1>{user?.nickname || '我的清叶'}</h1>
-          <p>{isDemo ? '演示账户 · 数据仅保存在当前设备' : '收藏热爱，整理属于你的珍藏。'}</p>
+          <h1>我的清叶</h1>
+          <p>收藏心动，打理你的每一份热爱。</p>
         </div>
-        <button className="button-outline" onClick={logout} disabled={!!busy}>
-          {busy === 'logout' ? '正在退出…' : '退出登录'}
-        </button>
       </div>
+      <section className="member-identity" aria-label="账户信息">
+        <div className="member-identity-person">
+          <div className="profile-avatar" aria-hidden="true">
+            {Array.from(user?.nickname || '清叶')[0]}
+          </div>
+          <div>
+            <h2>{user?.nickname || '清叶会员'}</h2>
+            <p>{isDemo ? '演示账户 · 仅在当前设备保存' : phone || '未绑定手机号'}</p>
+          </div>
+        </div>
+        <div className="member-identity-actions">
+          <Link className="button-white" to="/publish">
+            <Plus size={16} aria-hidden="true" />
+            发布账号
+          </Link>
+          <button className="member-logout" onClick={logout} disabled={!!busy}>
+            <LogOut size={16} aria-hidden="true" />
+            {busy === 'logout' ? '正在退出…' : '退出登录'}
+          </button>
+        </div>
+      </section>
       <div className="member-layout">
-        <nav className="member-sidebar" aria-label="个人中心导航">
-          {[
-            ['/me', '01', '基本资料'],
-            ['/me/favorites', '02', '我的收藏'],
-            ['/me/listings', '03', '我的发布'],
-            ['/me/history', '04', '最近浏览'],
-          ].map(([to, n, label]) => (
+        <nav className="member-nav" aria-label="个人中心导航">
+          {memberLinks.map(({ to, icon: Icon, label }) => (
             <NavLink key={to} to={to} end>
-              <span>{n}</span>
-              {label}
+              <Icon size={17} aria-hidden="true" />
+              <span>{label}</span>
             </NavLink>
           ))}
         </nav>
@@ -230,7 +275,7 @@ export function MemberPage() {
           className="member-content"
           aria-label={
             {
-              profile: '基本资料',
+              profile: '账户概览',
               favorites: '我的收藏',
               listings: '我的发布',
               history: '最近浏览',
@@ -250,45 +295,95 @@ export function MemberPage() {
             </div>
           )}
           {tab === 'profile' ? (
-            <div className="panel">
-              <div className="profile-avatar" aria-hidden="true">
-                {user?.nickname?.slice(0, 1) || '叶'}
+            <>
+              <div className="member-shortcuts" aria-label="我的账号与收藏">
+                {memberLinks.slice(1).map(({ to, icon: Icon, label, description }) => (
+                  <Link className="member-shortcut" to={to} key={to}>
+                    <span className="member-shortcut-icon">
+                      <Icon size={21} aria-hidden="true" />
+                    </span>
+                    <div>
+                      <h2>{label}</h2>
+                      <p>{description}</p>
+                    </div>
+                    <ArrowUpRight className="member-shortcut-arrow" size={18} aria-hidden="true" />
+                  </Link>
+                ))}
               </div>
-              <h2>基本资料</h2>
-              <form className="member-form profile-form" onSubmit={saveProfile}>
-                <label className="form-field">
-                  昵称
-                  <input
-                    value={nickname}
-                    onChange={(e) => setNickname(e.target.value)}
-                    maxLength={24}
-                    required
-                    placeholder="怎样称呼你"
-                  />
-                  <small>最多 24 个字符，用于个人中心展示。</small>
-                </label>
-                <label className="form-field">
-                  手机号
-                  <input value={user?.phone || '演示账户未绑定手机号'} disabled />
-                </label>
-                <button type="submit" className="button-white" disabled={!!busy}>
-                  {busy === 'profile' ? '正在保存…' : '保存修改'}
+              <section className="panel profile-panel" aria-labelledby="profile-heading">
+                <div className="profile-panel-heading">
+                  <div>
+                    <h2 id="profile-heading">基本资料</h2>
+                    <p>让这里更像你。</p>
+                  </div>
+                  <Settings2 size={20} aria-hidden="true" />
+                </div>
+                <form className="member-form profile-form" onSubmit={saveProfile}>
+                  <label className="form-field">
+                    昵称
+                    <input
+                      value={nickname}
+                      onChange={(e) => setNickname(e.target.value)}
+                      maxLength={24}
+                      required
+                      placeholder="怎样称呼你"
+                    />
+                    <small>最多 24 个字符，用于个人中心展示。</small>
+                  </label>
+                  <label className="form-field">
+                    手机号
+                    <input
+                      value={isDemo ? '演示账户 · 未绑定手机号' : phone || '未绑定手机号'}
+                      disabled
+                    />
+                    <small>
+                      {isDemo
+                        ? '演示体验无需绑定真实手机号。'
+                        : '如需更换绑定手机号，请联系平台客服。'}
+                    </small>
+                  </label>
+                  <div className="profile-form-footer">
+                    <p>修改昵称后，记得保存。</p>
+                    <button type="submit" className="button-white" disabled={!!busy}>
+                      {busy === 'profile' ? '正在保存…' : '保存修改'}
+                    </button>
+                  </div>
+                </form>
+              </section>
+              <div className="member-help-row">
+                <Link to="/forgot-password?returnTo=%2Fme">
+                  <ShieldCheck size={19} aria-hidden="true" />
+                  <span>
+                    账户安全<small>验证手机号并重设密码</small>
+                  </span>
+                  <ArrowUpRight size={16} aria-hidden="true" />
+                </Link>
+                <button onClick={() => contact(undefined, 'general')}>
+                  <MessageCircle size={19} aria-hidden="true" />
+                  <span>
+                    需要帮助？<small>联系平台客服</small>
+                  </span>
+                  <ArrowUpRight size={16} aria-hidden="true" />
                 </button>
-              </form>
-              <p className="profile-note">
-                账号密码、验证码和身份材料无需出现在公开资料中。
-                <br />
-                如需帮助，可
-                <button className="text-button" onClick={() => contact(undefined, 'general')}>
-                  联系平台客服
-                </button>
-                。
-              </p>
-            </div>
+              </div>
+            </>
           ) : (
             <>
               <div className="member-toolbar">
-                <h2>{{ favorites: '我的收藏', listings: '我的发布', history: '最近浏览' }[tab]}</h2>
+                <div className="member-section-heading">
+                  <h2>
+                    {{ favorites: '我的收藏', listings: '我的发布', history: '最近浏览' }[tab]}
+                  </h2>
+                  <p>
+                    {
+                      {
+                        favorites: '心动的珍藏，都在这里。',
+                        listings: '从一份草稿，到下一次相遇。',
+                        history: '上一次心动，值得再看一眼。',
+                      }[tab]
+                    }
+                  </p>
+                </div>
                 {tab === 'listings' ? (
                   <div className="member-toolbar" style={{ marginBottom: 0 }}>
                     <select

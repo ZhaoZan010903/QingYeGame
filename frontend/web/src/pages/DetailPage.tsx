@@ -233,7 +233,6 @@ function DetailContent({ product: p }: { product: Product }) {
         </section>
       </div>
       <section className="detail-description panel">
-        <span className="section-eyebrow mono">ABOUT THIS COLLECTION</span>
         <h2>关于这份珍藏</h2>
         <p>{p.description || '暂无补充介绍，请联系客服了解详情。'}</p>
         {isDemo && (

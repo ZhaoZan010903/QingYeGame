@@ -11,7 +11,6 @@ export function HelpPage() {
   return (
     <div className="help-page page-width mx-auto">
       <aside className="help-menu">
-        <span className="section-eyebrow mono">QINGYE GUIDE</span>
         {[
           ['about', '关于清叶'],
           ['process', '咨询流程'],
@@ -33,7 +32,6 @@ export function HelpPage() {
         ) : (
           result.data && (
             <>
-              <span className="section-eyebrow mono">A LITTLE MORE ABOUT US</span>
               <h1>{result.data.title}</h1>
               {!result.data.published && (
                 <p className="notice-box">此页面尚未发布正式内容，服务及协议条款需由经营方确认。</p>
