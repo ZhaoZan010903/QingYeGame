@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, isDemo } from './lib/api';
 import type { User } from './types';
 import { Modal, StateView } from './components/shared';
@@ -102,7 +102,7 @@ export function Providers({ children }: { children: ReactNode }) {
   const [support, setSupport] = useState<{ id?: string; purpose?: string; channel?: 'qq' } | null>(
     null,
   );
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setError(undefined);
     try {
       setUser(await api.me());
@@ -111,10 +111,10 @@ export function Providers({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
   useEffect(() => {
     if (!message) return;
     const timer = setTimeout(() => notify(''), 4500);

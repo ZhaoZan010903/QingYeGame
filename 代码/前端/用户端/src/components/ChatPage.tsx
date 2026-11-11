@@ -13,6 +13,7 @@ import {
   type Conversation,
 } from '../../../共享/chat-types';
 import '../chat.css';
+import { ChatOutbox } from '../../../共享/chat-outbox';
 
 const statusNames = { waiting: '等待接待', active: '咨询中', closed: '已结束' };
 const units: Record<string, string> = {
@@ -103,7 +104,7 @@ export function ChatPage() {
     messageCache = useRef<ChatMessage[]>([]),
     lastRead = useRef('');
   const drafts = useRef(new Map<string, string>()),
-    pending = useRef<{ id: string; body: string; client: string } | null>(null),
+    pending = useRef(new ChatOutbox()),
     scroll = useRef<HTMLDivElement>(null),
     bottom = useRef(true);
   currentID.current = selected;
@@ -135,7 +136,7 @@ export function ChatPage() {
   }, [productId, connected, startRetry, user?.id]);
   useEffect(() => {
     drafts.current.clear();
-    pending.current = null;
+    pending.current.clear();
     setOlder([]);
   }, [user?.id]);
   useEffect(() => {
@@ -285,9 +286,7 @@ export function ChatPage() {
       setError('每条消息最多 2000 字。');
       return;
     }
-    if (!pending.current || pending.current.body !== body || pending.current.id !== selected)
-      pending.current = { id: selected, body, client: createRequestId() };
-    const input = pending.current;
+    const input = pending.current.prepare(selected, body, createRequestId);
     setSending(true);
     setError('');
     try {
@@ -299,7 +298,7 @@ export function ChatPage() {
         setAtBottom(true);
         await latest();
       }
-      pending.current = null;
+      pending.current.acknowledge(input);
       void refresh();
     } catch (e) {
       if (currentID.current === input.id) setError(`${errorText(e)} 内容已保留，可以重新发送。`);

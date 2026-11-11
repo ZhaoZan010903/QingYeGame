@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -155,7 +156,7 @@ func (a *App) saveCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, u := range in.PriceUnits {
-		if !strings.Contains("|account|hour|day|week|month|unknown|", "|"+u+"|") || in.TradeType == "sale" && u != "account" && u != "unknown" || in.TradeType == "rent" && u == "account" {
+		if !slices.Contains([]string{"account", "hour", "day", "week", "month", "unknown"}, u) || in.TradeType == "sale" && u != "account" && u != "unknown" || in.TradeType == "rent" && u == "account" {
 			fail(w, 422, "INVALID_CATEGORY", "报价单位不适用于该分类")
 			return
 		}
@@ -227,7 +228,7 @@ func (a *App) saveContact(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if strings.TrimSpace(in.Name) == "" || utf8.RuneCountInString(in.Name) > 60 || len(in.Value) > 500 || len(in.Hours) > 200 || !strings.Contains("|wechat|qq|phone|url|", "|"+in.Channel+"|") {
+	if strings.TrimSpace(in.Name) == "" || utf8.RuneCountInString(in.Name) > 60 || len(in.Value) > 500 || len(in.Hours) > 200 || !slices.Contains([]string{"wechat", "qq", "phone", "url"}, in.Channel) {
 		fail(w, 422, "INVALID_CONTACT", "请检查客服名称和联系方式")
 		return
 	}
@@ -243,7 +244,7 @@ func (a *App) saveContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, p := range in.Purpose {
-		if !strings.Contains("|general|sale|rent|listing|support|", "|"+p+"|") {
+		if !slices.Contains([]string{"general", "sale", "rent", "listing", "support"}, p) {
 			fail(w, 422, "INVALID_CONTACT", "用途无效")
 			return
 		}
@@ -472,7 +473,7 @@ func (a *App) adminRecommendations(w http.ResponseWriter, r *http.Request) {
 	}
 	var state map[string]any
 	_ = a.DB.QueryRow(r.Context(), "SELECT value FROM site_settings WHERE key='recommendation_state'").Scan(&state)
-	writeJSON(w, 200, map[string]any{"data": rows, "rule_version": state["rule_version"], "computed_at": state["computed_at"], "applied_config": state["config"], "config": config, "rule": "可配置的近期有效浏览、首次收藏与新品加分；测试建议参数"})
+	writeJSON(w, 200, map[string]any{"data": rows, "rule_version": state["rule_version"], "computed_at": state["computed_at"], "applied_config": state["config"], "config": config, "rule": "按配置窗口内的有效浏览与首次有效收藏加权；上架时间不加热度分，个性化推荐独立计算"})
 }
 func (a *App) refreshRecommendations(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*1000000000)

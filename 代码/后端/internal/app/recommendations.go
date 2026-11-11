@@ -51,7 +51,7 @@ func loadRecommendations(ctx context.Context, q rowQuerier) (recommendationConfi
 }
 
 func (a *App) RefreshRecommendations(ctx context.Context) error {
-	return a.refreshRecommendationsAt(ctx, time.Now().UTC())
+	return a.refreshRecommendationsAt(ctx, time.Time{})
 }
 
 // One as-of instant defines the whole batch, including its persisted rule metadata.
@@ -69,6 +69,13 @@ func (a *App) refreshRecommendationsAt(ctx context.Context, asOf time.Time) erro
 	}
 	if !locked {
 		return errors.New("recommendation refresh already running")
+	}
+	// The database also timestamps engagement and evaluates snapshot freshness.
+	// Use that same clock when the caller did not provide a fixed test cutoff.
+	if asOf.IsZero() {
+		if err = tx.QueryRow(ctx, "SELECT now()").Scan(&asOf); err != nil {
+			return err
+		}
 	}
 	config, err := loadRecommendations(ctx, tx)
 	if err != nil {

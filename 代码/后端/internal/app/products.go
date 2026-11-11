@@ -245,7 +245,7 @@ func productOrder(sort string) (string, error) {
 	case "newest":
 		return "p.published_at DESC NULLS LAST,p.id", nil
 	case "hot", "recommended":
-		return "COALESCE((SELECT score FROM product_hot_scores h WHERE h.product_id=p.id AND h.computed_at>=now()-interval '60 minutes'),0) DESC,p.published_at DESC NULLS LAST,p.id", nil
+		return "COALESCE((SELECT score FROM product_hot_scores h WHERE h.product_id=p.id AND h.computed_at BETWEEN now()-interval '60 minutes' AND now()),0) DESC,p.published_at DESC NULLS LAST,p.id", nil
 	case "price_asc", "price-up":
 		return "p.price_amount ASC NULLS LAST,p.id", nil
 	case "price_desc", "price-down":

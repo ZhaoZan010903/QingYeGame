@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+func itemCFNow(t *testing.T, a *App) time.Time {
+	t.Helper()
+	var now time.Time
+	if err := a.DB.QueryRow(context.Background(), "SELECT now()").Scan(&now); err != nil {
+		t.Fatal(err)
+	}
+	return now
+}
+
 func itemCFView(t *testing.T, a *App, viewer, product string, at time.Time) {
 	t.Helper()
 	_, err := a.DB.Exec(context.Background(), `INSERT INTO product_views_daily(product_id,visitor_hash,viewed_date,created_at,last_seen_at)
@@ -38,13 +47,13 @@ func TestItemCFHybridRankingAndPagination(t *testing.T) {
 	h.call("POST", "/api/v1/products/sale-old/view", nil, one, 200)
 	for _, peer := range []string{"peer-a", "peer-b"} {
 		for _, id := range []string{"sale-old", "rent-old"} {
-			itemCFView(t, a, peer, id, time.Now().Add(-time.Minute))
+			itemCFView(t, a, peer, id, itemCFNow(t, a).Add(-time.Minute))
 		}
 	}
 	// The same person browsing on more days is still one co-viewer.
 	for day := 1; day < 5; day++ {
 		for _, id := range []string{"sale-old", "rent-old"} {
-			itemCFView(t, a, "peer-a", id, time.Now().Add(-time.Duration(day)*24*time.Hour))
+			itemCFView(t, a, "peer-a", id, itemCFNow(t, a).Add(-time.Duration(day)*24*time.Hour))
 		}
 	}
 	if err := a.RefreshItemCF(ctx); err != nil {
@@ -122,7 +131,7 @@ func TestItemCFHybridRankingAndPagination(t *testing.T) {
 func TestItemCFTrainingBoundariesAndFallbacks(t *testing.T) {
 	a, h, one, _ := personalFixture(t)
 	ctx := context.Background()
-	now := time.Now().Add(-time.Second)
+	now := itemCFNow(t, a).Add(-time.Second)
 	h.call("POST", "/api/v1/products/sale-old/view", nil, one, 200)
 	for _, peer := range []string{"active-1", "active-2", "off", "reset", "too-old", "future"} {
 		at := now
@@ -193,7 +202,7 @@ func TestItemCFTrainingBoundariesAndFallbacks(t *testing.T) {
 func TestItemCFBoundedHistoryTopKAndAtomicRefresh(t *testing.T) {
 	a := integrationMemberApp(t)
 	ctx := context.Background()
-	now := time.Now().Add(-time.Second)
+	now := itemCFNow(t, a).Add(-time.Second)
 	recommendationCategory(t, a, "items", true)
 	for i := 0; i < 55; i++ {
 		id := fmt.Sprintf("p%02d", i)
@@ -263,7 +272,7 @@ func TestItemCFConcurrentReadsDuringRefresh(t *testing.T) {
 	h.call("POST", "/api/v1/products/sale-old/view", nil, one, 200)
 	for _, peer := range []string{"peer1", "peer2"} {
 		for _, id := range []string{"sale-old", "rent-old"} {
-			itemCFView(t, a, peer, id, time.Now().Add(-time.Minute))
+			itemCFView(t, a, peer, id, itemCFNow(t, a).Add(-time.Minute))
 		}
 	}
 	if err := a.RefreshItemCF(ctx); err != nil {

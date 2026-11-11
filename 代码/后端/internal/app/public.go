@@ -207,12 +207,14 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		result["presentation"] = presentation
 	}
 	var state map[string]any
-	if a.DB.QueryRow(r.Context(), "SELECT value FROM site_settings WHERE key='recommendation_state'").Scan(&state) == nil {
+	var databaseNow time.Time
+	if a.DB.QueryRow(r.Context(), "SELECT value,now() FROM site_settings WHERE key='recommendation_state'").Scan(&state, &databaseNow) == nil {
 		result["computed_at"] = state["computed_at"]
 		result["rule_version"] = state["rule_version"]
 		computed, _ := state["computed_at"].(string)
 		at, err := time.Parse(time.RFC3339Nano, computed)
-		if err == nil && time.Since(at) <= time.Hour && state["has_engagement"] == true {
+		age := databaseNow.Sub(at)
+		if err == nil && age >= 0 && age <= time.Hour && state["has_engagement"] == true {
 			result["recommendation_source"] = "local-view-favorite-score"
 		}
 	}

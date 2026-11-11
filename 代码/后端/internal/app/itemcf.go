@@ -31,7 +31,7 @@ func (a *App) RunItemCF(ctx context.Context) {
 }
 
 func (a *App) RefreshItemCF(ctx context.Context) error {
-	return a.refreshItemCFAt(ctx, time.Now().UTC())
+	return a.refreshItemCFAt(ctx, time.Time{})
 }
 
 // Each run has one consistent cutoff and atomically replaces the previous
@@ -54,6 +54,13 @@ func (a *App) refreshItemCFAt(parent context.Context, asOf time.Time) error {
 	}
 	if !locked {
 		return nil
+	}
+	// View/reset facts and freshness checks use PostgreSQL time. An API host's
+	// clock must not make a newly committed batch appear to be from the future.
+	if asOf.IsZero() {
+		if err = tx.QueryRow(ctx, "SELECT now()").Scan(&asOf); err != nil {
+			return err
+		}
 	}
 	// Bound database sort/hash memory and statement duration. PostgreSQL may
 	// spill to temporary disk rather than accumulating the graph in Go or Redis.

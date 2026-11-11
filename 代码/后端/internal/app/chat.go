@@ -16,6 +16,20 @@ import (
 const chatCapacity = 3
 const chatAssignmentLock = 1834181
 
+// IDs reach PostgreSQL text parameters; NUL and malformed URL UTF-8 must not
+// turn a client input error into a database-unavailable response.
+func validChatID(value string, maxBytes int) bool {
+	return len(value) > 0 && len(value) <= maxBytes && utf8.ValidString(value) && !strings.ContainsRune(value, 0)
+}
+
+func chatConversationID(w http.ResponseWriter, r *http.Request) bool {
+	if !validChatID(r.PathValue("id"), 100) {
+		fail(w, 422, "INVALID_CONVERSATION", "会话编号无效")
+		return false
+	}
+	return true
+}
+
 func (a *App) registerChat(m *http.ServeMux) {
 	prefix := "/api/v1/chat"
 	if a.surface() == "admin" {
@@ -78,7 +92,7 @@ func (a *App) chatStart(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if len(in.ProductID) > 100 || in.ProductID == "" {
+	if !validChatID(in.ProductID, 100) {
 		fail(w, 422, "INVALID_PRODUCT", "请选择要咨询的商品")
 		return
 	}
@@ -191,6 +205,9 @@ func (a *App) chatDetail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !chatConversationID(w, r) {
+		return
+	}
 	sql := "SELECT " + fmt.Sprintf(chatProjection, a.chatReadColumn()) + " FROM chat_conversations c JOIN users m ON m.id=c.member_id LEFT JOIN users ad ON ad.id=c.admin_id WHERE c." + a.chatOwnerColumn() + "=$1 AND c.id=$2"
 	rows, e := a.jsonRows(r.Context(), sql, u.ID, r.PathValue("id"))
 	if e != nil {
@@ -206,6 +223,9 @@ func (a *App) chatDetail(w http.ResponseWriter, r *http.Request) {
 func (a *App) chatMessages(w http.ResponseWriter, r *http.Request) {
 	u, ok := a.requireUser(w, r)
 	if !ok {
+		return
+	}
+	if !chatConversationID(w, r) {
 		return
 	}
 	before := int64(9223372036854775807)
@@ -267,6 +287,9 @@ func (a *App) chatSend(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !chatConversationID(w, r) {
+		return
+	}
 	var in struct {
 		Body     string `json:"body"`
 		ClientID string `json:"client_id"`
@@ -275,7 +298,7 @@ func (a *App) chatSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Body = strings.TrimSpace(in.Body)
-	if in.Body == "" || utf8.RuneCountInString(in.Body) > 2000 || len(in.ClientID) < 1 || len(in.ClientID) > 80 || strings.ContainsRune(in.Body, 0) {
+	if in.Body == "" || utf8.RuneCountInString(in.Body) > 2000 || !validChatID(in.ClientID, 80) || strings.ContainsRune(in.Body, 0) {
 		fail(w, 422, "INVALID_MESSAGE", "消息需为 1–2000 字，请重新输入")
 		return
 	}
@@ -335,6 +358,9 @@ func (a *App) chatRead(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !chatConversationID(w, r) {
+		return
+	}
 	if !a.memberLimit(w, r, "chat-read:"+u.ID, 240, time.Minute) {
 		return
 	}
@@ -365,6 +391,9 @@ func (a *App) chatRead(w http.ResponseWriter, r *http.Request) {
 func (a *App) chatClose(w http.ResponseWriter, r *http.Request) {
 	u, ok := a.requireUser(w, r)
 	if !ok {
+		return
+	}
+	if !chatConversationID(w, r) {
 		return
 	}
 	tag, e := a.DB.Exec(r.Context(), "UPDATE chat_conversations SET status='closed',updated_at=now() WHERE id=$1 AND "+a.chatOwnerColumn()+"=$2 AND status<>'closed'", r.PathValue("id"), u.ID)

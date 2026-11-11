@@ -287,6 +287,28 @@ func TestRecommendationColdStartVisibilityAndSummary(t *testing.T) {
 	}
 }
 
+func TestPopularityRejectsFutureSnapshot(t *testing.T) {
+	a, h, one, _ := personalFixture(t)
+	ctx := context.Background()
+	if err := a.RefreshRecommendations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// A restored or clock-skewed batch must not rank before it was computed.
+	if _, err := a.DB.Exec(ctx, `UPDATE product_hot_scores SET score=999,computed_at=now()+interval '1 hour' WHERE product_id='sale-old';
+UPDATE site_settings SET value=jsonb_set(jsonb_set(value,'{computed_at}',to_jsonb(now()+interval '1 hour')),'{has_engagement}','true') WHERE key='recommendation_state'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"hot", "recommended"} {
+		if ids := personalList(t, h, one, mode); len(ids) == 0 || ids[0] != "rent-new" {
+			t.Fatalf("future batch influenced %s ordering: %v", mode, ids)
+		}
+	}
+	home := memberData(t, h.call("GET", "/api/v1/home", nil, one, 200))
+	if home["recommendation_source"] != "newest-fallback" {
+		t.Fatal("future metadata claimed a current popularity batch", home["recommendation_source"])
+	}
+}
+
 func TestRecommendationViewAndFavoriteDedup(t *testing.T) {
 	a := integrationMemberApp(t)
 	ctx := context.Background()

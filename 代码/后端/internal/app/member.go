@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -137,7 +138,7 @@ func (a *App) memberList(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		status := r.URL.Query().Get("status")
-		if status != "" && !strings.Contains("|draft|pending|published|rejected|offline|", "|"+status+"|") {
+		if status != "" && !slices.Contains([]string{"draft", "pending", "published", "rejected", "offline"}, status) {
 			fail(w, 422, "INVALID_STATUS", "状态无效")
 			return
 		}
