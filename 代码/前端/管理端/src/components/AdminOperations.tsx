@@ -181,8 +181,6 @@ const fields = [
   ["window_days", "统计窗口（天）", 1, 30],
   ["view_weight", "每次有效浏览权重", 0, 100],
   ["favorite_weight", "首次收藏权重", 0, 100],
-  ["new_bonus", "新品加分", 0, 100],
-  ["new_hours", "新品时限（小时）", 1, 720],
 ] as const;
 export function AdminRecommendations() {
   const [result, setResult] = useState<AdminRecord | null>(null);
@@ -207,7 +205,7 @@ export function AdminRecommendations() {
       setDirty(false);
       if (refresh)
         setNotice(
-          "热门榜单已更新，刷新首页可查看。首页还会按区块去重，展示数量以实际商品为准。",
+          "热门榜单已更新，刷新首页可查看。热门、为你推荐、最新上架各自独立排序。",
         );
     } catch (e) {
       setError(message(e));
@@ -245,7 +243,7 @@ export function AdminRecommendations() {
       <div className="admin-heading">
         <div>
           <span className="eyebrow">网站运营</span>
-          <h1>热门推荐</h1>
+          <h1>热门榜单</h1>
           <p>
             生效版本：{result?.rule_version ?? "—"} · 最近计算：
             {date(result?.computed_at)}
@@ -291,13 +289,13 @@ export function AdminRecommendations() {
                   </p>
                   <p className="formula">
                     浏览 × {config.view_weight} + 收藏 ×{" "}
-                    {config.favorite_weight} + 符合条件的新品加分
+                    {config.favorite_weight}
                   </p>
                   <p>
-                    算例：100 次有效浏览、10 次有效收藏，非新品得分为{" "}
+                    算例：100 次有效浏览、10 次有效收藏，热度分为{" "}
                     {100 * Number(config.view_weight || 0) +
                       10 * Number(config.favorite_weight || 0)}
-                    。旧站迁移商品不加新品分。
+                    。上架时间不加分；个性化推荐另按用户浏览匹配。
                   </p>
                 </div>
                 <div className="panel">
@@ -320,10 +318,10 @@ export function AdminRecommendations() {
               </div>
               <details className="admin-advanced ranking-advanced">
                 <summary>
-                  调整推荐权重（高级设置）{dirty ? " · 有修改未保存" : ""}
+                  调整热门权重（高级设置）{dirty ? " · 有修改未保存" : ""}
                 </summary>
                 <p>
-                  日常运营无需修改。调整后先保存参数，再更新榜单。修改只影响自动推荐排序。
+                  日常运营无需修改。调整后先保存参数，再更新榜单。修改只影响热门榜，不改变个人推荐偏好或最新上架顺序。
                 </p>
                 <form
                   className="member-form admin-resource-form"

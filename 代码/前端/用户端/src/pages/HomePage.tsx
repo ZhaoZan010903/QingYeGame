@@ -7,10 +7,14 @@ import { useLoad } from '../lib-use';
 import { AssetCard, StateView } from '../components/shared';
 import { HomeEntrance } from '../components/HomeEntrance';
 import { EditorialCarousel } from '../components/EditorialCarousel';
+import { useSession } from '../context';
+import { RecommendationPreferences } from '../components/RecommendationPreferences';
 
 export function HomePage() {
-  const result = useLoad(() => api.home(), 'home');
+  const { user } = useSession();
+  const result = useLoad(() => api.home(), `home:${user?.id ?? 'visitor'}`);
   const presentation = result.data?.presentation ?? defaultHomePresentation;
+  const personalizationSource = result.data?.personalizationSource;
   const sections = useMemo(
     () => (result.data ? selectHomeSections(result.data, presentation.sections) : []),
     [result.data, presentation.sections],
@@ -31,19 +35,34 @@ export function HomePage() {
               return (
                 <section
                   className="recommendation-section home-product-section page-width mx-auto"
-                  id={mode === 'hot' ? 'recommendations' : 'new-arrivals'}
+                  id={
+                    {
+                      hot: 'popular-accounts',
+                      recommended: 'recommendations',
+                      newest: 'new-arrivals',
+                    }[mode]
+                  }
                   aria-labelledby={`${mode}-heading`}
                   key={mode}
                 >
                   <div className="section-heading">
                     <div>
                       <h2 id={`${mode}-heading`}>{title}</h2>
-                      <p className="home-section-description">{description}</p>
+                      <p className="home-section-description">
+                        {mode === 'recommended' && personalizationSource !== 'browsing'
+                          ? personalizationSource === 'disabled'
+                            ? '个性化推荐已关闭，当前展示热门账号。'
+                            : '还没有足够的浏览记录，先看看大家关注的账号。'
+                          : description}
+                      </p>
                     </div>
                     <Link className="section-more" to={`/accounts?sort=${mode}`}>
                       查看全部 <ArrowRight />
                     </Link>
                   </div>
+                  {mode === 'recommended' && !isDemo && (
+                    <RecommendationPreferences compact onChange={result.retry} />
+                  )}
                   {products.length ? (
                     <div className="recommendation-grid home-product-grid" id={`${mode}-grid`}>
                       {products.map((p) => (
@@ -58,7 +77,7 @@ export function HomePage() {
                       className="recommendation-explainer home-ranking-note"
                       to="/help/recommendation"
                     >
-                      {isDemo ? '演示排序说明' : '了解推荐规则'} <ArrowUpRight />
+                      {isDemo ? '演示排序说明' : '了解热门与推荐规则'} <ArrowUpRight />
                     </Link>
                   )}
                 </section>

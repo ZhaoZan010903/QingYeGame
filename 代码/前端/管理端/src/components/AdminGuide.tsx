@@ -36,11 +36,11 @@ export const guides = {
   home: {
     title: "修改首页内容",
     to: "/settings",
-    where: "首页 · 热门推荐",
+    where: "首页 · 热门榜单",
     steps: ["找到修改位置", "修改标题和数量", "保存并查看首页"],
     notes: [
-      "进入首页装修，选择“热门推荐”。选中区域会高亮。",
-      "修改标题和展示数量。这里调整展示，推荐排序到“热门推荐”中管理。",
+      "进入首页装修，选择“热门榜单”。选中区域会高亮。",
+      "修改标题和展示数量。这里调整展示，推荐排序到“热门榜单”中管理。",
       "保存后刷新用户站。示意预览只用于确认位置，实际商品来自当前榜单。",
     ],
   },
@@ -80,7 +80,7 @@ export function DemoContent({
   const [step, setStep] = useState(0);
   const [title, setTitle] = useState(
     kind === "home"
-      ? "热门推荐"
+      ? "热门榜单"
       : kind === "contact"
         ? "清叶客服"
         : "QQ 炫舞 · 演示账号",
@@ -317,9 +317,9 @@ export function AdminHelp() {
           </p>
         </details>
         <details>
-          <summary>热门推荐和首页轮播有什么区别？</summary>
+          <summary>热门榜单和首页轮播有什么区别？</summary>
           <p>
-            热门推荐根据有效浏览和收藏自动排序；轮播使用人工精选。要更换轮播商品，请在商品编辑的“检查并上架”中设置首页精选顺序。
+            热门榜单根据有效浏览和收藏自动排序；轮播使用人工精选。要更换轮播商品，请在商品编辑的“检查并上架”中设置首页精选顺序。
           </p>
         </details>
         <details>

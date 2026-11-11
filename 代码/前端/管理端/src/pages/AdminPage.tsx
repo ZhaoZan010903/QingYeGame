@@ -35,6 +35,8 @@ import {
 } from "../components/AdminOperations";
 import type { ProductPage } from "../types";
 import { AdminDashboard } from "../components/AdminDashboard";
+import { AdminProductView } from "../components/AdminProductView";
+import { adminProductID } from "../lib/product-links";
 import { ChatPage } from "../components/ChatPage";
 import { useChat } from "../components/ChatNotifications";
 import { AdminHelp, GuideButton } from "../components/AdminGuide";
@@ -298,6 +300,7 @@ export function AdminPage() {
   const { "*": path = "" } = useParams();
   const resources: Resource[] = ["contacts", "pages", "categories", "settings"];
   const tab = path.replace(/\/$/, "");
+  const detailID = adminProductID(tab);
   const groups = [
     {
       label: "日常工作",
@@ -312,7 +315,7 @@ export function AdminPage() {
       label: "网站运营",
       items: [
         ["settings", "首页装修", PanelsTopLeft],
-        ["recommendations", "热门推荐", TrendingUp],
+        ["recommendations", "热门榜单", TrendingUp],
         ["contacts", "客服与二维码", Headphones],
         ["categories", "分类与筛选", ListFilter],
         ["pages", "说明与协议", FileText],
@@ -362,6 +365,8 @@ export function AdminPage() {
             <AdminDashboard />
           ) : tab === "chat" ? (
             <ChatPage />
+          ) : detailID ? (
+            <AdminProductView key={detailID} id={detailID} />
           ) : tab === "help" ? (
             <AdminHelp />
           ) : tab === "products" || tab === "reviews" ? (

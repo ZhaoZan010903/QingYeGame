@@ -244,7 +244,7 @@ func productOrder(sort string) (string, error) {
 		return "p.manual_rank ASC NULLS LAST,p.published_at DESC NULLS LAST,p.id", nil
 	case "newest":
 		return "p.published_at DESC NULLS LAST,p.id", nil
-	case "hot":
+	case "hot", "recommended":
 		return "COALESCE((SELECT score FROM product_hot_scores h WHERE h.product_id=p.id AND h.computed_at>=now()-interval '60 minutes'),0) DESC,p.published_at DESC NULLS LAST,p.id", nil
 	case "price_asc", "price-up":
 		return "p.price_amount ASC NULLS LAST,p.id", nil
@@ -339,6 +339,13 @@ func (a *App) publicProducts(w http.ResponseWriter, r *http.Request) {
 				args = append(args, key, values)
 				where += fmt.Sprintf(" AND ((p.attributes->>$%[1]d)=ANY($%[2]d::text[]) OR (jsonb_typeof(p.attributes->$%[1]d)='array' AND (p.attributes->$%[1]d) ?| $%[2]d::text[]))", len(args)-1, len(args))
 			}
+		}
+	}
+	if q.Get("sort") == "recommended" {
+		order, _, e = a.personalizedOrder(r, &where, &args)
+		if e != nil {
+			a.dbError(w, e)
+			return
 		}
 	}
 	items, total, e := a.productRows(r.Context(), where, args, order, limit, offset)

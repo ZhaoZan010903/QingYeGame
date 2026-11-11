@@ -520,6 +520,8 @@ export const api = {
     return {
       featured: (d.featured ?? []).map(productFrom),
       hot: (d.hot ?? []).map(productFrom),
+      recommended: (d.recommended ?? []).map(productFrom),
+      personalizationSource: d.personalization_source,
       newest: (d.newest ?? []).map(productFrom),
       ruleVersion: d.rule_version,
       computedAt: d.computed_at,

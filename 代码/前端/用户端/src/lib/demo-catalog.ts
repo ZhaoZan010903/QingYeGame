@@ -91,12 +91,15 @@ export function demoHome() {
   const inventory = {
     featured,
     hot: [...fixtureProducts].sort(demoHot),
+    recommended: [...fixtureProducts].sort(demoHot),
     newest: [...fixtureProducts].sort(stableNewest),
   };
   const sections = selectHomeSections(inventory, presentation.sections);
   return {
     featured,
     hot: sections.find((section) => section.source === 'hot')?.products ?? [],
+    recommended: sections.find((section) => section.source === 'recommended')?.products ?? [],
+    personalizationSource: 'cold-start' as const,
     newest: sections.find((section) => section.source === 'newest')?.products ?? [],
     presentation,
     ruleVersion: 'demo-v3',

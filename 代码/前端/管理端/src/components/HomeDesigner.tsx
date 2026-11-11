@@ -14,11 +14,13 @@ import {
 } from "../lib/home-content";
 import { publicSite } from "../lib/admin-ux";
 
-type Zone = "editorial" | "hot" | "newest" | "shortcuts" | "publishing";
+type Zone =
+  "editorial" | "hot" | "recommended" | "newest" | "shortcuts" | "publishing";
 const zones: { key: Zone; title: string; where: string }[] = [
   { key: "editorial", title: "精选轮播", where: "首页上方 · 主视觉下方" },
   { key: "shortcuts", title: "快捷入口", where: "精选轮播下方 · 分类入口" },
-  { key: "hot", title: "热门推荐", where: "首页商品区 · 自动推荐" },
+  { key: "hot", title: "热门账号", where: "首页商品区 · 浏览与收藏热度" },
+  { key: "recommended", title: "为你推荐", where: "首页商品区 · 根据个人浏览" },
   { key: "newest", title: "最新上架", where: "首页商品区 · 按上架时间" },
   { key: "publishing", title: "发布邀请", where: "首页下方 · 发布账号入口" },
 ];
@@ -73,7 +75,7 @@ export function HomeDesigner({
     });
   const enabled = !!section;
   function toggleSection() {
-    const source = zone as "hot" | "newest";
+    const source = zone as "hot" | "recommended" | "newest";
     onChange({
       ...value,
       sections: enabled
@@ -149,7 +151,13 @@ export function HomeDesigner({
               onClick={() => setZone(item.source)}
             >
               <span className="zone-tag">
-                {item.source === "hot" ? "热门推荐" : "最新上架"}
+                {
+                  {
+                    hot: "热门账号",
+                    recommended: "为你推荐",
+                    newest: "最新上架",
+                  }[item.source]
+                }
               </span>
               <strong>{item.title}</strong>
               <small>{item.description}</small>
@@ -255,7 +263,7 @@ export function HomeDesigner({
             </div>
           </>
         )}
-        {(zone === "hot" || zone === "newest") && (
+        {(zone === "hot" || zone === "newest" || zone === "recommended") && (
           <>
             <label className="switch-row">
               <span>
@@ -322,9 +330,16 @@ export function HomeDesigner({
                 {zone === "hot" && (
                   <div className="inline-help">
                     <p>
-                      这里管理显示内容。想了解排序或更新榜单，请到热门推荐。
+                      这里管理显示内容。想了解排序或更新榜单，请到热门榜单。
                     </p>
-                    <Link to="/recommendations">管理热门推荐 →</Link>
+                    <Link to="/recommendations">管理热门榜单 →</Link>
+                  </div>
+                )}
+                {zone === "recommended" && (
+                  <div className="inline-help">
+                    <p>
+                      系统根据每位用户的近期浏览选择账号；这里仅设置标题、数量和位置。没有浏览记录或关闭个性化推荐的用户会看到热门账号。
+                    </p>
                   </div>
                 )}
               </>

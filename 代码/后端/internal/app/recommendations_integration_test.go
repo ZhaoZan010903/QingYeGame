@@ -130,8 +130,8 @@ func TestRecommendationCalendarBoundariesAndRules(t *testing.T) {
 	if scores["engaged"] != [4]int64{13, 3, 2, 0} {
 		t.Fatalf("calendar/cutoff boundary wrong: %v", scores["engaged"])
 	}
-	if scores["recent"][3] != 10 || scores["future"][3] != 0 || scores["legacy"][3] != 0 {
-		t.Fatalf("new bonus boundaries or legacy provenance wrong: %v", scores)
+	if scores["recent"][3] != 0 || scores["future"][3] != 0 || scores["legacy"][3] != 0 {
+		t.Fatalf("publication time must not earn popularity: %v", scores)
 	}
 	var computed time.Time
 	var state map[string]any
@@ -149,7 +149,7 @@ func TestRecommendationCalendarBoundariesAndRules(t *testing.T) {
 	if err := a.refreshRecommendationsAt(ctx, asOf.Add(-time.Microsecond)); err != nil {
 		t.Fatal(err)
 	}
-	if got := recommendationScores(t, a)["engaged"]; got != [4]int64{24, 4, 2, 10} {
+	if got := recommendationScores(t, a)["engaged"]; got != [4]int64{14, 4, 2, 0} {
 		t.Fatalf("midnight rollover wrong: %v", got)
 	}
 	if err := a.refreshRecommendationsAt(ctx, asOf); err != nil {
@@ -174,7 +174,7 @@ func TestRecommendationCalendarBoundariesAndRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	scores = recommendationScores(t, a)
-	if scores["engaged"][0] != 20 || scores["recent"][3] != 37 {
+	if scores["engaged"][0] != 20 || scores["recent"][3] != 0 {
 		t.Fatalf("new rule not applied: %v", scores)
 	}
 	if err = a.DB.QueryRow(ctx, "SELECT value FROM site_settings WHERE key='recommendation_state'").Scan(&state); err != nil || state["rule_version"] != "rules-v2" {
@@ -248,12 +248,12 @@ func TestRecommendationColdStartVisibilityAndSummary(t *testing.T) {
 	if len(home.Data.Featured) != 1 || home.Data.Featured[0]["description"] == nil || len(home.Data.Newest) != 1 || home.Data.Newest[0]["id"] != "newest" || len(home.Data.Hot) != 2 {
 		t.Fatalf("homepage configured sections not honored: %s", w.Body.String())
 	}
-	seen := map[string]bool{}
 	for _, list := range [][]map[string]any{home.Data.Featured, home.Data.Newest, home.Data.Hot} {
+		seen := map[string]bool{}
 		for _, p := range list {
 			id := p["id"].(string)
 			if seen[id] {
-				t.Fatal("homepage repeats a product")
+				t.Fatal("one homepage section repeats a product")
 			}
 			seen[id] = true
 		}

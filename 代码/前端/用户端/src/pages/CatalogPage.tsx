@@ -7,6 +7,7 @@ import { AssetCard, Modal, StateView, unitLabels } from '../components/shared';
 import { CatalogSearch } from '../components/CatalogSearch';
 import { CatalogSelect } from '../components/CatalogSelect';
 import type { FilterGroup } from '../types';
+import { useSession } from '../context';
 import '../catalog.css';
 const defaultFilters: FilterGroup[] = [
   {
@@ -179,7 +180,11 @@ export function Catalog({ home = false }: { home?: boolean }) {
     request.delete(group.key);
   });
   if (Object.keys(filterValues).length) request.set('filters', JSON.stringify(filterValues));
-  const result = useLoad(() => api.products(request), request.toString());
+  const { user } = useSession();
+  const result = useLoad(
+    () => api.products(request),
+    `${request.toString()}:${user?.id ?? 'visitor'}`,
+  );
   const update = (p: URLSearchParams) => {
     p.delete('cursor');
     setParams(p, { preventScrollReset: true });
@@ -309,7 +314,8 @@ export function Catalog({ home = false }: { home?: boolean }) {
                 onChange={sort}
                 options={[
                   { value: 'featured', label: '精选推荐' },
-                  { value: 'hot', label: '热门推荐' },
+                  { value: 'hot', label: '热门账号' },
+                  { value: 'recommended', label: '为你推荐' },
                   { value: 'newest', label: '最新上架' },
                   {
                     value: 'price-up',

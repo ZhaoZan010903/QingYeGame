@@ -322,8 +322,9 @@ class Suite:
         presentation = {"editorial": {"title": "Acceptance", "description": "Editable", "intervalMs": 5000}, "sections": [{"source": "hot", "title": "Hot", "description": "", "limit": 3}, {"source": "newest", "title": "New", "description": "", "limit": 3}], "shortcuts": [], "publishing": {"title": "Publish", "description": "Test", "action": "Submit"}}
         self.call("admin", "PUT", "/api/v1/admin/settings/home_presentation", {"value": presentation})
         home = self.call("anonymous", "GET", "/api/v1/home").data
-        home_ids = [p["id"] for key in ("featured", "hot", "newest") for p in home.get(key, [])]
-        self.check("home sections do not repeat products", len(home_ids) == len(set(home_ids)))
+        self.check("each home section has unique products; rankings remain independent", all(
+            len(items) == len({p["id"] for p in items})
+            for items in (home.get(key, []) for key in ("featured", "hot", "recommended", "newest"))))
         other_id = self.fixtures["other_user_id"]
         self.call("admin", "PATCH", f"/api/v1/admin/users/{other_id}", {"enabled": False})
         self.call("other", "GET", "/api/v1/me", status=401)

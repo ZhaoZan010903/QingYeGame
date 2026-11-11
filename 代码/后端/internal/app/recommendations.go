@@ -22,7 +22,7 @@ type recommendationConfig struct {
 }
 
 func defaultRecommendations() recommendationConfig {
-	return recommendationConfig{"integration-v1", 7, 1, 5, 10, 72}
+	return recommendationConfig{"engagement-v2", 7, 1, 5, 0, 72}
 }
 func parseRecommendations(raw []byte) (recommendationConfig, error) {
 	var c recommendationConfig
@@ -34,6 +34,8 @@ func parseRecommendations(raw []byte) (recommendationConfig, error) {
 	if strings.TrimSpace(c.Version) == "" || len(c.Version) > 40 || c.WindowDays < 1 || c.WindowDays > 30 || c.NewHours < 1 || c.NewHours > 720 || c.ViewWeight < 0 || c.ViewWeight > 100 || c.FavoriteWeight < 0 || c.FavoriteWeight > 100 || c.NewBonus < 0 || c.NewBonus > 100 {
 		return c, errors.New("推荐参数超出允许范围")
 	}
+	// Legacy keys remain readable; publication time never earns popularity points.
+	c.NewBonus = 0
 	return c, nil
 }
 func loadRecommendations(ctx context.Context, q rowQuerier) (recommendationConfig, error) {
@@ -54,7 +56,7 @@ func (a *App) RefreshRecommendations(ctx context.Context) error {
 
 // One as-of instant defines the whole batch, including its persisted rule metadata.
 // The window covers Beijing calendar days, including today up to asOf. Future
-// timestamps never earn engagement or a new-listing bonus.
+// timestamps never earn engagement. Personal recommendations are independent.
 func (a *App) refreshRecommendationsAt(ctx context.Context, asOf time.Time) error {
 	tx, err := a.DB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
@@ -79,16 +81,16 @@ SELECT 1 FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=h.pr
 		return err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO product_hot_scores(product_id,score,views,favorites,new_bonus,batch_id,computed_at)
- SELECT p.id,v.n::bigint*$2::int+f.n::bigint*$3::int+CASE WHEN p.source<>'legacy' AND p.published_at>$7::timestamptz-make_interval(hours=>$4) AND p.published_at<=$7 THEN $5::int ELSE 0 END,
- v.n,f.n,CASE WHEN p.source<>'legacy' AND p.published_at>$7::timestamptz-make_interval(hours=>$4) AND p.published_at<=$7 THEN $5::int ELSE 0 END,$1,$7
+ SELECT p.id,v.n::bigint*$2::int+f.n::bigint*$3::int,
+ v.n,f.n,0,$1,$5
  FROM products p JOIN categories c ON c.id=p.category_id
  CROSS JOIN LATERAL(SELECT count(*)::int n FROM product_views_daily WHERE product_id=p.id
-   AND viewed_date BETWEEN ($7::timestamptz AT TIME ZONE 'Asia/Shanghai')::date-($6::int-1) AND ($7::timestamptz AT TIME ZONE 'Asia/Shanghai')::date
-   AND created_at<=$7)v
+   AND viewed_date BETWEEN ($5::timestamptz AT TIME ZONE 'Asia/Shanghai')::date-($4::int-1) AND ($5::timestamptz AT TIME ZONE 'Asia/Shanghai')::date
+   AND created_at<=$5)v
  CROSS JOIN LATERAL(SELECT count(*)::int n FROM favorites WHERE product_id=p.id AND active
-   AND created_at>=(date_trunc('day',$7::timestamptz AT TIME ZONE 'Asia/Shanghai')-make_interval(days=>$6::int-1)) AT TIME ZONE 'Asia/Shanghai'
-   AND created_at<=$7)f
- WHERE `+visibleSQL+` ON CONFLICT(product_id) DO UPDATE SET score=EXCLUDED.score,views=EXCLUDED.views,favorites=EXCLUDED.favorites,new_bonus=EXCLUDED.new_bonus,batch_id=EXCLUDED.batch_id,computed_at=EXCLUDED.computed_at`, batch, config.ViewWeight, config.FavoriteWeight, config.NewHours, config.NewBonus, config.WindowDays, asOf)
+   AND created_at>=(date_trunc('day',$5::timestamptz AT TIME ZONE 'Asia/Shanghai')-make_interval(days=>$4::int-1)) AT TIME ZONE 'Asia/Shanghai'
+   AND created_at<=$5)f
+ WHERE `+visibleSQL+` ON CONFLICT(product_id) DO UPDATE SET score=EXCLUDED.score,views=EXCLUDED.views,favorites=EXCLUDED.favorites,new_bonus=EXCLUDED.new_bonus,batch_id=EXCLUDED.batch_id,computed_at=EXCLUDED.computed_at`, batch, config.ViewWeight, config.FavoriteWeight, config.WindowDays, asOf)
 	if err != nil {
 		return err
 	}

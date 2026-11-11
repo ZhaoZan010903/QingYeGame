@@ -78,6 +78,8 @@ export interface HomeData {
   presentation?: HomePresentation;
   featured: Product[];
   hot: Product[];
+  recommended?: Product[];
+  personalizationSource?: "browsing" | "cold-start" | "disabled";
   newest: Product[];
   ruleVersion?: string;
   computedAt?: string;

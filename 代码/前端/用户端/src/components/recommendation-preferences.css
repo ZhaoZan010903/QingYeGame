@@ -1,0 +1,37 @@
+.recommendation-preferences {
+  margin: 0 0 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  max-width: 100%;
+}
+.recommendation-preferences summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--text-secondary);
+  padding: 8px 0;
+}
+.recommendation-preferences-body {
+  margin-top: 8px;
+  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--bg-card);
+  line-height: 1.8;
+}
+.recommendation-preferences-body p {
+  margin: 0 0 12px;
+}
+.recommendation-preferences-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin: 12px 0;
+}
+.recommendation-preferences-actions .button-outline {
+  padding: 9px 15px;
+  font-size: 13px;
+}
+.recommendation-preferences-body small {
+  color: var(--text-secondary);
+}

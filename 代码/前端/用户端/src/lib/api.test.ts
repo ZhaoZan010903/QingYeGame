@@ -57,7 +57,7 @@ describe('配置校验', () => {
   });
 });
 describe('真实接口与演示边界', () => {
-  it('演示首页分区各有独立库存，保留热门及最新排序且跨区不重复', async () => {
+  it('演示首页各区独立排序，最新商品不因入选其他分区而消失', async () => {
     vi.stubEnv('VITE_DATA_MODE', 'demo');
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
@@ -66,25 +66,20 @@ describe('真实接口与演示边界', () => {
     expect(home.featured).toHaveLength(3);
     expect(home.hot).toHaveLength(6);
     expect(home.newest).toHaveLength(6);
-    const all = [...home.featured, ...home.hot, ...home.newest];
-    expect(new Set(all.map((p) => p.id)).size).toBe(all.length);
-    expect(home.hot.map((p) => p.id)).toEqual([
-      'QY-02431',
-      'QY-02439',
-      'QY-02452',
-      'QY-02481',
-      'QY-02445',
-      'QY-02488',
-    ]);
-    // Equal publication dates use the stable product identifier as the tie-breaker.
-    expect(home.newest.map((p) => p.id)).toEqual([
-      'QY-02466',
-      'QY-02496',
-      'QY-02503',
-      'QY-02511',
-      'QY-02519',
-      'QY-02527',
-    ]);
+    const { fixtureProducts, demoHot, stableNewest } = await import('./demo-catalog');
+    expect(home.hot.map((p) => p.id)).toEqual(
+      [...fixtureProducts]
+        .sort(demoHot)
+        .slice(0, 6)
+        .map((p) => p.id),
+    );
+    expect(home.newest.map((p) => p.id)).toEqual(
+      [...fixtureProducts]
+        .sort(stableNewest)
+        .slice(0, 6)
+        .map((p) => p.id),
+    );
+    expect(home.recommended).toEqual(home.hot);
     expect(fetch).not.toHaveBeenCalled();
   });
   it('真实服务失败不会回退到样例商品', async () => {
@@ -154,7 +149,7 @@ describe('真实接口与演示边界', () => {
       {
         source: 'hot',
         title: '本周关注',
-        description: '此刻，值得关注的珍藏。',
+        description: '大家正在浏览和收藏的账号。',
         limit: 1,
       },
     ]);

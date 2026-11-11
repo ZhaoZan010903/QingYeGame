@@ -173,12 +173,12 @@ func TestCoreCatalogImportAndAdministration(t *testing.T) {
 	if err = json.Unmarshal(w.Body.Bytes(), &home); err != nil {
 		t.Fatal(err)
 	}
-	seen := map[string]bool{}
 	for _, list := range [][]map[string]any{home.Data.Featured, home.Data.Hot, home.Data.Newest} {
+		seen := map[string]bool{}
 		for _, p := range list {
 			pid := p["id"].(string)
 			if seen[pid] {
-				t.Fatal("homepage duplicated product")
+				t.Fatal("homepage section duplicated product")
 			}
 			seen[pid] = true
 		}

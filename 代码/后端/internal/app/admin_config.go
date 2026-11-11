@@ -332,7 +332,7 @@ func validatePresentation(raw []byte) error {
 	}
 	seen := map[string]bool{}
 	for _, s := range p.Sections {
-		if s.Source != "hot" && s.Source != "newest" || seen[s.Source] || s.Limit < 1 || s.Limit > 24 || !textOK(s.Title, 32) || utf8.RuneCountInString(s.Description) > 120 {
+		if s.Source != "hot" && s.Source != "newest" && s.Source != "recommended" || seen[s.Source] || s.Limit < 1 || s.Limit > 24 || !textOK(s.Title, 32) || utf8.RuneCountInString(s.Description) > 120 {
 			return errors.New("分区来源、数量或文案无效")
 		}
 		seen[s.Source] = true

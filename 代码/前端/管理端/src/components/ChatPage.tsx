@@ -1,3 +1,4 @@
+import { adminProductPath } from "../lib/product-links";
 import {
   useCallback,
   useEffect,
@@ -47,13 +48,10 @@ const date = (value: string) =>
   });
 function ProductCard({ product }: { product: ChatProduct }) {
   const [failed, setFailed] = useState(false);
-  const site = chatAdmin
-    ? String(import.meta.env.VITE_PUBLIC_SITE_URL || "").replace(/\/$/, "")
-    : "";
   return (
     <a
       className="chat-product-card"
-      href={`${site}/accounts/${encodeURIComponent(product.id)}`}
+      href={adminProductPath(product.id)}
       target="_blank"
       rel="noreferrer"
     >
@@ -611,7 +609,7 @@ export function ChatPage() {
                   <div className="chat-closed">
                     本次咨询已结束，记录保留供查阅。
                     <a
-                      href={`${chatAdmin ? String(import.meta.env.VITE_PUBLIC_SITE_URL || "").replace(/\/$/, "") : ""}/accounts/${conversation.product.id}`}
+                      href={adminProductPath(conversation.product.id)}
                       target="_blank"
                       rel="noreferrer"
                     >

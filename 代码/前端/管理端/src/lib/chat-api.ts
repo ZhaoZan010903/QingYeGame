@@ -19,7 +19,9 @@ export const chatApi = {
   async ticket(
     transport: TransportKind = "webtransport",
   ): Promise<TransportTicket> {
-    const r = await request(`${prefix}/transport-ticket`, "POST", {});
+    const r = await request(`${prefix}/transport-ticket`, "POST", {
+      transport,
+    });
     return r.data as TransportTicket;
   },
   async list(offset = 0): Promise<ChatList> {

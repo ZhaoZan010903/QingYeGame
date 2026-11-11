@@ -13,11 +13,12 @@ describe('首页可配置展示边界', () => {
     const value = resolveHomePresentation();
     expect(value.sections.map(({ source, limit }) => [source, limit])).toEqual([
       ['hot', 6],
+      ['recommended', 6],
       ['newest', 6],
     ]);
     value.sections[0].title = '修改';
     value.shortcuts[0].title = '修改';
-    expect(defaultHomePresentation.sections[0].title).toBe('热门推荐');
+    expect(defaultHomePresentation.sections[0].title).toBe('热门账号');
     expect(defaultHomePresentation.shortcuts[0].title).toBe('账号出售');
   });
 
@@ -46,7 +47,7 @@ describe('首页可配置展示边界', () => {
     expect(resolveHomePresentation({ sections: [], shortcuts: [] }).sections).toEqual([]);
     expect(resolveHomePresentation({ sections: [], shortcuts: [] }).shortcuts).toEqual([]);
     expect(resolveHomePresentation({ sections: null, shortcuts: 'invalid' }).sections).toHaveLength(
-      2,
+      3,
     );
     expect(
       resolveHomePresentation({ sections: null, shortcuts: 'invalid' }).shortcuts,
@@ -67,7 +68,7 @@ describe('首页可配置展示边界', () => {
     ]);
   });
 
-  it('按配置顺序去重和限量，不重排后端结果，不填入样例库存', () => {
+  it('各分区独立去重和限量，不重排后端结果，不填入样例库存', () => {
     const data = {
       featured: [product('featured')],
       newest: ['featured', 'b', 'a', 'b'].map(product),
@@ -82,8 +83,8 @@ describe('首页可配置展示边界', () => {
     });
     const sections = selectHomeSections(data, presentation.sections);
     expect(sections.map(({ products }) => products.map(({ id }) => id))).toEqual([
-      ['b', 'a'],
-      ['c'],
+      ['featured', 'b', 'a'],
+      ['b'],
     ]);
     expect(data).toEqual(before);
     expect(

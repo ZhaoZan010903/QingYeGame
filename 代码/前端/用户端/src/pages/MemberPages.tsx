@@ -14,6 +14,7 @@ import {
 import { api, isDemo, ApiError } from '../lib/api';
 import type { Product } from '../types';
 import { useSession, useUi } from '../context';
+import { RecommendationPreferences } from '../components/RecommendationPreferences';
 import '../member.css';
 
 export const listingStatus: Record<Product['status'], string> = {
@@ -350,6 +351,7 @@ export function MemberPage() {
                   </div>
                 </form>
               </section>
+              {!isDemo && <RecommendationPreferences />}
               <div className="member-help-row">
                 <Link to="/forgot-password?returnTo=%2Fme">
                   <ShieldCheck size={19} aria-hidden="true" />

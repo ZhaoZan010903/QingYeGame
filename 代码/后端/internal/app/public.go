@@ -18,8 +18,10 @@ func (a *App) registerPublic(m *http.ServeMux) {
 	m.HandleFunc("GET /api/v1/products", a.publicProducts)
 	m.HandleFunc("GET /api/v1/products/{id}", a.publicProduct)
 	m.HandleFunc("GET /api/v1/products/{id}/images", a.publicImages)
-	m.HandleFunc("POST /api/v1/products/{id}/view", a.recordView)
+	m.HandleFunc("POST /api/v1/products/{id}/view", a.memberMutation(a.recordView))
 	m.HandleFunc("GET /api/v1/home", a.home)
+	m.HandleFunc("GET /api/v1/recommendations/profile", a.getInterestProfile)
+	m.HandleFunc("PATCH /api/v1/recommendations/profile", a.memberMutation(a.updateInterestProfile))
 	m.HandleFunc("GET /api/v1/contacts", a.publicContacts)
 	m.HandleFunc("GET /api/v1/pages/{slug}", a.publicPage)
 }
@@ -137,12 +139,16 @@ func (a *App) recordView(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: "qy_visitor", Value: visitor + "." + a.visitorSignature(visitor), Path: "/", MaxAge: 31536000, HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteLaxMode})
 	}
 	hash := sha256.Sum256([]byte(visitor))
-	tag, e := a.DB.Exec(r.Context(), "INSERT INTO product_views_daily(product_id,visitor_hash,viewed_date) VALUES($1,$2,(now() AT TIME ZONE 'Asia/Shanghai')::date) ON CONFLICT DO NOTHING", id, hex.EncodeToString(hash[:]))
+	var recorded bool
+	e = a.DB.QueryRow(r.Context(), `WITH inserted AS (
+ INSERT INTO product_views_daily(product_id,visitor_hash,viewed_date,last_seen_at) VALUES($1,$2,(now() AT TIME ZONE 'Asia/Shanghai')::date,now()) ON CONFLICT DO NOTHING RETURNING 1
+ ), touched AS (UPDATE product_views_daily SET last_seen_at=now() WHERE product_id=$1 AND visitor_hash=$2 AND viewed_date=(now() AT TIME ZONE 'Asia/Shanghai')::date)
+ SELECT EXISTS(SELECT 1 FROM inserted)`, id, hex.EncodeToString(hash[:])).Scan(&recorded)
 	if e != nil {
 		a.dbError(w, e)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"data": map[string]bool{"recorded": tag.RowsAffected() > 0}})
+	writeJSON(w, 200, map[string]any{"data": map[string]bool{"recorded": recorded}})
 }
 func (a *App) visitorSignature(id string) string {
 	h := hmac.New(sha256.New, []byte(a.Config.SessionSecret))
@@ -155,10 +161,8 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
-	seen := []string{}
 	for _, p := range featured {
 		publicProductFields(p)
-		seen = append(seen, p["id"].(string))
 	}
 	var presentation json.RawMessage
 	err = a.DB.QueryRow(r.Context(), "SELECT value FROM site_settings WHERE key='home_presentation'").Scan(&presentation)
@@ -166,27 +170,36 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		a.dbError(w, err)
 		return
 	}
-	sections := []homeSection{{Source: "hot", Limit: 6}, {Source: "newest", Limit: 6}}
+	sections := []homeSection{{Source: "hot", Limit: 6}, {Source: "recommended", Limit: 6}, {Source: "newest", Limit: 6}}
 	if len(presentation) > 0 {
 		var cfg homePresentation
 		if json.Unmarshal(presentation, &cfg) == nil {
 			sections = cfg.Sections
 		}
 	}
-	result := map[string]any{"featured": featured, "hot": []map[string]any{}, "newest": []map[string]any{}, "recommendation_source": "newest-fallback"}
+	result := map[string]any{"featured": featured, "hot": []map[string]any{}, "recommended": []map[string]any{}, "newest": []map[string]any{}, "recommendation_source": "newest-fallback", "personalization_source": "cold-start"}
 	for _, section := range sections {
 		order, err := productOrder(section.Source)
 		if err != nil || section.Limit < 1 || section.Limit > 24 {
 			continue
 		}
-		items, _, err := a.productRows(r.Context(), visibleSQL+" AND NOT(p.id=ANY($1::text[]))", []any{seen}, order, section.Limit, 0)
+		where, args := visibleSQL, []any{}
+		if section.Source == "recommended" {
+			var source string
+			order, source, err = a.personalizedOrder(r, &where, &args)
+			if err != nil {
+				a.dbError(w, err)
+				return
+			}
+			result["personalization_source"] = source
+		}
+		items, _, err := a.productRows(r.Context(), where, args, order, section.Limit, 0)
 		if err != nil {
 			a.dbError(w, err)
 			return
 		}
 		for _, p := range items {
 			publicProductSummary(p)
-			seen = append(seen, p["id"].(string))
 		}
 		result[section.Source] = items
 	}
