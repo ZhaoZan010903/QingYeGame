@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,15 +14,18 @@ import (
 	"qingye/backend/internal/domain/fault"
 	"qingye/backend/internal/domain/member"
 	"strconv"
-	"strings"
 )
 
 type MemberStore struct {
-	DB    *pgxpool.Pool
-	NewID func() string
+	DB            *pgxpool.Pool
+	NewID         func() string
+	CredentialKey string
 }
 
 func memberStoreError(err error) error {
+	if f, ok := fault.As(err); ok {
+		return f
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fault.New(fault.NotFound, "NOT_FOUND", "未找到资料")
 	}
@@ -66,7 +70,7 @@ func (s *MemberStore) imageAudit(ctx context.Context, tx pgx.Tx, u member.Actor,
 }
 
 // 幂等键先持有事务锁，首次并发请求也只创建一次。
-func replayProduct(ctx context.Context, tx pgx.Tx, user, scope, key string, body any) (string, string, error) {
+func replayProduct(ctx context.Context, tx pgx.Tx, user, scope, key string, body any, privateKey ...string) (string, string, error) {
 	if len(key) < 8 || len(key) > 128 {
 		return "", "", fault.New(fault.Conflict, "IDEMPOTENCY_CONFLICT", "request_id must be 8–128 characters")
 	}
@@ -75,6 +79,14 @@ func replayProduct(ctx context.Context, tx pgx.Tx, user, scope, key string, body
 		return "", "", err
 	}
 	hash := productReplayHash(raw)
+	if p, ok := body.(catalog.ProductInput); ok && p.PrivateCredentials != nil {
+		if len(privateKey) == 0 || privateKey[0] == "" {
+			return "", "", fault.New(fault.Unavailable, "CREDENTIAL_STORAGE_UNAVAILABLE", "私密资料存储尚未配置")
+		}
+		mac := hmac.New(sha256.New, []byte(privateKey[0]))
+		mac.Write(raw)
+		hash = hex.EncodeToString(mac.Sum(nil))
+	}
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, user+":"+scope+":"+key); err != nil {
 		return "", "", err
 	}
@@ -205,6 +217,7 @@ func (s *MemberStore) Favorite(ctx context.Context, u member.Actor, id string, a
 }
 
 func (s *MemberStore) Create(ctx context.Context, u member.Actor, input catalog.ProductInput) (map[string]any, error) {
+	catalog.NormalizeInput(&input)
 	if input.Attributes == nil {
 		input.Attributes = map[string]any{}
 	}
@@ -216,7 +229,7 @@ func (s *MemberStore) Create(ctx context.Context, u member.Actor, input catalog.
 	if err := ValidateProductInput(ctx, tx, input, false); err != nil {
 		return nil, fault.New(fault.Invalid, "INVALID_PRODUCT", err.Error())
 	}
-	replay, hash, err := replayProduct(ctx, tx, u.ID, "create-product", input.RequestID, input)
+	replay, hash, err := replayProduct(ctx, tx, u.ID, "create-product", input.RequestID, input, s.CredentialKey)
 	if err != nil {
 		return nil, productReplayError(err)
 	}
@@ -225,8 +238,14 @@ func (s *MemberStore) Create(ctx context.Context, u member.Actor, input catalog.
 		return s.productResult(ctx, replay)
 	}
 	id := s.NewID()
-	code := "QY-" + strings.ToUpper(strings.ReplaceAll(id, "-", "")[:10])
+	code, err := nextProductCode(ctx, tx, input.TradeType)
+	if err != nil {
+		return nil, memberStoreError(err)
+	}
 	_, err = tx.Exec(ctx, `INSERT INTO products(id,product_code,owner_id,category_id,title,trade_type,price_amount,price_unit,attributes,description,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'member')`, id, code, u.ID, input.CategoryID, input.Title, input.TradeType, input.PriceAmount, input.PriceUnit, input.Attributes, input.Description)
+	if err == nil {
+		err = saveProductExtras(ctx, tx, id, s.CredentialKey, input)
+	}
 	if err == nil {
 		err = recordProductReplay(ctx, tx, u.ID, "create-product", input.RequestID, hash, id)
 	}
@@ -240,6 +259,7 @@ func (s *MemberStore) Create(ctx context.Context, u member.Actor, input catalog.
 }
 
 func (s *MemberStore) Edit(ctx context.Context, u member.Actor, id string, input catalog.ProductInput) (map[string]any, error) {
+	catalog.NormalizeInput(&input)
 	if input.Attributes == nil {
 		input.Attributes = map[string]any{}
 	}
@@ -255,10 +275,20 @@ func (s *MemberStore) Edit(ctx context.Context, u member.Actor, id string, input
 	if err := member.CheckVersion(version, input.ExpectedVersion); err != nil {
 		return nil, err
 	}
+	var originalTrade string
+	if err = tx.QueryRow(ctx, "SELECT trade_type FROM products WHERE id=$1", id).Scan(&originalTrade); err != nil {
+		return nil, memberStoreError(err)
+	}
+	if originalTrade != input.TradeType {
+		return nil, fault.New(fault.Invalid, "TRADE_TYPE_IMMUTABLE", "已保存商品的租售类型不可更改，如需更换请新建资产")
+	}
 	if err := ValidateProductInput(ctx, tx, input, false); err != nil {
 		return nil, fault.New(fault.Invalid, "INVALID_PRODUCT", err.Error())
 	}
 	_, err = tx.Exec(ctx, `UPDATE products SET category_id=$1,title=$2,trade_type=$3,price_amount=$4,price_unit=$5,attributes=$6,description=$7,status='draft',version=version+1,approved_version=NULL,review_note='',updated_at=now() WHERE id=$8`, input.CategoryID, input.Title, input.TradeType, input.PriceAmount, input.PriceUnit, input.Attributes, input.Description, id)
+	if err == nil {
+		err = saveProductExtras(ctx, tx, id, s.CredentialKey, input)
+	}
 	if err == nil {
 		err = tx.Commit(ctx)
 	}
@@ -287,7 +317,7 @@ func (s *MemberStore) Transition(ctx context.Context, u member.Actor, id string,
 	}
 	if submit {
 		var p catalog.ProductInput
-		err = tx.QueryRow(ctx, `SELECT category_id,title,trade_type,price_amount::text,price_unit,attributes,description FROM products WHERE id=$1`, id).Scan(&p.CategoryID, &p.Title, &p.TradeType, &p.PriceAmount, &p.PriceUnit, &p.Attributes, &p.Description)
+		err = tx.QueryRow(ctx, `SELECT category_id,title,trade_type,price_amount::text,price_unit,attributes,description,rental_quotes,EXISTS(SELECT 1 FROM product_private_credentials pc WHERE pc.product_id=products.id) FROM products WHERE id=$1`, id).Scan(&p.CategoryID, &p.Title, &p.TradeType, &p.PriceAmount, &p.PriceUnit, &p.Attributes, &p.Description, &p.RentalQuotes, &p.HasPrivateCredentials)
 		if err != nil {
 			return nil, memberStoreError(err)
 		}
@@ -442,15 +472,33 @@ func (s *MemberStore) AppendImages(ctx context.Context, u member.Actor, id strin
 	if err != nil {
 		return nil, memberStoreError(err)
 	}
+	// Lock shared media in one stable order even when clients request opposite display orders.
+	mediaRows, err := tx.Query(ctx, `SELECT id,COALESCE(owner_id,''),status FROM media_files WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE`, input.MediaIDs)
+	if err != nil {
+		return nil, memberStoreError(err)
+	}
+	ready := map[string]bool{}
+	for mediaRows.Next() {
+		var mid, owner, state string
+		if err = mediaRows.Scan(&mid, &owner, &state); err != nil {
+			break
+		}
+		ready[mid] = owner == u.ID && state == "ready"
+	}
+	if err == nil {
+		err = mediaRows.Err()
+	}
+	mediaRows.Close()
+	if err != nil {
+		return nil, memberStoreError(err)
+	}
 	seen := map[string]bool{}
 	for _, mid := range input.MediaIDs {
 		if seen[mid] {
 			continue
 		}
 		seen[mid] = true
-		var owner, state string
-		err = tx.QueryRow(ctx, `SELECT COALESCE(owner_id,''),status FROM media_files WHERE id=$1 FOR UPDATE`, mid).Scan(&owner, &state)
-		if err != nil || owner != u.ID || state != "ready" {
+		if !ready[mid] {
 			return nil, fault.New(fault.Invalid, "MEDIA_NOT_READY", "只能使用本人已完成校验的图片")
 		}
 		var linked string

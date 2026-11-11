@@ -234,7 +234,7 @@ func TestRecommendationColdStartVisibilityAndSummary(t *testing.T) {
 	if got := recommendationListIDs(t, h, "/api/v1/products?sort=hot"); strings.Join(got, ",") != expected {
 		t.Fatalf("stale score did not fall back to newest: %v", got)
 	}
-	_, err := a.DB.Exec(ctx, `UPDATE products SET manual_rank=1 WHERE id='a'; INSERT INTO site_settings(key,value) VALUES('home_presentation','{"sections":[{"source":"newest","limit":1},{"source":"hot","limit":2}]}')`)
+	_, err := a.DB.Exec(ctx, `UPDATE products SET manual_rank=1 WHERE id='a'; INSERT INTO site_settings(key,value) VALUES('home_presentation','{"slides":[{"productId":"a","title":"人工精选标题","description":"独立编辑介绍","tradeLabel":"账号出售","serverLabel":"","priceLabel":"","imagePositionX":50,"imagePositionY":50,"imageFit":"contain","layout":"image-right","textAlign":"left","verticalAlign":"center"}],"sections":[{"source":"newest","limit":1},{"source":"hot","limit":2}]}')`)
 	if err != nil {
 		t.Fatal(err)
 	}

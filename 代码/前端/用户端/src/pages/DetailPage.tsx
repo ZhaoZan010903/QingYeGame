@@ -12,6 +12,7 @@ import { levelLabel } from '../../../共享/level';
 import { AssetArchive } from '../components/AssetArchive';
 import { quoteTerms } from '../lib/asset-copy';
 import '../gallery.css';
+import '../service-refinement.css';
 function DetailContent({
   product: p,
   reloadProduct,
@@ -29,7 +30,15 @@ function DetailContent({
   const location = useLocation();
   const quotes = quoteTerms(p.title + '\n' + p.description);
   const deposit = quotes.find((quote) => quote.label === '押金');
-  const rates = p.mode === 'rent' ? quotes.filter((quote) => quote.label !== '押金') : [];
+  const rates =
+    p.mode === 'rent'
+      ? p.rentalQuotes?.length
+        ? p.rentalQuotes.map((q) => ({
+            label: { hour: '时租', day: '日租', week: '周租', month: '月租' }[q.unit],
+            value: q.amount,
+          }))
+        : quotes.filter((quote) => quote.label !== '押金')
+      : [];
   useEffect(() => {
     void api.view(p.id).catch(() => {});
     try {
@@ -123,14 +132,9 @@ function DetailContent({
             </span>
           </div>
           <h1 className="detail-title">{p.title}</h1>
-          {Array.from(p.title).length > 40 && (
-            <a className="text-button detail-title-more" href="#asset-archive">
-              查看完整资产档案 <ArrowRight />
-            </a>
-          )}
           <p className="detail-subtitle">QQ炫舞 / {p.server}</p>
           <div className="pill-tags">
-            {p.tags.slice(0, 3).map((t) => (
+            {p.tags.map((t) => (
               <span key={t}>{t}</span>
             ))}
           </div>
@@ -190,7 +194,7 @@ function DetailContent({
           <div className="detail-actions">
             <button className="button-white" onClick={() => setConsulting(true)}>
               <Headphones />
-              {p.mode === 'rent' ? '立即租用' : '购买此账号'}
+              {p.mode === 'rent' ? '咨询租赁与报价' : '咨询购买与报价'}
             </button>
             <button
               className={`button-outline favorite-button ${favorite ? 'selected' : ''}`}
@@ -204,6 +208,9 @@ function DetailContent({
             </button>
           </div>
           <p className="detail-action-note">选择在线客服或 QQ 咨询，由客服协助确认与办理。</p>
+          {(p.consultationCount ?? 0) > 0 && (
+            <p className="consultation-count">已有 {p.consultationCount} 位用户咨询此账号</p>
+          )}
           <div className="detail-trust">
             <span>
               <ShieldCheck />

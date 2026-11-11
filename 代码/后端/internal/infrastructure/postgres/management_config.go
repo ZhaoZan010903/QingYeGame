@@ -12,8 +12,9 @@ import (
 )
 
 type ManagementStore struct {
-	DB    *pgxpool.Pool
-	NewID func() string
+	DB            *pgxpool.Pool
+	NewID         func() string
+	CredentialKey string
 }
 
 func managementStoreError(err error) error {
@@ -178,8 +179,37 @@ func (s *ManagementStore) SavePage(ctx context.Context, actor management.Actor, 
 	return s.configWrite(ctx, actor, "page", slug, `INSERT INTO content_pages(slug,title,body,published) VALUES($1,$2,$3,$4) ON CONFLICT(slug) DO UPDATE SET title=EXCLUDED.title,body=EXCLUDED.body,published=EXCLUDED.published,version=content_pages.version+1 RETURNING to_jsonb(content_pages)`, slug, in.Title, in.Body, in.Published)
 }
 func (s *ManagementStore) SaveSetting(ctx context.Context, actor management.Actor, key string, in management.SettingInput) (map[string]any, error) {
-	return s.configWrite(ctx, actor, "setting", key, `INSERT INTO site_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now() RETURNING to_jsonb(site_settings)`, key, in.Value)
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return nil, managementStoreError(err)
+	}
+	defer tx.Rollback(ctx)
+	if key == "home_presentation" {
+		var config management.HomePresentation
+		if err = json.Unmarshal(in.Value, &config); err != nil {
+			return nil, fault.New(fault.Invalid, "INVALID_SETTING", "首页配置无效")
+		}
+		for _, slide := range config.Slides {
+			var valid bool
+			err = tx.QueryRow(ctx, `SELECT true FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=$1 AND `+VisibleSQL+` AND ($2='' OR EXISTS(SELECT 1 FROM product_images pi JOIN media_files m ON m.id=pi.media_id WHERE pi.product_id=p.id AND m.id=$2 AND m.status='ready')) FOR SHARE OF p,c`, slide.ProductID, slide.ImageID).Scan(&valid)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, fault.New(fault.Invalid, "INVALID_SLIDE_PRODUCT", "轮播只能引用已上架商品及该商品的有效图片")
+			}
+			if err != nil {
+				return nil, managementStoreError(err)
+			}
+		}
+	}
+	out, err := s.configWriteTx(ctx, tx, actor, "setting", key, `INSERT INTO site_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now() RETURNING to_jsonb(site_settings)`, key, in.Value)
+	if err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return nil, managementStoreError(err)
+	}
+	return out, nil
 }
+
 func (s *ManagementStore) Users(ctx context.Context, actor management.Actor, q string, limit, offset int) (map[string]any, error) {
 	var total int
 	e := s.DB.QueryRow(ctx, "SELECT count(*) FROM users WHERE nickname ILIKE '%'||$1||'%' OR phone=$1", q).Scan(&total)
@@ -275,5 +305,5 @@ func (s *ManagementStore) Pages(ctx context.Context) ([]map[string]any, error) {
 	return s.jsonRows(ctx, `SELECT to_jsonb(p) FROM content_pages p ORDER BY slug`)
 }
 func (s *ManagementStore) Settings(ctx context.Context) ([]map[string]any, error) {
-	return s.jsonRows(ctx, `SELECT to_jsonb(s) FROM site_settings s WHERE key IN ('home_presentation','recommendation') ORDER BY key`)
+	return s.jsonRows(ctx, `SELECT to_jsonb(s) FROM site_settings s WHERE key IN ('home_presentation','recommendation','publish_form') ORDER BY key`)
 }

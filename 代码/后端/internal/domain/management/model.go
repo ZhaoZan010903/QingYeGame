@@ -13,6 +13,22 @@ import (
 	"unicode/utf8"
 )
 
+type HomeSlide struct {
+	ProductID      string  `json:"productId"`
+	Title          string  `json:"title"`
+	Description    string  `json:"description"`
+	TradeLabel     string  `json:"tradeLabel"`
+	ServerLabel    string  `json:"serverLabel"`
+	PriceLabel     string  `json:"priceLabel"`
+	ImageID        string  `json:"imageId,omitempty"`
+	ImagePositionX float64 `json:"imagePositionX"`
+	ImagePositionY float64 `json:"imagePositionY"`
+	ImageFit       string  `json:"imageFit"`
+	Layout         string  `json:"layout"`
+	TextAlign      string  `json:"textAlign"`
+	VerticalAlign  string  `json:"verticalAlign"`
+}
+
 var CodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 type Actor struct{ ID, Role string }
@@ -63,6 +79,15 @@ func ValidateFilters(groups []catalog.FilterGroup) error {
 	}
 	seen := map[string]bool{}
 	for _, g := range groups {
+		if g.Key == "custom_tags" || catalog.IsPrivateAttributeKey(g.Key) {
+			return errors.New("自定义标签及私密账号字段请在专用发布表单设置中管理")
+		}
+		if g.Type != "" && g.Type != "text" && g.Type != "select" && g.Type != "multiselect" && g.Type != "checkbox" {
+			return errors.New("字段类型无效")
+		}
+		if g.Required && g.Enabled != nil && !*g.Enabled || utf8.RuneCountInString(g.Placeholder) > 200 {
+			return errors.New("必填字段不能停用或提示过长")
+		}
 		if !CodePattern.MatchString(g.Key) || seen[g.Key] || len(g.Options) > 200 || utf8.RuneCountInString(g.Label) > 40 {
 			return errors.New("筛选分组编码、标题或数量无效")
 		}
@@ -83,6 +108,16 @@ func ValidatePresentation(raw []byte) error {
 	d.DisallowUnknownFields()
 	if e := d.Decode(&p); e != nil {
 		return errors.New("首页配置结构无效")
+	}
+	if len(p.Slides) > 12 {
+		return errors.New("轮播最多12张")
+	}
+	slideIDs := map[string]bool{}
+	for _, s := range p.Slides {
+		if s.ProductID == "" || len(s.ProductID) > 100 || slideIDs[s.ProductID] || strings.TrimSpace(s.Title) == "" || utf8.RuneCountInString(s.Title) > 100 || utf8.RuneCountInString(s.Description) > 300 || utf8.RuneCountInString(s.TradeLabel) > 24 || utf8.RuneCountInString(s.ServerLabel) > 60 || utf8.RuneCountInString(s.PriceLabel) > 60 || s.ImagePositionX < 0 || s.ImagePositionX > 100 || s.ImagePositionY < 0 || s.ImagePositionY > 100 || !slices.Contains([]string{"cover", "contain"}, s.ImageFit) || !slices.Contains([]string{"image-left", "image-right", "overlay"}, s.Layout) || !slices.Contains([]string{"left", "center", "right"}, s.TextAlign) || !slices.Contains([]string{"top", "center", "bottom"}, s.VerticalAlign) {
+			return errors.New("轮播商品、文案或布局参数无效")
+		}
+		slideIDs[s.ProductID] = true
 	}
 	textOK := func(s string, max int) bool { return strings.TrimSpace(s) != "" && utf8.RuneCountInString(s) <= max }
 	if !textOK(p.Editorial.Title, 32) || utf8.RuneCountInString(p.Editorial.Description) > 120 || p.Editorial.IntervalMS < 4000 || p.Editorial.IntervalMS > 30000 || !textOK(p.Publishing.Title, 60) || utf8.RuneCountInString(p.Publishing.Description) > 120 || !textOK(p.Publishing.Action, 24) {
@@ -114,6 +149,7 @@ type HomeSection struct {
 	Limit       int    `json:"limit"`
 }
 type HomePresentation struct {
+	Slides    []HomeSlide `json:"slides,omitempty"`
 	Editorial struct {
 		Title       string `json:"title"`
 		Description string `json:"description"`
@@ -155,7 +191,7 @@ func Transition(status, source, operation string, in TransitionInput) (target, a
 		}
 	case "publish":
 		action = "publish"
-		if source != "member" && (status == "draft" || status == "rejected" || status == "offline") {
+		if status == "offline" || status == "sold" || status == "rented" || source != "member" && (status == "draft" || status == "rejected") {
 			target = "published"
 		}
 	case "status":
@@ -163,8 +199,8 @@ func Transition(status, source, operation string, in TransitionInput) (target, a
 		if action == "submit" && (status == "draft" || status == "rejected" || status == "offline") {
 			target = "pending"
 		}
-		if action == "offline" && status == "published" && strings.TrimSpace(in.Reason) != "" {
-			target = "offline"
+		if (action == "offline" || action == "sold" || action == "rented") && status == "published" && strings.TrimSpace(in.Reason) != "" {
+			target = action
 		}
 	}
 	if target == "" {
@@ -250,4 +286,41 @@ func RemovedOptions(old, next []catalog.FilterGroup) []RemovedOption {
 		}
 	}
 	return removed
+}
+
+type PublishField struct {
+	Label       string `json:"label"`
+	Placeholder string `json:"placeholder"`
+	Required    bool   `json:"required"`
+	Enabled     bool   `json:"enabled"`
+}
+type PublishForm struct {
+	Fields map[string]PublishField `json:"fields"`
+}
+
+func DefaultPublishForm() PublishForm {
+	return PublishForm{Fields: map[string]PublishField{
+		"title":               {Label: "账号标题", Placeholder: "填写账号标题", Required: true, Enabled: true},
+		"description":         {Label: "账号介绍", Placeholder: "介绍账号特点，勿填写账号密码", Required: true, Enabled: true},
+		"custom_tags":         {Label: "自定义标签", Placeholder: "最多12个标签", Enabled: true},
+		"private_credentials": {Label: "账号交接资料", Placeholder: "仅授权管理员可核验，不公开展示", Enabled: true},
+	}}
+}
+func ValidatePublishForm(raw []byte) error {
+	var form PublishForm
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&form); err != nil {
+		return errors.New("发布表单配置格式无效")
+	}
+	if len(form.Fields) != 4 {
+		return errors.New("请保留四组发布表单字段")
+	}
+	for k := range DefaultPublishForm().Fields {
+		f, ok := form.Fields[k]
+		if !ok || strings.TrimSpace(f.Label) == "" || utf8.RuneCountInString(f.Label) > 40 || utf8.RuneCountInString(f.Placeholder) > 200 || f.Required && !f.Enabled || (k == "title" || k == "description") && (!f.Required || !f.Enabled) {
+			return errors.New("字段文案无效，标题和介绍必须保留必填")
+		}
+	}
+	return nil
 }

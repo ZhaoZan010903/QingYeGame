@@ -12,6 +12,16 @@ import {
   PackageCheck,
 } from "lucide-react";
 import { GuideButton } from "./AdminGuide";
+import { Link } from "react-router-dom";
+import {
+  buildRentalQuotes,
+  customTagsForEditing,
+  parseCustomTags,
+} from "../lib/product-input";
+import {
+  defaultPublishForm,
+  resolvePublishForm,
+} from "../../../共享/publish-form";
 import {
   parseFilters,
   publicSite,
@@ -27,6 +37,8 @@ export const statusNames: Record<string, string> = {
   published: "已上架",
   rejected: "已退回",
   offline: "已下架",
+  sold: "已售出",
+  rented: "出租中",
 };
 const message = (error: unknown) =>
   error instanceof Error ? error.message : "保存失败，请重试。";
@@ -77,18 +89,32 @@ export function AdminProductEditor({
   const [imagePending, setImagePending] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [reason, setReason] = useState("");
-  const [rank, setRank] = useState("");
   const [notice, setNotice] = useState("");
   const [step, setStep] = useState(0);
+  const [privateAccount, setPrivateAccount] = useState("");
+  const [privatePassword, setPrivatePassword] = useState("");
+  const [privateVisible, setPrivateVisible] = useState(false);
+  const [tags, setTags] = useState("");
+  const [quotes, setQuotes] = useState<Record<string, string>>({});
+  const [formFields, setFormFields] = useState(defaultPublishForm.fields);
+  const [showPreview, setShowPreview] = useState(false);
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [step]);
   const product = row ? productFrom(row) : null;
   const locked = busy || imageBusy;
-  const rankDirty =
-    !!row && rank !== (row.manual_rank == null ? "" : String(row.manual_rank));
-  useUnsavedChanges(dirty || imagePending || rankDirty, locked);
+  useUnsavedChanges(dirty || imagePending, locked);
   const category = categories.find((c) => c.id === form.category_id);
+  const allowedUnits: string[] = category?.price_units?.length
+    ? category.price_units
+    : form.trade_type === "rent"
+      ? ["hour", "day", "week", "month"]
+      : ["account"];
+  const unsupportedPrimary =
+    form.price_unit !== "unknown" && !allowedUnits.includes(form.price_unit);
+  const unsupportedQuotes = Object.entries(quotes).filter(
+    ([unit]) => unit !== form.price_unit && !allowedUnits.includes(unit),
+  );
   let groups: EditableGroup[] = [],
     attributes: Record<string, unknown> = {};
   try {
@@ -100,20 +126,36 @@ export function AdminProductEditor({
   function accept(value: AdminRecord) {
     setRow(value);
     setForm(formFrom(value));
-    setRank(value.manual_rank == null ? "" : String(value.manual_rank));
     setDirty(false);
     setConflict(false);
+    setPrivateAccount("");
+    setPrivatePassword("");
+    setPrivateVisible(false);
+    setTags(customTagsForEditing(value.attributes));
+    setQuotes(
+      Object.fromEntries(
+        (value.rental_quotes ?? []).map(
+          (q: { unit: string; amount: string }) => [q.unit, String(q.amount)],
+        ),
+      ),
+    );
   }
   async function reload() {
     setLoading(true);
     setError("");
     try {
-      const [list, value] = await Promise.all([
+      const [list, value, settings] = await Promise.all([
         adminApi.list("categories"),
         (row?.id ?? id)
           ? adminApi.product(row?.id ?? id!)
           : Promise.resolve(null),
+        adminApi.list("settings"),
       ]);
+      setFormFields(
+        resolvePublishForm(
+          settings.find((s) => s.key === "publish_form")?.value,
+        ).fields,
+      );
       setCategories(list);
       if (value) accept(value);
       else
@@ -170,7 +212,26 @@ export function AdminProductEditor({
         throw new Error("账号属性必须为对象。");
       const input = {
         ...form,
-        attributes,
+        attributes: {
+          ...attributes,
+          game: "QQ炫舞",
+          custom_tags: parseCustomTags(tags),
+        },
+        rental_quotes: buildRentalQuotes(
+          form.trade_type,
+          form.price_unit,
+          form.price_amount,
+          quotes,
+          allowedUnits,
+        ),
+        ...(privateAccount || privatePassword
+          ? {
+              private_credentials: {
+                qq_account: privateAccount.trim(),
+                qq_password: privatePassword,
+              },
+            }
+          : {}),
         price_amount:
           form.price_unit === "unknown" || form.price_amount === ""
             ? null
@@ -189,7 +250,14 @@ export function AdminProductEditor({
     }
   }
   async function action(
-    kind: "approve" | "reject" | "submit" | "offline" | "publish",
+    kind:
+      | "approve"
+      | "reject"
+      | "submit"
+      | "offline"
+      | "publish"
+      | "sold"
+      | "rented",
   ) {
     if (!row) return;
     setError("");
@@ -198,7 +266,10 @@ export function AdminProductEditor({
       setError("请先保存资料并处理完图片队列，再进行状态操作。");
       return;
     }
-    if ((kind === "reject" || kind === "offline") && !reason.trim()) {
+    if (
+      ["reject", "offline", "sold", "rented"].includes(kind) &&
+      !reason.trim()
+    ) {
       setError("请填写退回或下架原因。");
       return;
     }
@@ -208,6 +279,8 @@ export function AdminProductEditor({
       reject: "确认退回给投稿人修改？填写的原因会作为审核说明。",
       offline: "下架后，用户将无法查看这个商品。确认下架？",
       submit: "确认资料和图片已准备好，提交审核？",
+      sold: "确认标记为已售出？商品将停止公开展示。",
+      rented: "确认标记为出租中？商品将停止公开展示。",
     };
     if (!window.confirm(confirmations[kind])) return;
     setBusy(true);
@@ -235,25 +308,10 @@ export function AdminProductEditor({
             ? "已退回修改，审核原因已保存。"
             : kind === "offline"
               ? "商品已下架，前台不再展示。"
-              : "已提交，等待审核。",
+              : kind === "sold" || kind === "rented"
+                ? `商品已标记为${statusNames[kind]}。`
+                : "已提交，等待审核。",
       );
-      onSaved();
-    } catch (e) {
-      fail(e);
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function feature() {
-    if (!row) return;
-    setError("");
-    setBusy(true);
-    try {
-      await adminApi.featured(row.id, rank === "" ? null : Number(rank));
-      setRow((old) =>
-        old ? { ...old, manual_rank: rank === "" ? null : Number(rank) } : old,
-      );
-      setNotice(rank === "" ? "已取消人工精选。" : "精选顺序已保存。");
       onSaved();
     } catch (e) {
       fail(e);
@@ -278,6 +336,13 @@ export function AdminProductEditor({
           </p>
         </div>
         <div className="heading-actions">
+          <button
+            type="button"
+            className="button-outline"
+            onClick={() => setShowPreview(!showPreview)}
+          >
+            {showPreview ? "收起预览" : "上架预览"}
+          </button>
           <GuideButton kind="product" />
           <button
             type="button"
@@ -340,6 +405,49 @@ export function AdminProductEditor({
               {notice}
             </p>
           )}
+          {showPreview && (
+            <section
+              className="panel admin-listing-preview"
+              aria-label="上架效果预览"
+            >
+              <span className="eyebrow">当前编辑内容预览 · 尚未发布</span>
+              {product?.images[0]?.url && (
+                <img src={product.images[0].url} alt="商品封面预览" />
+              )}
+              <div>
+                <small>
+                  {row?.product_code ||
+                    `${form.trade_type === "sale" ? "QYCH" : "QYZH"} · 保存后自动生成`}
+                </small>
+                <h2>{form.title || "商品标题"}</h2>
+                <p>{form.description || "商品介绍"}</p>
+                <div className="preview-tags">
+                  {tags
+                    .split(/[,，\n]/)
+                    .map((t) => t.trim())
+                    .filter(Boolean)
+                    .map((t) => (
+                      <span key={t}>{t}</span>
+                    ))}
+                </div>
+                <strong>
+                  {form.price_amount
+                    ? `¥ ${form.price_amount} ${unitLabels[form.price_unit] || ""}`
+                    : "联系客服报价"}
+                </strong>
+                {form.trade_type === "rent" && (
+                  <div className="preview-tags">
+                    {Object.entries(quotes).map(([unit, amount]) => (
+                      <span key={unit}>
+                        {amount || "—"} {unitLabels[unit]}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <small>QQ 账号和密码不会出现在公开预览中。</small>
+              </div>
+            </section>
+          )}
           <div hidden={step !== 0} className="editor-step-body panel">
             <div className="location-note">
               <strong>第 1 步 · 填写用户会看到的资料</strong>
@@ -353,19 +461,29 @@ export function AdminProductEditor({
             >
               <fieldset disabled={locked}>
                 <label className="form-field">
-                  商品标题
+                  {formFields.title.label}
                   <input
                     required
-                    placeholder="例如：QQ 炫舞 · 华东区 · 稀有套装账号"
-                    maxLength={row?.source === "legacy" ? 1000 : 100}
+                    placeholder={formFields.title.placeholder}
+                    maxLength={Math.max(
+                      1000,
+                      row?.source === "legacy"
+                        ? Array.from(row.title ?? "").length
+                        : 1000,
+                    )}
                     value={form.title}
                     onChange={(e) => change("title", e.target.value)}
                   />
                 </label>
+                <p className="field-hint">
+                  QQ 炫舞 · 商品编号：
+                  {row?.product_code ||
+                    `${form.trade_type === "sale" ? "QYCH" : "QYZH"}，保存后按历史编号自动顺延`}
+                </p>
                 {row?.source === "legacy" &&
-                  Array.from(row.title ?? "").length > 100 && (
+                  Array.from(row.title ?? "").length > 1000 && (
                     <p className="admin-warning">
-                      原站长标题可原样保留。若修改标题，请精简至 100
+                      原站长标题可原样保留。若修改标题，请精简至 1000
                       字以内；详细内容可保留在商品介绍。
                     </p>
                   )}
@@ -374,6 +492,7 @@ export function AdminProductEditor({
                     交易类型
                     <select
                       value={form.trade_type}
+                      disabled={!!row}
                       onChange={(e) => {
                         const mode = e.target.value;
                         const target = categories.find(
@@ -399,30 +518,16 @@ export function AdminProductEditor({
                       <option value="sale">账号出售</option>
                       <option value="rent">账号租赁</option>
                     </select>
+                    {row && <small>租售类型已固定，如需更换请新建资产。</small>}
                   </label>
                   <label className="form-field">
-                    分类
+                    发布模板
                     <select
                       required
                       value={form.category_id}
-                      onChange={(e) => {
-                        change("category_id", e.target.value);
-                        const target = categories.find(
-                          (c) => c.id === e.target.value,
-                        );
-                        if (
-                          target?.price_units?.length &&
-                          !target.price_units.includes(form.price_unit)
-                        )
-                          change(
-                            "price_unit",
-                            target.price_units.find(
-                              (u: string) => u !== "unknown",
-                            ) ?? "unknown",
-                          );
-                      }}
+                      onChange={(e) => change("category_id", e.target.value)}
                     >
-                      <option value="">选择分类</option>
+                      <option value="">选择发布模板</option>
                       {categories
                         .filter(
                           (c) =>
@@ -441,14 +546,33 @@ export function AdminProductEditor({
                     报价单位
                     <select
                       value={form.price_unit}
-                      onChange={(e) => change("price_unit", e.target.value)}
+                      onChange={(e) => {
+                        const unit = e.target.value;
+                        setQuotes((old) =>
+                          form.trade_type === "rent" &&
+                          form.price_amount &&
+                          form.price_unit !== "unknown"
+                            ? { ...old, [form.price_unit]: form.price_amount }
+                            : old,
+                        );
+                        setForm((old) => ({
+                          ...old,
+                          price_unit: unit,
+                          price_amount: quotes[unit] ?? "",
+                        }));
+                        setDirty(true);
+                      }}
                     >
+                      {unsupportedPrimary && (
+                        <option value={form.price_unit} disabled>
+                          {units[form.price_unit]}（当前模板不支持）
+                        </option>
+                      )}
                       {Object.entries(units)
                         .filter(([key]) =>
                           key === "unknown"
                             ? row?.price_unit === "unknown"
-                            : category?.price_units?.length &&
-                                !category.price_units.includes(key)
+                            : !allowedUnits.includes(key)
                               ? false
                               : form.trade_type === "sale"
                                 ? key === "account"
@@ -477,14 +601,180 @@ export function AdminProductEditor({
                     </small>
                   </label>
                 </div>
+                {form.trade_type === "rent" && (
+                  <section className="subform-card">
+                    <h3>更多租期报价</h3>
+                    {unsupportedPrimary && (
+                      <p className="admin-warning">
+                        当前模板不支持原主报价单位，金额仍保留。请重新选择报价单位并核对金额。
+                      </p>
+                    )}
+                    {unsupportedQuotes.length > 0 && (
+                      <div className="admin-warning" role="status">
+                        <p>
+                          以下旧报价不适用于当前模板，尚未删除。请切回原模板，或确认后逐项移除。
+                        </p>
+                        {unsupportedQuotes.map(([unit, amount]) => (
+                          <div key={unit}>
+                            <span>
+                              {amount || "未填写"} {unitLabels[unit] || unit}
+                            </span>
+                            <button
+                              type="button"
+                              className="text-button"
+                              onClick={() => {
+                                setQuotes((old) => {
+                                  const next = { ...old };
+                                  delete next[unit];
+                                  return next;
+                                });
+                                setDirty(true);
+                              }}
+                            >
+                              移除此报价
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <p className="field-hint">
+                      可同时填写多种租期。上方报价优先展示；未填主价时使用这里的首个报价，不自动换算。
+                    </p>
+                    <div className="admin-grid">
+                      {["hour", "day", "week", "month"]
+                        .filter(
+                          (unit) =>
+                            unit !== form.price_unit &&
+                            allowedUnits.includes(unit),
+                        )
+                        .map((unit) => (
+                          <div key={unit}>
+                            <label className="agreement-check">
+                              <input
+                                type="checkbox"
+                                checked={Object.hasOwn(quotes, unit)}
+                                onChange={(e) => {
+                                  setQuotes((old) => {
+                                    const next = { ...old };
+                                    if (e.target.checked) next[unit] = "";
+                                    else delete next[unit];
+                                    return next;
+                                  });
+                                  setDirty(true);
+                                }}
+                              />
+                              {unitLabels[unit]}
+                            </label>
+                            {Object.hasOwn(quotes, unit) && (
+                              <input
+                                aria-label={`${unitLabels[unit]}报价`}
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                required
+                                value={quotes[unit]}
+                                onChange={(e) => {
+                                  setQuotes((old) => ({
+                                    ...old,
+                                    [unit]: e.target.value,
+                                  }));
+                                  setDirty(true);
+                                }}
+                              />
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </section>
+                )}
                 <label className="form-field">
-                  商品介绍
+                  {formFields.description.label}
                   <textarea
                     rows={7}
+                    required
+                    placeholder={formFields.description.placeholder}
                     value={form.description}
                     onChange={(e) => change("description", e.target.value)}
                   />
                 </label>
+                {formFields.custom_tags.enabled && (
+                  <label className="form-field">
+                    {formFields.custom_tags.label}
+                    <input
+                      maxLength={600}
+                      required={formFields.custom_tags.required}
+                      placeholder={formFields.custom_tags.placeholder}
+                      value={tags}
+                      onChange={(e) => {
+                        setTags(e.target.value);
+                        setDirty(true);
+                      }}
+                    />
+                    <small>
+                      用逗号分隔，最多 12 个新增标签，每个最多 24
+                      字。历史标签保留在原始属性中，不计入这里的额度。
+                    </small>
+                  </label>
+                )}
+                {formFields.private_credentials.enabled && (
+                  <section className="subform-card private-credentials">
+                    <h3>{formFields.private_credentials.label}</h3>
+                    <p className="field-hint">
+                      {formFields.private_credentials.placeholder}{" "}
+                      {row?.has_private_credentials
+                        ? "已保存私密资料；留空保留现有内容。"
+                        : "尚未保存私密资料。"}
+                    </p>
+                    <div className="admin-grid">
+                      <label className="form-field">
+                        QQ 账号
+                        <input
+                          autoComplete="off"
+                          maxLength={15}
+                          inputMode="numeric"
+                          pattern="[1-9][0-9]{4,14}"
+                          title="请输入 5 至 15 位 QQ 账号"
+                          required={
+                            !!privatePassword ||
+                            (formFields.private_credentials.required &&
+                              !row?.has_private_credentials)
+                          }
+                          value={privateAccount}
+                          onChange={(e) => {
+                            setPrivateAccount(e.target.value);
+                            setDirty(true);
+                          }}
+                        />
+                      </label>
+                      <label className="form-field">
+                        QQ 密码
+                        <input
+                          type={privateVisible ? "text" : "password"}
+                          autoComplete="new-password"
+                          maxLength={128}
+                          required={
+                            !!privateAccount ||
+                            (formFields.private_credentials.required &&
+                              !row?.has_private_credentials)
+                          }
+                          value={privatePassword}
+                          onChange={(e) => {
+                            setPrivatePassword(e.target.value);
+                            setDirty(true);
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <label className="agreement-check">
+                      <input
+                        type="checkbox"
+                        checked={privateVisible}
+                        onChange={(e) => setPrivateVisible(e.target.checked)}
+                      />
+                      显示本次输入的密码
+                    </label>
+                  </section>
+                )}
                 <div className="admin-grid">
                   {groups
                     .filter((group) => group.enabled !== false)
@@ -498,7 +788,25 @@ export function AdminProductEditor({
                       return (
                         <div key={group.key} className="form-field">
                           <span>{group.label}</span>
-                          {group.multiple ? (
+                          {group.type === "text" ? (
+                            <input
+                              aria-label={group.label}
+                              required={!!group.required}
+                              placeholder={group.placeholder}
+                              maxLength={200}
+                              value={selected[0] ?? ""}
+                              onChange={(e) =>
+                                change(
+                                  "attributes",
+                                  updateAttribute(
+                                    form.attributes,
+                                    group.key,
+                                    e.target.value,
+                                  ),
+                                )
+                              }
+                            />
+                          ) : group.multiple || group.type === "multiselect" ? (
                             <div className="attribute-options">
                               {group.options.map((option) => (
                                 <label
@@ -539,6 +847,7 @@ export function AdminProductEditor({
                           ) : (
                             <select
                               aria-label={group.label}
+                              required={!!group.required}
                               value={selected[0] ?? ""}
                               onChange={(e) => {
                                 try {
@@ -555,7 +864,10 @@ export function AdminProductEditor({
                                 }
                               }}
                             >
-                              <option value="">暂不填写</option>
+                              <option value="">
+                                {group.placeholder ||
+                                  (group.required ? "请选择" : "暂不填写")}
+                              </option>
                               {group.options.map((option) => (
                                 <option
                                   value={option.value}
@@ -567,16 +879,17 @@ export function AdminProductEditor({
                               ))}
                             </select>
                           )}
-                          {selected.some(
-                            (v) =>
-                              !group.options.some(
-                                (o) => o.value === v && o.enabled !== false,
-                              ),
-                          ) && (
-                            <small className="danger-text">
-                              有历史或停用选项，请核对高级资料后再保存。
-                            </small>
-                          )}
+                          {group.type !== "text" &&
+                            selected.some(
+                              (v) =>
+                                !group.options.some(
+                                  (o) => o.value === v && o.enabled !== false,
+                                ),
+                            ) && (
+                              <small className="danger-text">
+                                有历史或停用选项，请核对高级资料后再保存。
+                              </small>
+                            )}
                         </div>
                       );
                     })}
@@ -791,18 +1104,22 @@ export function AdminProductEditor({
                       </button>
                     </>
                   )}
-                  {["draft", "rejected", "offline"].includes(row.status) && (
+                  {["draft", "rejected", "offline", "sold", "rented"].includes(
+                    row.status,
+                  ) && (
                     <>
-                      {row.source === "member" && (
-                        <button
-                          className="button-outline"
-                          disabled={locked}
-                          onClick={() => void action("submit")}
-                        >
-                          提交审核
-                        </button>
-                      )}
-                      {row.source !== "member" && (
+                      {row.source === "member" &&
+                        ["draft", "rejected"].includes(row.status) && (
+                          <button
+                            className="button-outline"
+                            disabled={locked}
+                            onClick={() => void action("submit")}
+                          >
+                            提交审核
+                          </button>
+                        )}
+                      {(row.source !== "member" ||
+                        ["offline", "sold", "rented"].includes(row.status)) && (
                         <button
                           className="button-white"
                           disabled={locked}
@@ -822,38 +1139,23 @@ export function AdminProductEditor({
                       下架商品
                     </button>
                   )}
-                </div>
-                {row.status === "published" && (
-                  <div className="admin-feature">
-                    <label className="form-field">
-                      首页轮播 · 精选顺序
-                      <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={rank}
-                        onChange={(e) => setRank(e.target.value)}
-                        placeholder="留空取消精选"
-                      />
-                    </label>
+                  {row.status === "published" && (
                     <button
                       className="button-outline"
-                      disabled={
-                        locked ||
-                        (rank !== "" &&
-                          (!Number.isInteger(Number(rank)) || Number(rank) < 1))
+                      disabled={locked}
+                      onClick={() =>
+                        void action(
+                          row.trade_type === "sale" ? "sold" : "rented",
+                        )
                       }
-                      onClick={() => void feature()}
                     >
-                      保存轮播顺序
+                      {row.trade_type === "sale" ? "标记已售出" : "标记出租中"}
                     </button>
-                  </div>
-                )}
-                {row.status === "published" && (
-                  <p className="field-hint">
-                    数字越小越靠前，留空取消精选。轮播位置有限，实际显示以首页为准；不改变自动热门排序。
-                  </p>
-                )}
+                  )}
+                </div>
+                <Link className="button-outline" to="/settings">
+                  前往首页装修设置轮播文案与图片 →
+                </Link>
               </section>
             )}
           </div>

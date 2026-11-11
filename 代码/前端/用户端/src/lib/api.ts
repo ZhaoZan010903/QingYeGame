@@ -153,7 +153,12 @@ export function productFrom(value: RecordData): Product {
     gender: a.gender ?? value.gender ?? 'unknown',
     level: readLevel(a.level ?? a.xvip ?? value.level),
     kind: a.kind ?? value.kind ?? 'single',
-    tags: a.tags ?? value.tags ?? [],
+    tags: [
+      ...new Set([
+        ...(Array.isArray(a.tags) ? a.tags : (value.tags ?? [])),
+        ...(Array.isArray(a.custom_tags) ? a.custom_tags : []),
+      ]),
+    ],
     description: value.description ?? '',
     art: Number(value.art ?? -1),
     images,
@@ -166,9 +171,14 @@ export function productFrom(value: RecordData): Product {
     reviewNote: value.review_note ?? value.review_reason,
     favorite: value.favorite,
     editorial: value.editorial,
+    rentalQuotes: Array.isArray(value.rental_quotes) ? value.rental_quotes : [],
+    hasPrivateCredentials: !!value.has_private_credentials,
+    consultationCount: Number(value.consultation_count ?? 0),
   };
 }
 export function productToWire(input: ProductWrite): RecordData {
+  const attributes = { ...input.attributes };
+  // Imported tags are preserved separately; only editable custom tags use the new limit.
   return {
     category_id: input.categoryId ?? 'qq-dance',
     title: input.title,
@@ -180,10 +190,19 @@ export function productToWire(input: ProductWrite): RecordData {
       gender: input.gender,
       level: input.level,
       kind: input.kind ?? 'single',
-      tags: input.tags,
-      ...input.attributes,
+      ...attributes,
+      custom_tags: input.tags,
     },
     description: input.description,
+    rental_quotes: input.mode === 'rent' ? (input.rentalQuotes ?? []) : [],
+    ...(input.privateCredentials
+      ? {
+          private_credentials: {
+            qq_account: input.privateCredentials.qqAccount,
+            qq_password: input.privateCredentials.qqPassword,
+          },
+        }
+      : {}),
   };
 }
 function pageFrom(e: Envelope): ProductPage {
@@ -285,7 +304,7 @@ function validateWrite(p: ProductWrite, submit = false) {
     throw new ApiError('交易类型与报价单位不一致。', 422, 'INVALID_PRICE_UNIT');
   if (p.price !== null && (!Number.isFinite(p.price) || p.price < 0))
     throw new ApiError('参考报价须为非负金额。', 422, 'INVALID_PRICE');
-  if (p.title.length > 100) throw new ApiError('标题最多 100 字。', 422, 'TITLE_TOO_LONG');
+
   if (submit && (!p.title.trim() || !p.server.trim() || !p.description.trim()))
     throw new ApiError('请补全标题、游戏区服与账号介绍后提交。', 422, 'INCOMPLETE_PRODUCT');
 }
@@ -705,7 +724,11 @@ export const api = {
   },
   async saveProduct(input: ProductWrite, id?: string, version?: number): Promise<Product> {
     validateWrite(input);
+    if (!id && input.title.length > 1000)
+      throw new ApiError('标题最多1000字。', 422, 'TITLE_TOO_LONG');
     if (isDemo) {
+      if (input.privateCredentials)
+        throw new ApiError('演示模式不保存私密账号资料。', 422, 'PRIVATE_DATA_UNSUPPORTED');
       if (id)
         return hydrateProduct(
           editDemo(id, version!, (p) => Object.assign(p, input, { status: 'draft' })),

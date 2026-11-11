@@ -44,6 +44,14 @@ export const adminApi = {
   async product(id: string): Promise<AdminRecord> {
     return unwrap(await request(path(id)));
   },
+  async privateCredentials(
+    id: string,
+  ): Promise<{ qq_account: string; qq_password: string }> {
+    return unwrap(await request(`${path(id)}/private-credentials`)) as {
+      qq_account: string;
+      qq_password: string;
+    };
+  },
   async saveProduct(
     input: AdminRecord,
     id?: string,

@@ -65,11 +65,21 @@ export interface EditableGroup {
   label: string;
   multiple?: boolean;
   enabled?: boolean;
+  required?: boolean;
+  placeholder?: string;
+  type?: string;
   options: EditableOption[];
   [key: string]: unknown;
 }
 export function parseFilters(raw: string): EditableGroup[] {
-  const value: unknown = JSON.parse(raw);
+  const decoded: unknown = JSON.parse(raw);
+  const value = Array.isArray(decoded)
+    ? decoded.map((group) =>
+        group && group.type === "text" && group.options == null
+          ? { ...group, options: [] }
+          : group,
+      )
+    : decoded;
   if (
     !Array.isArray(value) ||
     value.some(
@@ -116,9 +126,9 @@ export const locations = {
     hint: "选择页面，修改标题和正文。勾选“公开展示”后保存，用户才能打开该页面。",
   },
   categories: {
-    title: "分类与筛选",
+    title: "发布模板与属性",
     where: "用户站 → 账号集市 / 发布账号",
-    hint: "管理分类名称、报价单位和筛选选项。停用分类会同时隐藏该分类下的公开商品。",
+    hint: "统一管理发布表单中的属性与集市筛选选项。停用模板会同时隐藏其中的公开商品。",
   },
   settings: {
     title: "首页装修",

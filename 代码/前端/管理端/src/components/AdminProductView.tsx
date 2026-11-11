@@ -6,6 +6,7 @@ import { productFrom } from "../lib/api";
 import { Price, StateView } from "./shared";
 import { statusNames } from "./AdminProductEditor";
 import type { Product, ImageItem } from "../types";
+import { PrivateCredentials } from "./PrivateCredentials";
 
 export function AdminProductView({ id }: { id: string }) {
   const [product, setProduct] = useState<Product>();
@@ -170,6 +171,29 @@ export function AdminProductView({ id }: { id: string }) {
           </div>
           <h2>{product.title}</h2>
           <Price product={product} />
+          {!!product.rentalQuotes?.length && (
+            <div className="preview-tags">
+              {product.rentalQuotes.map((q) => (
+                <span key={q.unit}>
+                  {q.amount} 元/
+                  {
+                    (
+                      {
+                        hour: "小时",
+                        day: "日",
+                        week: "周",
+                        month: "月",
+                      } as Record<string, string>
+                    )[q.unit]
+                  }
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="field-hint">
+            累计 {product.consultationCount ?? 0} 人咨询
+          </p>
+          {product.hasPrivateCredentials && <PrivateCredentials id={id} />}
           <dl className="admin-product-facts">
             <div>
               <dt>交易方式</dt>

@@ -55,7 +55,7 @@ func ValidateList(in ListInput) error {
 	if err := ValidatePage(in.Offset, in.Limit); err != nil {
 		return err
 	}
-	if !in.Favorites && in.Status != "" && !slices.Contains([]string{"draft", "pending", "published", "rejected", "offline"}, in.Status) {
+	if !in.Favorites && in.Status != "" && !slices.Contains([]string{"draft", "pending", "published", "rejected", "offline", "sold", "rented"}, in.Status) {
 		return fault.New(fault.Invalid, "INVALID_STATUS", "状态无效")
 	}
 	return nil

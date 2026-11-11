@@ -200,12 +200,12 @@ func TestChatLifecycleAndPrivacy(t *testing.T) {
 		f.call(t, f.first, "GET", "/api/v1/admin/chat/conversations/"+id+"/messages", nil, 404)
 		f.call(t, f.second, "GET", "/api/v1/admin/chat/conversations/"+id+"/messages", nil, 200)
 	})
-	t.Run("closed chats retain history and need a new consultation", func(t *testing.T) {
+	t.Run("closed chats reopen the same customer history", func(t *testing.T) {
 		f.call(t, f.second, "POST", "/api/v1/admin/chat/conversations/"+id+"/close", map[string]any{}, 200)
 		f.call(t, f.member, "POST", "/api/v1/chat/conversations/"+id+"/messages", map[string]any{"body": "closed", "client_id": "closed"}, 409)
 		f.call(t, f.member, "GET", "/api/v1/chat/conversations/"+id+"/messages", nil, 200)
-		if next := f.start(t, f.member, f.product); next == id {
-			t.Fatal("closed conversation reused")
+		if next := f.start(t, f.member, f.product); next != id {
+			t.Fatal("reopening created duplicate customer history")
 		}
 	})
 	t.Run("private or withdrawn products cannot start new inquiries", func(t *testing.T) {

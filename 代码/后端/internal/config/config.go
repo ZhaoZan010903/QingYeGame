@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 
 type Config struct {
 	Addr, DatabaseURL, RedisURL, MediaDir, PublicBaseURL, SessionSecret string
+	ProductCredentialKey                                                string
 	Surface                                                             string
 	AllowedOrigins                                                      []string
 	SecureCookies                                                       bool
@@ -39,6 +41,7 @@ func Load() (Config, error) {
 		addr, origin = "127.0.0.1:5182", "http://127.0.0.1:5181"
 	}
 	c := Config{Surface: surface, Addr: env("QINGYE_ADDR", env("HTTP_ADDR", addr)), DatabaseURL: os.Getenv("DATABASE_URL"), RedisURL: env("REDIS_URL", "redis://127.0.0.1:6381/0"), MediaDir: env("MEDIA_DIR", "./data/media"), PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), SessionSecret: os.Getenv("SESSION_SECRET"), AllowedOrigins: strings.Split(env("ALLOWED_ORIGINS", origin), ",")}
+	c.ProductCredentialKey = os.Getenv("PRODUCT_CREDENTIAL_KEY")
 	c.ChatWTAddr, c.ChatWTURL = os.Getenv("CHAT_WT_ADDR"), os.Getenv("CHAT_WT_URL")
 	c.ChatWTCert, c.ChatWTKey = os.Getenv("CHAT_WT_CERT"), os.Getenv("CHAT_WT_KEY")
 	for _, item := range []struct {
@@ -102,6 +105,12 @@ func (c Config) Defaults() Config {
 }
 
 func (c Config) Validate() error {
+	if c.ProductCredentialKey != "" {
+		key, err := base64.StdEncoding.DecodeString(c.ProductCredentialKey)
+		if err != nil || len(key) != 32 {
+			return errors.New("PRODUCT_CREDENTIAL_KEY must be base64 of 32 bytes")
+		}
+	}
 	if c.Surface != "public" && c.Surface != "admin" {
 		return errors.New("APP_SURFACE must be public or admin")
 	}

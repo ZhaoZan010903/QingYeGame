@@ -181,6 +181,7 @@ const fields = [
   ["window_days", "统计窗口（天）", 1, 30],
   ["view_weight", "每次有效浏览权重", 0, 100],
   ["favorite_weight", "首次收藏权重", 0, 100],
+  ["consultation_weight", "每位有效咨询用户权重", 0, 100],
 ] as const;
 export function AdminRecommendations() {
   const [result, setResult] = useState<AdminRecord | null>(null);
@@ -284,18 +285,19 @@ export function AdminRecommendations() {
                   </h3>
                   <p>
                     根据最近 {config.window_days}{" "}
-                    天的有效浏览和收藏计算。系统约每 15
+                    天的有效浏览、收藏和去重咨询人数计算。系统约每 15
                     分钟更新一次，通常无需手动调整。
                   </p>
                   <p className="formula">
                     浏览 × {config.view_weight} + 收藏 ×{" "}
-                    {config.favorite_weight}
+                    {config.favorite_weight} + 咨询人数 ×{" "}
+                    {config.consultation_weight ?? 8}
                   </p>
                   <p>
                     算例：100 次有效浏览、10 次有效收藏，热度分为{" "}
                     {100 * Number(config.view_weight || 0) +
                       10 * Number(config.favorite_weight || 0)}
-                    。上架时间不加分；个性化推荐另按用户浏览匹配。
+                    （未计咨询）。同一用户对同一商品反复咨询只计一人；上架时间不加分。
                   </p>
                 </div>
                 <div className="panel">
@@ -307,10 +309,7 @@ export function AdminRecommendations() {
                     <Link className="button-outline" to="/settings">
                       修改首页展示
                     </Link>
-                    <Link
-                      className="button-outline"
-                      to="/products?status=published"
-                    >
+                    <Link className="button-outline" to="/settings">
                       设置轮播精选
                     </Link>
                   </div>
@@ -375,6 +374,7 @@ export function AdminRecommendations() {
                     <tr>
                       <th>商品</th>
                       <th>分数</th>
+                      <th>咨询人数</th>
                       <th>计算时间</th>
                     </tr>
                   </thead>
@@ -388,6 +388,7 @@ export function AdminRecommendations() {
                           <span>{item.product_id}</span>
                         </td>
                         <td>{Number(item.score).toLocaleString("zh-CN")}</td>
+                        <td>{Number(item.consultations ?? 0)}</td>
                         <td>{date(item.computed_at ?? result.computed_at)}</td>
                       </tr>
                     ))}

@@ -13,6 +13,7 @@ import {
   type HomePresentation,
 } from "../lib/home-content";
 import { publicSite } from "../lib/admin-ux";
+import { CarouselEditor } from "./CarouselEditor";
 
 type Zone =
   "editorial" | "hot" | "recommended" | "newest" | "shortcuts" | "publishing";
@@ -97,7 +98,9 @@ export function HomeDesigner({
     onChange({ ...value, sections });
   }
   return (
-    <div className="home-designer">
+    <div
+      className={`home-designer ${zone === "editorial" ? "editing-carousel" : ""}`}
+    >
       <aside className="home-map">
         <div className="section-heading">
           <strong>选择修改区域</strong>
@@ -252,15 +255,10 @@ export function HomeDesigner({
               />
               <small>建议 7.5 秒，允许 4–30 秒。</small>
             </label>
-            <div className="inline-help">
-              <strong>想更换轮播里的商品？</strong>
-              <p>
-                进入商品管理，选择已上架商品，在“检查并上架”中填写首页精选顺序。
-              </p>
-              <Link to="/products?status=published">
-                去选择商品 <ArrowRight size={14} />
-              </Link>
-            </div>
+            <CarouselEditor
+              slides={value.slides ?? []}
+              onChange={(slides) => onChange({ ...value, slides })}
+            />
           </>
         )}
         {(zone === "hot" || zone === "newest" || zone === "recommended") && (

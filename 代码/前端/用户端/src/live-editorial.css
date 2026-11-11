@@ -11,7 +11,7 @@
   inset: auto;
   grid-area: 1 / 1;
   display: grid;
-  grid-template-columns: minmax(0, 44%) minmax(0, 56%);
+  grid-template-columns: minmax(0, 1fr);
   min-height: 370px;
 }
 .live-editorial .slide-visual {

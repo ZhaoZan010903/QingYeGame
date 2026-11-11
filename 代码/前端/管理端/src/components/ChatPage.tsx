@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Send,
   Package,
+  Smile,
 } from "lucide-react";
 import { createRequestId } from "../lib/api";
 import { useSession } from "../context";
@@ -106,6 +107,21 @@ export function ChatPage() {
     [error, setError] = useState(""),
     [starting, setStarting] = useState(false),
     [startRetry, setStartRetry] = useState(0);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  function insertText(value: string) {
+    const node = composer.current;
+    const start = node?.selectionStart ?? text.length;
+    const end = node?.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + value + text.slice(end);
+    if (Array.from(next).length > 2000) return;
+    setText(next);
+    drafts.current.set(selected, next);
+    requestAnimationFrame(() => {
+      node?.focus();
+      node?.setSelectionRange(start + value.length, start + value.length);
+    });
+  }
   const [loading, setLoading] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
     [loadingList, setLoadingList] = useState(false),
@@ -167,6 +183,7 @@ export function ChatPage() {
     setMessages([]);
     setBefore(null);
     setText(drafts.current.get(selected) || "");
+    setEmojiOpen(false);
     setError("");
     setAtBottom(true);
     setLoadingOlder(false);
@@ -360,7 +377,7 @@ export function ChatPage() {
           <h1>{chatAdmin ? "在线咨询" : "与清叶聊一聊"}</h1>
           <p>
             {chatAdmin
-              ? "查看商品资料，直接回复咨询用户。"
+              ? "每位用户一个对话，询价商品和沟通记录集中保存。"
               : "商品和聊天放在一起，沟通更清楚。"}
           </p>
         </div>
@@ -452,7 +469,12 @@ export function ChatPage() {
                   </strong>
                   <time>{date(item.updated_at)}</time>
                 </span>
-                <b>{item.product.title}</b>
+                <b>
+                  {item.product_count && item.product_count > 1
+                    ? `已咨询 ${item.product_count} 件 · `
+                    : ""}
+                  {item.product.title}
+                </b>
                 <span>
                   <small>{item.last_message || statusNames[item.status]}</small>
                   {item.unread > 0 && (
@@ -506,7 +528,7 @@ export function ChatPage() {
                   <small>
                     {conversation ? statusNames[conversation.status] : ""}
                     {conversation?.status === "active"
-                      ? " · 由平台管理员为你服务"
+                      ? " · 核实商品、报价与交付条件"
                       : ""}
                   </small>
                 </div>
@@ -565,8 +587,8 @@ export function ChatPage() {
                           : conversation?.member_name}{" "}
                       · {date(item.created_at)}
                     </small>
-                    {item.kind === "product" && conversation ? (
-                      <ProductCard product={conversation.product} />
+                    {item.kind === "product" && item.product ? (
+                      <ProductCard product={item.product} />
                     ) : (
                       <p>{item.body}</p>
                     )}
@@ -613,7 +635,66 @@ export function ChatPage() {
                   </div>
                 ) : (
                   <>
+                    <div className="chat-composer-tools">
+                      <button
+                        type="button"
+                        className="chat-tool"
+                        aria-label="选择表情"
+                        aria-expanded={emojiOpen}
+                        disabled={!conversation || sending}
+                        onClick={() => setEmojiOpen(!emojiOpen)}
+                      >
+                        <Smile size={20} /> 表情
+                      </button>
+                      <span>快捷回复</span>
+                      {[
+                        "您好，想了解这个账号的哪些资料？",
+                        "请问您计划租用多久？我帮您核实对应报价。",
+                        "我正在核实账号状态与价格，请稍等。",
+                      ].map((reply) => (
+                        <button
+                          key={reply}
+                          type="button"
+                          disabled={!conversation || sending}
+                          onClick={() => insertText(reply)}
+                        >
+                          {reply}
+                        </button>
+                      ))}
+                    </div>
+                    {emojiOpen && (
+                      <div className="chat-emoji-picker" aria-label="表情面板">
+                        {[
+                          "😊",
+                          "🙂",
+                          "😄",
+                          "🥰",
+                          "🤝",
+                          "👍",
+                          "👌",
+                          "🙏",
+                          "❤️",
+                          "✨",
+                          "🎉",
+                          "🌿",
+                          "👋",
+                          "🤔",
+                          "✅",
+                          "💬",
+                        ].map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            aria-label={`插入表情 ${emoji}`}
+                            onClick={() => insertText(emoji)}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <textarea
+                      ref={composer}
                       aria-label="输入咨询消息"
                       placeholder={
                         chatAdmin ? "输入回复内容…" : "说说你想了解的商品资料…"
@@ -637,7 +718,10 @@ export function ChatPage() {
                       }}
                     />
                     <div>
-                      <span>Enter 发送 · Shift + Enter 换行</span>
+                      <span>
+                        {Array.from(text).length}/2000 · Enter 发送 · Shift +
+                        Enter 换行
+                      </span>
                       <button
                         type="submit"
                         className="button-white"

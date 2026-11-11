@@ -10,7 +10,7 @@ import (
 )
 
 func (a *App) memberService() *memberapp.Service {
-	return memberapp.New(&postgres.MemberStore{DB: a.DB, NewID: newID})
+	return memberapp.New(&postgres.MemberStore{DB: a.DB, NewID: newID, CredentialKey: a.Config.ProductCredentialKey})
 }
 func memberActor(u *User, admin bool) memberdomain.Actor {
 	return memberdomain.Actor{ID: u.ID, Role: u.Role, Admin: admin}

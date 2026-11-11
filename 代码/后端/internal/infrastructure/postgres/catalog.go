@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"qingye/backend/internal/domain/catalog"
 	"qingye/backend/internal/domain/fault"
+	"qingye/backend/internal/domain/management"
 	"strconv"
 	"strings"
 )
@@ -31,7 +32,38 @@ func ValidateProductInput(ctx context.Context, q RowQuerier, p catalog.ProductIn
 	if err := q.QueryRow(ctx, "SELECT enabled,trade_type,price_units,filter_config FROM categories WHERE id=$1 FOR SHARE", p.CategoryID).Scan(&c.Enabled, &c.TradeType, &c.PriceUnits, &c.Filters); err != nil {
 		return errors.New("分类不存在或已停用")
 	}
-	return catalog.ValidateInput(p, complete, c)
+	if err := catalog.ValidateInput(p, complete, c); err != nil {
+		return err
+	}
+	var raw []byte
+	err := q.QueryRow(ctx, "SELECT value FROM site_settings WHERE key='publish_form' FOR SHARE").Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("发布表单配置暂不可用")
+	}
+	var form management.PublishForm
+	if json.Unmarshal(raw, &form) != nil {
+		return errors.New("发布表单配置无效")
+	}
+	if complete {
+		for k, f := range form.Fields {
+			if !f.Required || !f.Enabled {
+				continue
+			}
+			if k == "custom_tags" {
+				tags, ok := p.Attributes["custom_tags"]
+				if !ok || fmt.Sprint(tags) == "[]" || tags == nil {
+					return fmt.Errorf("请填写%s", f.Label)
+				}
+			}
+			if k == "private_credentials" && p.PrivateCredentials == nil && !p.HasPrivateCredentials {
+				return fmt.Errorf("请填写%s", f.Label)
+			}
+		}
+	}
+	return nil
 }
 
 const VisibleSQL = "p.status='published' AND p.approved_version=p.version AND c.enabled=true"
@@ -46,6 +78,8 @@ const ProductJSON = `jsonb_build_object(
  'legacy_category',p.legacy_category,'verification_status',p.verification_status,
  'created_at',p.created_at,'updated_at',p.updated_at,'published_at',p.published_at,
  'price_amount',p.price_amount::text,'price_note',CASE WHEN p.price_unit='unknown' THEN '原站报价，单位待核对' ELSE '' END,
+ 'rental_quotes',p.rental_quotes,'has_private_credentials',EXISTS(SELECT 1 FROM product_private_credentials pc WHERE pc.product_id=p.id),
+ 'consultation_count',(SELECT count(*) FROM product_consultations co WHERE co.product_id=p.id),
  'image_total',(SELECT count(*) FROM product_images pi WHERE pi.product_id=p.id),
  'images',COALESCE((SELECT jsonb_agg(i.obj ORDER BY i.sort_order,i.media_id) FROM (
  SELECT pi.sort_order,pi.media_id,jsonb_build_object('id',m.id,'alt',m.filename,'status',m.status,

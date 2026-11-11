@@ -14,6 +14,7 @@ import (
 )
 
 func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Actor, id string, in catalog.ProductInput) (map[string]any, error) {
+	catalog.NormalizeInput(&in)
 	attrs, _ := json.Marshal(in.Attributes)
 	if in.Attributes == nil {
 		attrs = []byte("{}")
@@ -25,10 +26,10 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 	defer tx.Rollback(ctx)
 	validateInput := func() error {
 		check := in
-		if id != "" && utf8.RuneCountInString(in.Title) > 100 {
+		if id != "" && utf8.RuneCountInString(in.Title) > 1000 {
 			var original, source string
 			if tx.QueryRow(ctx, "SELECT title,source FROM products WHERE id=$1", id).Scan(&original, &source) == nil && source == "legacy" && original == in.Title {
-				check.Title = string([]rune(original)[:100])
+				check.Title = string([]rune(original)[:1000])
 			}
 		}
 		if e := ValidateProductInput(ctx, tx, check, false); e != nil {
@@ -40,7 +41,7 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 		if e = validateInput(); e != nil {
 			return nil, e
 		}
-		replay, hash, replayErr := replayProduct(ctx, tx, actor.ID, "admin-create", in.RequestID, in)
+		replay, hash, replayErr := replayProduct(ctx, tx, actor.ID, "admin-create", in.RequestID, in, s.CredentialKey)
 		if replayErr != nil {
 			return nil, productReplayError(replayErr)
 		}
@@ -53,18 +54,26 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 			return map[string]any{"data": p}, nil
 		}
 		id = s.NewID()
-		_, e = tx.Exec(ctx, `INSERT INTO products(id,product_code,category_id,title,trade_type,price_unit,price_amount,attributes,description,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'platform')`, id, "QY-"+strings.ToUpper(strings.ReplaceAll(id, "-", "")[:10]), in.CategoryID, strings.TrimSpace(in.Title), in.TradeType, in.PriceUnit, in.PriceAmount, attrs, in.Description)
+		code, err := nextProductCode(ctx, tx, in.TradeType)
+		if err != nil {
+			return nil, managementStoreError(err)
+		}
+		_, e = tx.Exec(ctx, `INSERT INTO products(id,product_code,category_id,title,trade_type,price_unit,price_amount,attributes,description,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'platform')`, id, code, in.CategoryID, strings.TrimSpace(in.Title), in.TradeType, in.PriceUnit, in.PriceAmount, attrs, in.Description)
 		if e == nil {
 			e = recordProductReplay(ctx, tx, actor.ID, "admin-create", in.RequestID, hash, id)
 		}
 	} else {
 		var version int
-		e = tx.QueryRow(ctx, "SELECT version FROM products WHERE id=$1 FOR UPDATE", id).Scan(&version)
+		var originalTrade string
+		e = tx.QueryRow(ctx, "SELECT version,trade_type FROM products WHERE id=$1 FOR UPDATE", id).Scan(&version, &originalTrade)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil, fault.New(fault.NotFound, "NOT_FOUND", "商品不存在")
 		}
 		if e == nil && version != in.ExpectedVersion {
 			return nil, fault.New(fault.Conflict, "VERSION_CONFLICT", "商品已更新，请重新加载")
+		}
+		if e == nil && originalTrade != in.TradeType {
+			return nil, fault.New(fault.Invalid, "TRADE_TYPE_IMMUTABLE", "已保存商品的租售类型不可更改，如需更换请新建资产")
 		}
 		if e == nil {
 			e = validateInput()
@@ -74,6 +83,9 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 		}
 	}
 	if e != nil {
+		return nil, managementStoreError(e)
+	}
+	if e = saveProductExtras(ctx, tx, id, s.CredentialKey, in); e != nil {
 		return nil, managementStoreError(e)
 	}
 	_, e = tx.Exec(ctx, "INSERT INTO admin_logs(id,user_id,action,resource_id) VALUES($1,$2,'product.save',$3)", s.NewID(), actor.ID, id)
@@ -95,9 +107,9 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 		return nil, managementStoreError(e)
 	}
 	defer tx.Rollback(ctx)
-	var status, source, title, description string
+	var status, source, title, description, tradeType string
 	var version int
-	e = tx.QueryRow(ctx, "SELECT status,source,title,description,version FROM products WHERE id=$1 FOR UPDATE", id).Scan(&status, &source, &title, &description, &version)
+	e = tx.QueryRow(ctx, "SELECT status,source,title,description,version,trade_type FROM products WHERE id=$1 FOR UPDATE", id).Scan(&status, &source, &title, &description, &version, &tradeType)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, fault.New(fault.NotFound, "NOT_FOUND", "商品不存在")
 	}
@@ -111,14 +123,17 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 	if e != nil {
 		return nil, e
 	}
+	if target == "sold" && tradeType != "sale" || target == "rented" && tradeType != "rent" {
+		return nil, fault.New(fault.Invalid, "INVALID_STATE", "成交状态与交易类型不符")
+	}
 	if target == "pending" || target == "published" {
 		var input catalog.ProductInput
-		e = tx.QueryRow(ctx, "SELECT category_id,title,trade_type,price_unit,price_amount::text,attributes,description FROM products WHERE id=$1", id).Scan(&input.CategoryID, &input.Title, &input.TradeType, &input.PriceUnit, &input.PriceAmount, &input.Attributes, &input.Description)
+		e = tx.QueryRow(ctx, "SELECT category_id,title,trade_type,price_unit,price_amount::text,attributes,description,rental_quotes,EXISTS(SELECT 1 FROM product_private_credentials pc WHERE pc.product_id=products.id) FROM products WHERE id=$1", id).Scan(&input.CategoryID, &input.Title, &input.TradeType, &input.PriceUnit, &input.PriceAmount, &input.Attributes, &input.Description, &input.RentalQuotes, &input.HasPrivateCredentials)
 		if e != nil {
 			return nil, managementStoreError(e)
 		}
-		if source == "legacy" && utf8.RuneCountInString(input.Title) > 100 {
-			input.Title = string([]rune(input.Title)[:100])
+		if source == "legacy" && utf8.RuneCountInString(input.Title) > 1000 {
+			input.Title = string([]rune(input.Title)[:1000])
 		}
 		if e = ValidateProductInput(ctx, tx, input, true); e != nil {
 			return nil, fault.New(fault.Invalid, "INVALID_PRODUCT", e.Error())

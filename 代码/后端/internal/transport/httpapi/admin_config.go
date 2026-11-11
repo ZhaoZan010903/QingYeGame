@@ -19,7 +19,7 @@ var codePattern = management.CodePattern
 func validateFilters(groups []filterGroup) error { return management.ValidateFilters(groups) }
 func validatePresentation(raw []byte) error      { return management.ValidatePresentation(raw) }
 func (a *App) managementService() *managementapp.Service {
-	return managementapp.New(&postgres.ManagementStore{DB: a.DB, NewID: newID}, func(raw []byte) error { _, err := parseRecommendations(raw); return err }, func() any { return defaultRecommendations() })
+	return managementapp.New(&postgres.ManagementStore{DB: a.DB, NewID: newID, CredentialKey: a.Config.ProductCredentialKey}, func(raw []byte) error { _, err := parseRecommendations(raw); return err }, func() any { return defaultRecommendations() })
 }
 func managementActor(u *User) management.Actor { return management.Actor{ID: u.ID, Role: u.Role} }
 func (a *App) adminCategories(w http.ResponseWriter, r *http.Request) {

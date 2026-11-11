@@ -1,6 +1,21 @@
 import type { Product } from "./types";
 
 export type HomeSectionSource = "hot" | "recommended" | "newest";
+export interface HomeSlide {
+  productId: string;
+  title: string;
+  description: string;
+  tradeLabel: string;
+  serverLabel: string;
+  priceLabel: string;
+  imageId?: string;
+  imagePositionX: number;
+  imagePositionY: number;
+  imageFit: "cover" | "contain";
+  layout: "image-right" | "image-left" | "overlay";
+  textAlign: "left" | "center" | "right";
+  verticalAlign: "top" | "center" | "bottom";
+}
 export interface HomeSectionConfig {
   source: HomeSectionSource;
   title: string;
@@ -14,6 +29,7 @@ export interface HomeShortcut {
   icon: "arrow" | "plus";
 }
 export interface HomePresentation {
+  slides?: HomeSlide[];
   editorial: { title: string; description: string; intervalMs: number };
   sections: HomeSectionConfig[];
   shortcuts: HomeShortcut[];
@@ -24,6 +40,7 @@ export interface HomePresentation {
  * Inventory, ranking, category filters and contact details always belong to their own APIs.
  */
 export const defaultHomePresentation: HomePresentation = {
+  slides: [],
   editorial: {
     title: "本期甄选",
     description: "每一份热爱，都有独特的模样",
@@ -158,6 +175,46 @@ export function resolveHomePresentation(value?: unknown): HomePresentation {
       })
     : defaults.shortcuts.map((shortcut) => ({ ...shortcut }));
   return {
+    slides: Array.isArray(input.slides)
+      ? input.slides.slice(0, 12).flatMap((entry): HomeSlide[] => {
+          const slide = record(entry);
+          if (
+            typeof slide.productId !== "string" ||
+            !slide.productId ||
+            typeof slide.title !== "string" ||
+            !slide.title.trim()
+          )
+            return [];
+          return [
+            {
+              productId: slide.productId,
+              title: text(slide.title, "", 100),
+              description: text(slide.description, "", 300),
+              tradeLabel: text(slide.tradeLabel, "", 24),
+              serverLabel: text(slide.serverLabel, "", 60),
+              priceLabel: text(slide.priceLabel, "", 60),
+              imageId:
+                typeof slide.imageId === "string" ? slide.imageId : undefined,
+              imagePositionX: integer(slide.imagePositionX, 50, 0, 100),
+              imagePositionY: integer(slide.imagePositionY, 50, 0, 100),
+              imageFit: slide.imageFit === "cover" ? "cover" : "contain",
+              layout:
+                slide.layout === "overlay" || slide.layout === "image-left"
+                  ? slide.layout
+                  : "image-right",
+              textAlign:
+                slide.textAlign === "center" || slide.textAlign === "right"
+                  ? slide.textAlign
+                  : "left",
+              verticalAlign:
+                slide.verticalAlign === "top" ||
+                slide.verticalAlign === "bottom"
+                  ? slide.verticalAlign
+                  : "center",
+            },
+          ];
+        })
+      : [],
     editorial: {
       title: text(editorial.title, defaults.editorial.title, 32),
       description: text(editorial.description, defaults.editorial.description),
@@ -189,6 +246,55 @@ export function readHomePresentation(value?: unknown): HomePresentation {
   };
   if (typeof value !== "object" || Array.isArray(value)) return invalid();
   const input = value as Record<string, unknown>;
+  if (input.slides !== undefined) {
+    if (!Array.isArray(input.slides) || input.slides.length > 12)
+      return invalid();
+    const seen = new Set<string>();
+    for (const entry of input.slides) {
+      const s = record(entry);
+      if (
+        typeof s.productId !== "string" ||
+        !s.productId ||
+        seen.has(s.productId) ||
+        typeof s.title !== "string" ||
+        !s.title.trim()
+      )
+        return invalid();
+      seen.add(s.productId);
+      for (const [key, max] of Object.entries({
+        title: 100,
+        description: 300,
+        tradeLabel: 24,
+        serverLabel: 60,
+        priceLabel: 60,
+      })) {
+        if (
+          s[key] !== undefined &&
+          (typeof s[key] !== "string" || (s[key] as string).length > max)
+        )
+          return invalid();
+      }
+      for (const key of ["imagePositionX", "imagePositionY"])
+        if (
+          s[key] !== undefined &&
+          (typeof s[key] !== "number" ||
+            !Number.isInteger(s[key]) ||
+            (s[key] as number) < 0 ||
+            (s[key] as number) > 100)
+        )
+          return invalid();
+      for (const [key, allowed] of Object.entries({
+        imageFit: ["cover", "contain"],
+        layout: ["image-right", "image-left", "overlay"],
+        textAlign: ["left", "center", "right"],
+        verticalAlign: ["top", "center", "bottom"],
+      }))
+        if (s[key] !== undefined && !allowed.includes(String(s[key])))
+          return invalid();
+      if (s.imageId !== undefined && typeof s.imageId !== "string")
+        return invalid();
+    }
+  }
   const checkText = (
     item: Record<string, unknown>,
     key: string,

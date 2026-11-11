@@ -1,9 +1,23 @@
 package management
 
 import (
+	"qingye/backend/internal/domain/catalog"
 	"qingye/backend/internal/domain/fault"
 	"testing"
 )
+
+func TestPublishTemplateCannotReuseDedicatedFields(t *testing.T) {
+	for _, key := range []string{"custom_tags", "private_credentials", "qq_account", "qq-account", "qqaccount", "qq_password", "password", "secret_note"} {
+		if err := ValidateFilters([]catalog.FilterGroup{{Key: key, Label: "错误配置", Type: "text"}}); err == nil {
+			t.Fatalf("reserved template field accepted: %s", key)
+		}
+	}
+	for _, key := range []string{"game", "tags", "server", "custom_style"} {
+		if err := ValidateFilters([]catalog.FilterGroup{{Key: key, Label: "历史兼容", Type: "text"}}); err != nil {
+			t.Fatalf("compatible template field rejected: %s: %v", key, err)
+		}
+	}
+}
 
 func TestReviewCannotBypassMemberApproval(t *testing.T) {
 	cases := []struct {

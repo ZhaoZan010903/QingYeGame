@@ -31,6 +31,28 @@ body {
 .site-nav .main-links a.active {
   background: var(--bg-subtle);
 }
+@media (min-width: 761px) and (max-width: 960px) {
+  .site-nav {
+    gap: 12px;
+  }
+  .site-nav .nav-search {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    padding: 0;
+    flex-shrink: 0;
+    justify-content: center;
+    margin-left: auto;
+  }
+  .site-nav .nav-search > span,
+  .site-nav .nav-search kbd,
+  .site-nav .chat-nav-label {
+    display: none;
+  }
+  .site-nav .nav-actions {
+    gap: 8px;
+  }
+}
 .reading-progress {
   background: var(--text-secondary);
 }

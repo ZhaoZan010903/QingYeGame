@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"qingye/backend/internal/domain/fault"
+	"qingye/backend/internal/domain/management"
+	"strings"
 	"time"
 )
 
@@ -61,8 +64,17 @@ func (a *CatalogStore) RecordView(ctx context.Context, id, hash string) (bool, e
 	return recorded, e
 }
 func (a *CatalogStore) Featured(ctx context.Context) ([]map[string]any, error) {
-	rows, _, e := a.ProductRows(ctx, VisibleSQL+" AND p.manual_rank IS NOT NULL", nil, "p.manual_rank ASC,p.id", 3, 0)
-	return rows, e
+	// Only an explicit administrator slide enters the carousel; no product-copy fallback.
+	projection := strings.Replace(fmt.Sprintf(ProductJSON, 1), "ORDER BY pi.sort_order,pi.media_id LIMIT 1", "ORDER BY (pi.media_id=COALESCE(sl.value->>'imageId','')) DESC,pi.sort_order,pi.media_id LIMIT 1", 1)
+	return a.JSONRows(ctx, "SELECT "+projection+` FROM site_settings ss CROSS JOIN LATERAL jsonb_array_elements(COALESCE(ss.value->'slides','[]')) WITH ORDINALITY sl(value,n) JOIN products p ON p.id=sl.value->>'productId' JOIN categories c ON c.id=p.category_id WHERE ss.key='home_presentation' AND `+VisibleSQL+" ORDER BY sl.n LIMIT 12")
+}
+func (a *CatalogStore) PublishForm(ctx context.Context) (json.RawMessage, error) {
+	var raw json.RawMessage
+	err := a.DB.QueryRow(ctx, "SELECT value FROM site_settings WHERE key='publish_form'").Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		raw, err = json.Marshal(management.DefaultPublishForm())
+	}
+	return raw, err
 }
 func (a *CatalogStore) HomePresentation(ctx context.Context) (json.RawMessage, error) {
 	var raw json.RawMessage

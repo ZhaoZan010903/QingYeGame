@@ -31,6 +31,7 @@ func (a *App) Routes() http.Handler {
 	if a.surface() == "admin" {
 		a.registerAdmin(mux)
 		a.registerAdminImages(mux)
+		mux.HandleFunc("GET /api/v1/publish-form", a.publicPublishForm)
 		// Preview reads run behind the same administrator gate as management writes.
 		mux.HandleFunc("GET /api/v1/categories", a.publicCategories)
 		mux.HandleFunc("GET /api/v1/products", a.publicProducts)

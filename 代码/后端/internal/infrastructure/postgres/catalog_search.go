@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"qingye/backend/internal/domain/catalog"
+	"strings"
 )
 
 func ProductOrder(sort string) (string, error) {
@@ -48,14 +49,19 @@ func (a *CatalogStore) search(ctx context.Context, q catalog.SearchInput, countT
 	if q.TradeType != "" && q.TradeType != "all" {
 		add("p.trade_type=$%d", q.TradeType)
 	}
+	priceSQL := "p.price_amount"
 	if q.PriceUnit != "" && q.PriceUnit != "all" {
-		add("p.price_unit=$%d", q.PriceUnit)
+		args = append(args, q.PriceUnit)
+		n := len(args)
+		where += fmt.Sprintf(" AND (p.price_unit=$%[1]d OR EXISTS(SELECT 1 FROM jsonb_array_elements(p.rental_quotes) quote WHERE quote->>'unit'=$%[1]d))", n)
+		priceSQL = fmt.Sprintf("COALESCE((SELECT (quote->>'amount')::numeric FROM jsonb_array_elements(p.rental_quotes) quote WHERE quote->>'unit'=$%[1]d LIMIT 1),CASE WHEN p.price_unit=$%[1]d THEN p.price_amount END)", n)
+		order = strings.ReplaceAll(order, "p.price_amount", priceSQL)
 	}
 	if q.MinPrice != nil {
-		add("p.price_amount >= $%d::numeric", *q.MinPrice)
+		add(priceSQL+" >= $%d::numeric", *q.MinPrice)
 	}
 	if q.MaxPrice != nil {
-		add("p.price_amount <= $%d::numeric", *q.MaxPrice)
+		add(priceSQL+" <= $%d::numeric", *q.MaxPrice)
 	}
 	for key, values := range q.Filters {
 		if len(values) > 0 {
@@ -69,7 +75,22 @@ func (a *CatalogStore) search(ctx context.Context, q catalog.SearchInput, countT
 			return nil, 0, e
 		}
 	}
-	return a.productRows(ctx, where, args, order, q.Limit, q.Offset, true, countTotal)
+	items, total, err := a.productRows(ctx, where, args, order, q.Limit, q.Offset, true, countTotal)
+	if err == nil && q.PriceUnit != "" && q.PriceUnit != "all" {
+		for _, p := range items {
+			if quotes, ok := p["rental_quotes"].([]any); ok {
+				for _, raw := range quotes {
+					quote, ok := raw.(map[string]any)
+					if ok && quote["unit"] == q.PriceUnit {
+						p["price_unit"] = q.PriceUnit
+						p["price_amount"] = quote["amount"]
+						break
+					}
+				}
+			}
+		}
+	}
+	return items, total, err
 }
 
 // 排序表达式固定，画像值只作为 JSON 参数绑定。

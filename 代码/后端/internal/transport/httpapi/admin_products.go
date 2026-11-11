@@ -16,6 +16,7 @@ func (a *App) adminOnly(h http.HandlerFunc) http.HandlerFunc {
 	})
 }
 func (a *App) registerAdmin(m routeRegistrar) {
+	m.HandleFunc("GET /api/v1/admin/products/{id}/private-credentials", a.adminOnly(a.adminPrivateCredentials))
 	m.HandleFunc("GET /api/v1/admin/products", a.adminOnly(a.adminProducts))
 	m.HandleFunc("GET /api/v1/admin/products/{id}", a.adminOnly(a.adminProduct))
 	m.HandleFunc("POST /api/v1/admin/products", a.adminOnly(a.adminSaveProduct))
@@ -99,5 +100,15 @@ func (a *App) adminFeatured(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, err := a.managementService().FeatureProduct(r.Context(), managementActor(u), r.PathValue("id"), in.Rank)
+	memberResponse(w, data, err)
+}
+
+func (a *App) adminPrivateCredentials(w http.ResponseWriter, r *http.Request) {
+	u, ok := a.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	data, err := a.managementService().PrivateCredentials(r.Context(), managementActor(u), r.PathValue("id"))
 	memberResponse(w, data, err)
 }

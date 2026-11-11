@@ -72,11 +72,13 @@ func (s *Service) SaveSetting(ctx context.Context, actor management.Actor, key s
 	if err := management.ValidateActor(actor); err != nil {
 		return nil, err
 	}
-	if key != "home_presentation" && key != "recommendation" {
+	if key != "home_presentation" && key != "recommendation" && key != "publish_form" {
 		return nil, fault.New(fault.Invalid, "UNKNOWN_SETTING", "此配置项尚未开放编辑")
 	}
 	var err error
-	if key == "home_presentation" {
+	if key == "publish_form" {
+		err = management.ValidatePublishForm(in.Value)
+	} else if key == "home_presentation" {
 		err = management.ValidatePresentation(in.Value)
 	} else {
 		err = s.validateRecommendation(in.Value)
@@ -185,6 +187,9 @@ func (s *Service) Products(ctx context.Context, actor management.Actor, in manag
 	if in.Limit < 1 || in.Limit > 50 || in.Offset < 0 || in.Offset > 1000000 {
 		return nil, fault.New(fault.Invalid, "INVALID_CURSOR", "分页参数无效")
 	}
+	if in.Status != "" && in.Status != "all" && in.Status != "draft" && in.Status != "pending" && in.Status != "published" && in.Status != "rejected" && in.Status != "offline" && in.Status != "sold" && in.Status != "rented" {
+		return nil, fault.New(fault.Invalid, "INVALID_STATUS", "商品状态无效")
+	}
 	return s.store.Products(ctx, in)
 }
 func (s *Service) Product(ctx context.Context, actor management.Actor, id string) (map[string]any, error) {
@@ -192,4 +197,17 @@ func (s *Service) Product(ctx context.Context, actor management.Actor, id string
 		return nil, err
 	}
 	return s.store.Product(ctx, id)
+}
+
+func (s *Service) PrivateCredentials(ctx context.Context, actor management.Actor, id string) (map[string]any, error) {
+	if err := management.ValidateActor(actor); err != nil {
+		return nil, err
+	}
+	repo, ok := s.store.(interface {
+		PrivateCredentials(context.Context, management.Actor, string) (map[string]any, error)
+	})
+	if !ok {
+		return nil, fault.New(fault.Unavailable, "CREDENTIAL_STORAGE_UNAVAILABLE", "私密资料暂不可用")
+	}
+	return repo.PrivateCredentials(ctx, actor, id)
 }

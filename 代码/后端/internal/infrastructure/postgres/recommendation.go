@@ -23,7 +23,7 @@ func (a *RecommendationStore) Report(ctx context.Context) (map[string]any, error
 	}
 	var state map[string]any
 	_ = a.DB.QueryRow(ctx, "SELECT value FROM site_settings WHERE key='recommendation_state'").Scan(&state)
-	return map[string]any{"data": rows, "rule_version": state["rule_version"], "computed_at": state["computed_at"], "applied_config": state["config"], "config": config, "rule": "按配置窗口内的有效浏览与首次有效收藏加权；上架时间不加热度分，个性化推荐独立计算"}, nil
+	return map[string]any{"data": rows, "rule_version": state["rule_version"], "computed_at": state["computed_at"], "applied_config": state["config"], "config": config, "rule": "按配置窗口内有效浏览、首次有效收藏及首次咨询人数加权；同一账号重复咨询不重复加分，上架时间不加热度分"}, nil
 }
 
 func LoadRecommendations(ctx context.Context, q RowQuerier) (recommendation.Config, error) {
@@ -66,23 +66,28 @@ SELECT 1 FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=h.pr
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO product_hot_scores(product_id,score,views,favorites,new_bonus,batch_id,computed_at)
- SELECT p.id,v.n::bigint*$2::int+f.n::bigint*$3::int,
- v.n,f.n,0,$1,$5
+	_, err = tx.Exec(ctx, `INSERT INTO product_hot_scores(product_id,score,views,favorites,consultations,new_bonus,batch_id,computed_at)
+ SELECT p.id,v.n::bigint*$2::int+f.n::bigint*$3::int+q.n::bigint*$6::int,
+ v.n,f.n,q.n,0,$1,$5
  FROM products p JOIN categories c ON c.id=p.category_id
  CROSS JOIN LATERAL(SELECT count(*)::int n FROM product_views_daily WHERE product_id=p.id
    AND viewed_date BETWEEN ($5::timestamptz AT TIME ZONE 'Asia/Shanghai')::date-($4::int-1) AND ($5::timestamptz AT TIME ZONE 'Asia/Shanghai')::date
    AND created_at<=$5)v
- CROSS JOIN LATERAL(SELECT count(*)::int n FROM favorites WHERE product_id=p.id AND active
-   AND created_at>=(date_trunc('day',$5::timestamptz AT TIME ZONE 'Asia/Shanghai')-make_interval(days=>$4::int-1)) AT TIME ZONE 'Asia/Shanghai'
-   AND created_at<=$5)f
- WHERE `+VisibleSQL+` ON CONFLICT(product_id) DO UPDATE SET score=EXCLUDED.score,views=EXCLUDED.views,favorites=EXCLUDED.favorites,new_bonus=EXCLUDED.new_bonus,batch_id=EXCLUDED.batch_id,computed_at=EXCLUDED.computed_at`, batch, config.ViewWeight, config.FavoriteWeight, config.WindowDays, asOf)
+ CROSS JOIN LATERAL(SELECT count(*)::int n FROM favorites fav JOIN users u ON u.id=fav.user_id
+   WHERE fav.product_id=p.id AND fav.active AND u.enabled AND u.role='member' AND p.owner_id IS DISTINCT FROM fav.user_id
+   AND fav.created_at>=(date_trunc('day',$5::timestamptz AT TIME ZONE 'Asia/Shanghai')-make_interval(days=>$4::int-1)) AT TIME ZONE 'Asia/Shanghai'
+   AND fav.created_at<=$5)f
+ CROSS JOIN LATERAL(SELECT count(*)::int n FROM product_consultations pc JOIN users u ON u.id=pc.member_id
+   WHERE pc.product_id=p.id AND u.enabled AND u.role='member' AND p.owner_id IS DISTINCT FROM pc.member_id
+   AND pc.first_consulted_at>=(date_trunc('day',$5::timestamptz AT TIME ZONE 'Asia/Shanghai')-make_interval(days=>$4::int-1)) AT TIME ZONE 'Asia/Shanghai'
+   AND pc.first_consulted_at<=$5)q
+ WHERE `+VisibleSQL+` ON CONFLICT(product_id) DO UPDATE SET score=EXCLUDED.score,views=EXCLUDED.views,favorites=EXCLUDED.favorites,consultations=EXCLUDED.consultations,new_bonus=EXCLUDED.new_bonus,batch_id=EXCLUDED.batch_id,computed_at=EXCLUDED.computed_at`, batch, config.ViewWeight, config.FavoriteWeight, config.WindowDays, asOf, config.ConsultationWeight)
 	if err != nil {
 		return err
 	}
 	// Persist the exact applied rule alongside the batch, separately from future editable settings.
 	var hasEngagement bool
-	err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM product_hot_scores WHERE views>0 OR favorites>0)").Scan(&hasEngagement)
+	err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM product_hot_scores WHERE views>0 OR favorites>0 OR consultations>0)").Scan(&hasEngagement)
 	if err != nil {
 		return err
 	}

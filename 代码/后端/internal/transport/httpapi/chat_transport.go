@@ -21,9 +21,11 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/jackc/pgx/v5"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/webtransport-go"
+	"github.com/redis/go-redis/v9"
 )
 
 const chatFrameLimit = 16 << 10
@@ -183,6 +185,12 @@ func (a *App) acceptChatTicket(w http.ResponseWriter, r *http.Request, transport
 	// Only a short-lived, one-use random ticket is ever carried in the URL; no access logging here.
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	raw, err := a.Redis.GetDel(ctx, "qingye:chat:ticket:"+a.surface()+":"+tokenHash(ticket)).Bytes()
+	// Infrastructure failures are retryable; they do not invalidate the user's login.
+	if err != nil && !errors.Is(err, redis.Nil) {
+		cancel()
+		fail(w, 503, "CHAT_UNAVAILABLE", "在线咨询暂不可用，请稍后重连")
+		return chatTicket{}, "", "", false
+	}
 	var binding chatTicket
 	if err != nil || json.Unmarshal(raw, &binding) != nil || binding.Surface != a.surface() || binding.Origin != r.Header.Get("Origin") || binding.Transport != transport {
 		cancel()
@@ -195,6 +203,11 @@ func (a *App) acceptChatTicket(w http.ResponseWriter, r *http.Request, transport
 		return chatTicket{}, "", "", false
 	}
 	u, err := a.currentUserBySession(ctx, binding.Session)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		cancel()
+		fail(w, 503, "SESSION_UNAVAILABLE", "会话服务暂不可用，请稍后重连")
+		return chatTicket{}, "", "", false
+	}
 	if err != nil || u.ID != binding.User {
 		cancel()
 		fail(w, 401, "SESSION_EXPIRED", "请重新登录")

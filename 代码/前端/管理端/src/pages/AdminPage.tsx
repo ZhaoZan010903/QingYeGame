@@ -40,6 +40,7 @@ import { adminProductID } from "../lib/product-links";
 import { ChatPage } from "../components/ChatPage";
 import { useChat } from "../components/ChatNotifications";
 import { AdminHelp, GuideButton } from "../components/AdminGuide";
+import { PublishFormSettings } from "../components/PublishFormSettings";
 import "../admin.css";
 const publicSite = String(import.meta.env.VITE_PUBLIC_SITE_URL ?? "").replace(
   /\/$/,
@@ -74,6 +75,33 @@ function Products({ review = false }: { review?: boolean }) {
   const [version, setVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>();
+  const [actionID, setActionID] = useState("");
+  async function changeListing(id: string, kind: "publish" | "offline") {
+    const reason =
+      kind === "offline"
+        ? window.prompt("填写下架原因（会记录到商品操作历史）")
+        : "";
+    if (kind === "offline" && !reason?.trim()) return;
+    if (
+      kind === "publish" &&
+      !window.confirm("确认重新上架？系统会检查资料、图片及审核版本。")
+    )
+      return;
+    setActionID(id);
+    setError(undefined);
+    try {
+      const latest = await adminApi.product(id);
+      await adminApi.action(id, kind === "publish" ? "publish" : "status", {
+        expected_version: latest.version,
+        ...(kind === "offline" ? { action: kind, reason: reason!.trim() } : {}),
+      });
+      setVersion((v) => v + 1);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setActionID("");
+    }
+  }
   const selected =
     params.get("edit") || (params.get("new") === "1" ? "new" : null);
   function setSelected(id: string | null) {
@@ -212,6 +240,7 @@ function Products({ review = false }: { review?: boolean }) {
                         <th>商品</th>
                         <th>报价</th>
                         <th>来源 / 状态</th>
+                        <th>咨询人数</th>
                         <th>管理</th>
                       </tr>
                     </thead>
@@ -239,6 +268,7 @@ function Products({ review = false }: { review?: boolean }) {
                               {statusNames[p.status]}
                             </strong>
                           </td>
+                          <td>{p.consultationCount ?? 0}</td>
                           <td>
                             <button
                               className="button-outline"
@@ -247,6 +277,31 @@ function Products({ review = false }: { review?: boolean }) {
                             >
                               {review ? "查看并审核" : "编辑商品"}
                             </button>
+                            {!review && p.status === "published" && (
+                              <button
+                                className="text-button"
+                                disabled={!!actionID || loading}
+                                onClick={() =>
+                                  void changeListing(p.id, "offline")
+                                }
+                              >
+                                {actionID === p.id ? "处理中…" : "下架"}
+                              </button>
+                            )}
+                            {!review &&
+                              ["offline", "sold", "rented"].includes(
+                                p.status,
+                              ) && (
+                                <button
+                                  className="text-button"
+                                  disabled={!!actionID || loading}
+                                  onClick={() =>
+                                    void changeListing(p.id, "publish")
+                                  }
+                                >
+                                  {actionID === p.id ? "处理中…" : "重新上架"}
+                                </button>
+                              )}
                             {p.status === "published" && publicSite && (
                               <a
                                 target="_blank"
@@ -317,7 +372,7 @@ export function AdminPage() {
         ["settings", "首页装修", PanelsTopLeft],
         ["recommendations", "热门榜单", TrendingUp],
         ["contacts", "客服与二维码", Headphones],
-        ["categories", "分类与筛选", ListFilter],
+        ["categories", "发布表单设置", ListFilter],
         ["pages", "说明与协议", FileText],
         ["users", "会员管理", Users],
       ],
@@ -375,6 +430,8 @@ export function AdminPage() {
             <AdminUsers />
           ) : tab === "recommendations" ? (
             <AdminRecommendations />
+          ) : tab === "categories" ? (
+            <PublishFormSettings />
           ) : resources.includes(tab as Resource) ? (
             <AdminResources key={tab} resource={tab as Resource} />
           ) : (

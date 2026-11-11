@@ -139,6 +139,14 @@ export function productFrom(value: RecordData): Product {
       value.legacy_price == null ? undefined : String(value.legacy_price),
     legacyCategory: value.legacy_category,
     priceNote: value.price_note,
+    rentalQuotes: Array.isArray(value.rental_quotes)
+      ? value.rental_quotes.map((q: RecordData) => ({
+          unit: q.unit,
+          amount: String(q.amount),
+        }))
+      : [],
+    hasPrivateCredentials: !!value.has_private_credentials,
+    consultationCount: Number(value.consultation_count ?? 0),
     attributes: a,
     title: value.title ?? "未命名账号",
     mode: value.trade_type ?? value.mode ?? "sale",
@@ -151,7 +159,16 @@ export function productFrom(value: RecordData): Product {
     gender: a.gender ?? value.gender ?? "unknown",
     level: readLevel(a.level ?? a.xvip ?? value.level),
     kind: a.kind ?? value.kind ?? "single",
-    tags: a.tags ?? value.tags ?? [],
+    tags: [
+      ...new Set(
+        [
+          ...(Array.isArray(a.tags ?? value.tags)
+            ? (a.tags ?? value.tags)
+            : []),
+          ...(Array.isArray(a.custom_tags) ? a.custom_tags : []),
+        ].filter((tag): tag is string => typeof tag === "string"),
+      ),
+    ],
     description: value.description ?? "",
     art: Number(value.art ?? -1),
     images,

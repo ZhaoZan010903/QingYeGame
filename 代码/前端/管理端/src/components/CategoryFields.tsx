@@ -24,7 +24,7 @@ export function CategoryFields({
   return (
     <section>
       <div className="section-heading">
-        <h3>用户可以筛选什么？</h3>
+        <h3>发布时填写哪些账号属性？</h3>
         <span>例如区服、性别、账号类型</span>
       </div>
       <p className="field-hint">
@@ -45,76 +45,123 @@ export function CategoryFields({
             <label className="form-field">
               选择方式
               <select
-                value={group.multiple ? "multiple" : "single"}
+                value={
+                  group.type === "text"
+                    ? "text"
+                    : group.multiple || group.type === "multiselect"
+                      ? "multiple"
+                      : "single"
+                }
                 onChange={(e) =>
-                  update(index, { multiple: e.target.value === "multiple" })
+                  update(index, {
+                    multiple: e.target.value === "multiple",
+                    type:
+                      e.target.value === "text"
+                        ? "text"
+                        : e.target.value === "multiple"
+                          ? "multiselect"
+                          : "select",
+                  })
                 }
               >
                 <option value="single">单选：只能选择一个</option>
                 <option value="multiple">多选：可以同时选择多个</option>
+                <option value="text">文本：用户自行填写</option>
               </select>
             </label>
           </div>
+          <label className="form-field">
+            输入提示
+            <input
+              maxLength={200}
+              value={group.placeholder ?? ""}
+              onChange={(e) => update(index, { placeholder: e.target.value })}
+            />
+          </label>
+          <label className="agreement-check">
+            <input
+              type="checkbox"
+              checked={!!group.required}
+              disabled={group.enabled === false}
+              onChange={(e) => update(index, { required: e.target.checked })}
+            />
+            发布时必须填写
+          </label>
           <label className="agreement-check">
             <input
               type="checkbox"
               checked={group.enabled !== false}
-              onChange={(e) => update(index, { enabled: e.target.checked })}
+              onChange={(e) =>
+                update(index, {
+                  enabled: e.target.checked,
+                  ...(!e.target.checked ? { required: false } : {}),
+                })
+              }
             />
-            在前台显示这个分组
+            在发布表单与集市筛选中显示
           </label>
-          <div className="filter-options">
-            {group.options.map((option, oi) => (
-              <div className="filter-option-row" key={option.value}>
-                <label className="form-field">
-                  选项 {oi + 1}
-                  <input
-                    aria-label={`${group.label}选项 ${oi + 1}`}
-                    required
-                    maxLength={80}
-                    value={option.label}
-                    onChange={(e) =>
-                      update(index, {
-                        options: group.options.map((o, i) =>
-                          i === oi ? { ...o, label: e.target.value } : o,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-                <label className="agreement-check">
-                  <input
-                    type="checkbox"
-                    checked={option.enabled !== false}
-                    onChange={(e) =>
-                      update(index, {
-                        options: group.options.map((o, i) =>
-                          i === oi ? { ...o, enabled: e.target.checked } : o,
-                        ),
-                      })
-                    }
-                  />
-                  显示
-                </label>
+          {group.type !== "text" && (
+            <>
+              <div className="filter-options">
+                {group.options.map((option, oi) => (
+                  <div className="filter-option-row" key={option.value}>
+                    <label className="form-field">
+                      选项 {oi + 1}
+                      <input
+                        aria-label={`${group.label}选项 ${oi + 1}`}
+                        required
+                        maxLength={80}
+                        value={option.label}
+                        onChange={(e) =>
+                          update(index, {
+                            options: group.options.map((o, i) =>
+                              i === oi ? { ...o, label: e.target.value } : o,
+                            ),
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="agreement-check">
+                      <input
+                        type="checkbox"
+                        checked={option.enabled !== false}
+                        onChange={(e) =>
+                          update(index, {
+                            options: group.options.map((o, i) =>
+                              i === oi
+                                ? { ...o, enabled: e.target.checked }
+                                : o,
+                            ),
+                          })
+                        }
+                      />
+                      显示
+                    </label>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="text-button"
-            disabled={group.options.length >= 200}
-            onClick={() =>
-              update(index, {
-                options: [
-                  ...group.options,
-                  { value: makeCode("option"), label: "新选项", enabled: true },
-                ],
-              })
-            }
-          >
-            <Plus size={14} />
-            添加选项
-          </button>
+              <button
+                type="button"
+                className="text-button"
+                disabled={group.options.length >= 200}
+                onClick={() =>
+                  update(index, {
+                    options: [
+                      ...group.options,
+                      {
+                        value: makeCode("option"),
+                        label: "新选项",
+                        enabled: true,
+                      },
+                    ],
+                  })
+                }
+              >
+                <Plus size={14} />
+                添加选项
+              </button>
+            </>
+          )}
         </div>
       ))}
       {!groups.length && (

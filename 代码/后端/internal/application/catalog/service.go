@@ -214,3 +214,14 @@ func (s *Service) Home(ctx context.Context, identity string) (map[string]any, er
 	}
 	return result, nil
 }
+
+func (s *Service) PublishForm(ctx context.Context) (json.RawMessage, error) {
+	repo, ok := s.repo.(interface {
+		PublishForm(context.Context) (json.RawMessage, error)
+	})
+	if !ok {
+		return nil, fault.New(fault.Unavailable, "FORM_UNAVAILABLE", "发布表单暂不可用")
+	}
+	data, err := repo.PublishForm(ctx)
+	return data, storageError(err)
+}

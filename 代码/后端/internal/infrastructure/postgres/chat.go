@@ -32,6 +32,7 @@ func chatReadColumn(actor chat.Actor) string {
 
 const chatProjection = `jsonb_build_object('id',c.id,'status',c.status,'product',c.product_snapshot,'created_at',c.created_at,'updated_at',c.updated_at,
  'member_name',m.nickname,'admin_name',coalesce(ad.nickname,''),
+ 'product_count',(SELECT count(DISTINCT x.product_snapshot->>'id') FROM chat_messages x WHERE x.conversation_id=c.id AND x.kind='product'),
  'last_message_mine',coalesce((SELECT x.sender_id=$1 FROM chat_messages x WHERE x.conversation_id=c.id ORDER BY x.id DESC LIMIT 1),false),
  'last_message',coalesce((SELECT CASE WHEN x.kind='product' THEN '咨询这个商品' ELSE left(x.body,80) END FROM chat_messages x WHERE x.conversation_id=c.id ORDER BY x.id DESC LIMIT 1),''),
  'last_message_id',coalesce((SELECT max(x.id)::text FROM chat_messages x WHERE x.conversation_id=c.id),'0'),
@@ -46,36 +47,53 @@ func (s *ChatStore) Start(ctx context.Context, actor chat.Actor, in chat.StartIn
 	if _, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", chatAssignmentLock); e != nil {
 		return "", e
 	}
-	var id string
-	e = tx.QueryRow(ctx, "SELECT id FROM chat_conversations WHERE member_id=$1 AND product_id=$2 AND status<>'closed'", actor.ID, in.ProductID).Scan(&id)
-	if errors.Is(e, pgx.ErrNoRows) {
-		var snapshot []byte
-		// 锁住商品可见性再生成公开快照，避免泄露私有字段。
-		e = tx.QueryRow(ctx, `SELECT jsonb_build_object('id',p.id,'code',p.product_code,'title',p.title,'price',p.price_amount::text,'unit',p.price_unit,
+	var snapshot []byte
+	var own bool
+	// 每次发起都重新校验可见性；已有会话不能绕过商品下架权限。
+	e = tx.QueryRow(ctx, `SELECT jsonb_build_object('id',p.id,'code',p.product_code,'title',p.title,'price',p.price_amount::text,'unit',p.price_unit,
+    'trade_type',p.trade_type,'category_name',c.name,'server',coalesce(p.attributes->>'server',''),
     'cover_url',coalesce((SELECT '/api/v1/media/'||i.media_id||'/file?variant=thumb' FROM product_images i JOIN media_files f ON f.id=i.media_id AND f.status='ready' WHERE i.product_id=p.id ORDER BY i.sort_order,i.media_id LIMIT 1),''))
-    FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=$1 AND p.status='published' AND p.approved_version=p.version AND c.enabled FOR SHARE OF p,c`, in.ProductID).Scan(&snapshot)
-		if errors.Is(e, pgx.ErrNoRows) {
-			return "", fault.New(fault.NotFound, "PRODUCT_UNAVAILABLE", "商品暂不可咨询，请刷新商品页面")
-		}
-		if e != nil {
-			return "", e
-		}
-		var open int
-		if e = tx.QueryRow(ctx, "SELECT count(*) FROM chat_conversations WHERE member_id=$1 AND status<>'closed'", actor.ID).Scan(&open); e != nil {
-			return "", e
-		}
-		if open >= 10 {
-			return "", fault.New(fault.Conflict, "CHAT_LIMIT", "同时咨询的商品较多，请先结束不再需要的咨询")
-		}
-		id = generatedID
-		if _, e = tx.Exec(ctx, "INSERT INTO chat_conversations(id,member_id,product_id,product_snapshot) VALUES($1,$2,$3,$4)", id, actor.ID, in.ProductID, snapshot); e != nil {
-			return "", e
-		}
-		if _, e = tx.Exec(ctx, "INSERT INTO chat_messages(conversation_id,sender_id,sender_role,client_id,kind) VALUES($1,$2,'member','product-context','product')", id, actor.ID); e != nil {
-			return "", e
-		}
-	} else if e != nil {
+	  ,coalesce(p.owner_id=$2,false)
+    FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=$1 AND p.status='published' AND p.approved_version=p.version AND c.enabled FOR SHARE OF p,c`, in.ProductID, actor.ID).Scan(&snapshot, &own)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return "", fault.New(fault.NotFound, "PRODUCT_UNAVAILABLE", "商品暂不可咨询，请刷新商品页面")
+	}
+	if e != nil {
 		return "", e
+	}
+	var id, status string
+	e = tx.QueryRow(ctx, "SELECT id,status FROM chat_conversations WHERE member_id=$1 AND merged_into IS NULL FOR UPDATE", actor.ID).Scan(&id, &status)
+	if errors.Is(e, pgx.ErrNoRows) {
+		id = generatedID
+		_, e = tx.Exec(ctx, "INSERT INTO chat_conversations(id,member_id,product_id,product_snapshot) VALUES($1,$2,$3,$4)", id, actor.ID, in.ProductID, snapshot)
+	}
+	if e != nil {
+		return "", e
+	}
+	// 连续双击复用卡片；更换商品或再次展开已结束咨询会保留新的上下文。
+	var repeated bool
+	if e = tx.QueryRow(ctx, `SELECT coalesce((SELECT kind='product' AND product_snapshot->>'id'=$2 AND created_at>now()-interval '2 minutes'
+ FROM chat_messages WHERE conversation_id=$1 ORDER BY id DESC LIMIT 1),false)`, id, in.ProductID).Scan(&repeated); e != nil {
+		return "", e
+	}
+	if !repeated || status == "closed" {
+		if _, e = tx.Exec(ctx, `INSERT INTO chat_messages(conversation_id,sender_id,sender_role,client_id,kind,product_snapshot)
+ VALUES($1,$2,'member',$3,'product',$4)`, id, actor.ID, "context:"+generatedID, snapshot); e != nil {
+			return "", e
+		}
+	}
+	if _, e = tx.Exec(ctx, `UPDATE chat_conversations SET product_id=$2,product_snapshot=$3,updated_at=now(),
+ admin_id=CASE WHEN status='closed' THEN NULL ELSE admin_id END,
+ admin_read_id=CASE WHEN status='closed' THEN 0 ELSE admin_read_id END,
+ status=CASE WHEN status='closed' THEN 'waiting' ELSE status END WHERE id=$1`, id, in.ProductID, snapshot); e != nil {
+		return "", e
+	}
+	if !own {
+		// 按商品和真实会员去重；首次咨询时间不因重复点击刷新热门权重。
+		if _, e = tx.Exec(ctx, `INSERT INTO product_consultations(product_id,member_id) VALUES($1,$2)
+ ON CONFLICT(product_id,member_id) DO UPDATE SET last_consulted_at=now()`, in.ProductID, actor.ID); e != nil {
+			return "", e
+		}
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return "", e
@@ -85,7 +103,7 @@ func (s *ChatStore) Start(ctx context.Context, actor chat.Actor, in chat.StartIn
 
 func (s *ChatStore) List(ctx context.Context, actor chat.Actor, offset int) (map[string]any, error) {
 	const limit = 50
-	where := "c." + chatOwnerColumn(actor) + "=$1"
+	where := "c." + chatOwnerColumn(actor) + "=$1 AND c.merged_into IS NULL"
 	var total, unread int
 	e := s.DB.QueryRow(ctx, "SELECT count(*) FROM chat_conversations c WHERE "+where, actor.ID).Scan(&total)
 	if e == nil {
@@ -107,6 +125,10 @@ func (s *ChatStore) List(ctx context.Context, actor chat.Actor, offset int) (map
 }
 
 func (s *ChatStore) Detail(ctx context.Context, actor chat.Actor, id string) (map[string]any, error) {
+	id, err := s.resolveConversation(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
 	sql := "SELECT " + fmt.Sprintf(chatProjection, chatReadColumn(actor)) + " FROM chat_conversations c JOIN users m ON m.id=c.member_id LEFT JOIN users ad ON ad.id=c.admin_id WHERE c." + chatOwnerColumn(actor) + "=$1 AND c.id=$2"
 	rows, e := s.chatJSONRows(ctx, sql, actor.ID, id)
 	if e != nil {
@@ -119,6 +141,10 @@ func (s *ChatStore) Detail(ctx context.Context, actor chat.Actor, id string) (ma
 }
 
 func (s *ChatStore) Messages(ctx context.Context, actor chat.Actor, id string, page chat.MessagePage) (map[string]any, error) {
+	id, err := s.resolveConversation(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
 	// 返回消息时再次限定归属，避免重分配后旧客服继续读取。
 	var exists bool
 	if e := s.DB.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM chat_conversations WHERE id=$1 AND "+chatOwnerColumn(actor)+"=$2)", id, actor.ID).Scan(&exists); e != nil {
@@ -132,7 +158,7 @@ func (s *ChatStore) Messages(ctx context.Context, actor chat.Actor, id string, p
 	if forward {
 		predicate, order, cursor = "x.id>$3", "ASC", page.After
 	}
-	rows, e := s.chatJSONRows(ctx, `SELECT jsonb_build_object('id',x.id::text,'body',x.body,'kind',x.kind,'sender_role',x.sender_role,'mine',x.sender_id=$2,'created_at',x.created_at,'client_id',CASE WHEN x.sender_id=$2 THEN x.client_id ELSE '' END)
+	rows, e := s.chatJSONRows(ctx, `SELECT jsonb_build_object('id',x.id::text,'body',x.body,'kind',x.kind,'product',x.product_snapshot,'sender_role',x.sender_role,'mine',x.sender_id=$2,'created_at',x.created_at,'client_id',CASE WHEN x.sender_id=$2 THEN x.client_id ELSE '' END)
  FROM chat_messages x JOIN chat_conversations c ON c.id=x.conversation_id WHERE c.id=$1 AND c.`+chatOwnerColumn(actor)+`=$2 AND `+predicate+` ORDER BY x.id `+order+` LIMIT 51`, id, actor.ID, cursor)
 	if e != nil {
 		return nil, e
@@ -154,6 +180,10 @@ func (s *ChatStore) Messages(ctx context.Context, actor chat.Actor, id string, p
 }
 
 func (s *ChatStore) Send(ctx context.Context, actor chat.Actor, id string, in chat.SendInput) (map[string]any, error) {
+	id, err := s.resolveConversation(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
 		return nil, e
@@ -194,6 +224,10 @@ func (s *ChatStore) Send(ctx context.Context, actor chat.Actor, id string, in ch
 }
 
 func (s *ChatStore) Read(ctx context.Context, actor chat.Actor, id string, through int64) (map[string]any, error) {
+	id, err := s.resolveConversation(ctx, actor, id)
+	if err != nil {
+		return nil, err
+	}
 	// 已读位置不越过客户端实际展示的消息。
 	tag, e := s.DB.Exec(ctx, "UPDATE chat_conversations c SET "+chatReadColumn(actor)+"=GREATEST(c."+chatReadColumn(actor)+",coalesce((SELECT max(x.id) FROM chat_messages x WHERE x.conversation_id=c.id AND x.id<=$3),0)) WHERE c.id=$1 AND c."+chatOwnerColumn(actor)+"=$2", id, actor.ID, through)
 	if e != nil {
@@ -206,6 +240,15 @@ func (s *ChatStore) Read(ctx context.Context, actor chat.Actor, id string, throu
 }
 
 func (s *ChatStore) Close(ctx context.Context, actor chat.Actor, id string) (map[string]any, error) {
+	id, err := s.resolveConversation(ctx, actor, id)
+	if err != nil {
+		// 保留既有关闭接口的冲突语义，不暴露会话归属。
+		var known *fault.Error
+		if errors.As(err, &known) {
+			return nil, fault.New(fault.Conflict, "CHAT_CHANGED", "咨询已结束或已重新分配，请刷新")
+		}
+		return nil, err
+	}
 	tag, e := s.DB.Exec(ctx, "UPDATE chat_conversations SET status='closed',updated_at=now() WHERE id=$1 AND "+chatOwnerColumn(actor)+"=$2 AND status<>'closed'", id, actor.ID)
 	if e != nil {
 		return nil, e
@@ -315,8 +358,21 @@ func (s *ChatStore) Dispatch(ctx context.Context) ([]string, error) {
 
 func (s *ChatStore) Participants(ctx context.Context, id string) ([]string, error) {
 	var member, admin string
-	err := s.DB.QueryRow(ctx, "SELECT member_id,coalesce(admin_id,'') FROM chat_conversations WHERE id=$1", id).Scan(&member, &admin)
+	err := s.DB.QueryRow(ctx, `SELECT c.member_id,coalesce(c.admin_id,'') FROM chat_conversations old
+ JOIN chat_conversations c ON c.id=coalesce(old.merged_into,old.id) WHERE old.id=$1`, id).Scan(&member, &admin)
 	return []string{member, admin}, err
+}
+
+// 历史链接转到合并后的会话，始终按当前归属鉴权，原客服不能借旧链接绕过重新分配。
+func (s *ChatStore) resolveConversation(ctx context.Context, actor chat.Actor, id string) (string, error) {
+	var canonical string
+	err := s.DB.QueryRow(ctx, `SELECT c.id FROM chat_conversations old
+ JOIN chat_conversations c ON c.id=coalesce(old.merged_into,old.id)
+ WHERE old.id=$1 AND c.`+chatOwnerColumn(actor)+`=$2`, id, actor.ID).Scan(&canonical)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fault.New(fault.NotFound, "CHAT_NOT_FOUND", "会话不存在或不属于当前账户")
+	}
+	return canonical, err
 }
 func (s *ChatStore) chatJSONRows(ctx context.Context, sql string, args ...any) ([]map[string]any, error) {
 	rows, err := s.DB.Query(ctx, sql, args...)

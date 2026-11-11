@@ -12,6 +12,7 @@ import (
 )
 
 func (a *App) registerPublic(m routeRegistrar) {
+	m.HandleFunc("GET /api/v1/publish-form", a.publicPublishForm)
 	m.HandleFunc("GET /api/v1/categories", a.publicCategories)
 	m.HandleFunc("GET /api/v1/products", a.publicProducts)
 	m.HandleFunc("GET /api/v1/products/{id}", a.publicProduct)
@@ -116,4 +117,13 @@ func (a *App) recordView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"data": map[string]bool{"recorded": recorded}})
+}
+
+func (a *App) publicPublishForm(w http.ResponseWriter, r *http.Request) {
+	data, err := a.catalogService().PublishForm(r.Context())
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"data": data})
 }

@@ -9,16 +9,27 @@ import (
 	"unicode/utf8"
 )
 
+type RentalQuote struct {
+	Unit   string `json:"unit"`
+	Amount string `json:"amount"`
+}
+type PrivateCredentials struct {
+	QQAccount  string `json:"qq_account"`
+	QQPassword string `json:"qq_password"`
+}
 type ProductInput struct {
-	CategoryID      string         `json:"category_id"`
-	Title           string         `json:"title"`
-	TradeType       string         `json:"trade_type"`
-	PriceUnit       string         `json:"price_unit"`
-	PriceAmount     *string        `json:"price_amount"`
-	Attributes      map[string]any `json:"attributes"`
-	Description     string         `json:"description"`
-	ExpectedVersion int            `json:"expected_version"`
-	RequestID       string         `json:"request_id"`
+	HasPrivateCredentials bool                `json:"-"`
+	RentalQuotes          []RentalQuote       `json:"rental_quotes"`
+	PrivateCredentials    *PrivateCredentials `json:"private_credentials,omitempty"`
+	CategoryID            string              `json:"category_id"`
+	Title                 string              `json:"title"`
+	TradeType             string              `json:"trade_type"`
+	PriceUnit             string              `json:"price_unit"`
+	PriceAmount           *string             `json:"price_amount"`
+	Attributes            map[string]any      `json:"attributes"`
+	Description           string              `json:"description"`
+	ExpectedVersion       int                 `json:"expected_version"`
+	RequestID             string              `json:"request_id"`
 }
 
 var MoneyPattern = regexp.MustCompile(`^\d{1,10}(\.\d{1,2})?$`)
@@ -29,12 +40,14 @@ type FilterOption struct {
 	Enabled *bool  `json:"enabled,omitempty"`
 }
 type FilterGroup struct {
-	Key      string         `json:"key"`
-	Label    string         `json:"label"`
-	Multiple bool           `json:"multiple,omitempty"`
-	Type     string         `json:"type,omitempty"`
-	Enabled  *bool          `json:"enabled,omitempty"`
-	Options  []FilterOption `json:"options"`
+	Key         string         `json:"key"`
+	Label       string         `json:"label"`
+	Required    bool           `json:"required,omitempty"`
+	Placeholder string         `json:"placeholder,omitempty"`
+	Multiple    bool           `json:"multiple,omitempty"`
+	Type        string         `json:"type,omitempty"`
+	Enabled     *bool          `json:"enabled,omitempty"`
+	Options     []FilterOption `json:"options"`
 }
 
 type CategoryRules struct {
@@ -44,6 +57,9 @@ type CategoryRules struct {
 }
 
 func ValidateBasicInput(p ProductInput, complete bool) error {
+	if err := ValidateExtendedInput(p); err != nil {
+		return err
+	}
 	if p.TradeType != "sale" && p.TradeType != "rent" {
 		return errors.New("请选择出售或出租")
 	}
@@ -54,7 +70,7 @@ func ValidateBasicInput(p ProductInput, complete bool) error {
 	if p.PriceAmount != nil && (!MoneyPattern.MatchString(*p.PriceAmount) || p.PriceUnit == "unknown") {
 		return errors.New("请填写有效的价格并确认报价单位")
 	}
-	if utf8.RuneCountInString(p.Title) > 100 || utf8.RuneCountInString(p.Description) > 10000 {
+	if utf8.RuneCountInString(p.Title) > 1000 || utf8.RuneCountInString(p.Description) > 10000 {
 		return errors.New("标题或说明过长")
 	}
 	if complete && (strings.TrimSpace(p.Title) == "" || strings.TrimSpace(p.Description) == "") {
@@ -81,16 +97,22 @@ func ValidateInput(p ProductInput, complete bool, category CategoryRules) error 
 		return errors.New("分类与交易类型不符")
 	}
 	var configured []string
-	_ = json.Unmarshal(raw, &configured)
-	if p.PriceUnit != "unknown" && len(configured) > 0 {
-		valid := false
+	if err := json.Unmarshal(raw, &configured); err != nil {
+		return errors.New("分类报价单位配置无效")
+	}
+	// An empty legacy configuration imposes no additional unit restriction.
+	if len(configured) > 0 {
+		allowedUnits := make(map[string]bool, len(configured))
 		for _, u := range configured {
-			if u == p.PriceUnit {
-				valid = true
-			}
+			allowedUnits[u] = true
 		}
-		if !valid {
+		if p.PriceUnit != "unknown" && !allowedUnits[p.PriceUnit] {
 			return errors.New("此分类不支持该报价单位")
+		}
+		for _, quote := range p.RentalQuotes {
+			if !allowedUnits[quote.Unit] {
+				return errors.New("租赁报价含此分类未启用的单位，请核对报价设置")
+			}
 		}
 	}
 	var groups []FilterGroup
@@ -99,6 +121,9 @@ func ValidateInput(p ProductInput, complete bool, category CategoryRules) error 
 	}
 	for _, g := range groups {
 		value, exists := p.Attributes[g.Key]
+		if complete && g.Required && (g.Enabled == nil || *g.Enabled) && (!exists || value == nil || strings.TrimSpace(fmt.Sprint(value)) == "") {
+			return fmt.Errorf("请填写%s", g.Label)
+		}
 		if !exists || value == nil {
 			continue
 		}
@@ -106,6 +131,12 @@ func ValidateInput(p ProductInput, complete bool, category CategoryRules) error 
 			continue
 		}
 		if g.Enabled != nil && !*g.Enabled {
+			continue
+		}
+		if g.Type == "text" {
+			if text, ok := value.(string); !ok || utf8.RuneCountInString(text) > 200 {
+				return fmt.Errorf("%s须为200字以内的文本", g.Label)
+			}
 			continue
 		}
 		allowed := map[string]bool{}
@@ -131,7 +162,10 @@ func ValidateInput(p ProductInput, complete bool, category CategoryRules) error 
 		default:
 			return errors.New("属性值类型与分类配置不符")
 		}
-		if !g.Multiple && len(values) > 1 {
+		if complete && g.Required && len(values) == 0 {
+			return fmt.Errorf("请填写%s", g.Label)
+		}
+		if !g.Multiple && g.Type != "multiselect" && len(values) > 1 {
 			return fmt.Errorf("%s只允许选择一个选项", g.Label)
 		}
 		selected := map[string]bool{}
@@ -161,9 +195,80 @@ var publicFields = map[string]bool{
 	"id": true, "product_code": true, "category_id": true, "title": true, "trade_type": true, "price_unit": true,
 	"attributes": true, "description": true, "status": true, "source": true, "version": true, "manual_rank": true,
 	"legacy_price": true, "legacy_category": true, "verification_status": true, "created_at": true, "updated_at": true,
-	"published_at": true, "price_amount": true, "price_note": true, "image_total": true, "images": true,
+	"published_at": true, "rental_quotes": true, "consultation_count": true, "price_amount": true, "price_note": true, "image_total": true, "images": true,
 }
 
 // Catalog cards do not render the full introduction. Keep titles and attributes
 // intact; detail and editorial requests continue to return the full description.
 func PublicSummary(p map[string]any) { PublicFields(p); delete(p, "description") }
+
+// 固定游戏名称与独立私密字段避免账号密码混入可公开的属性。
+func NormalizeInput(p *ProductInput) {
+	if p.Attributes == nil {
+		p.Attributes = map[string]any{}
+	}
+	p.Attributes["game"] = "QQ炫舞"
+	if len(p.RentalQuotes) > 0 {
+		p.PriceUnit = p.RentalQuotes[0].Unit
+		amount := p.RentalQuotes[0].Amount
+		p.PriceAmount = &amount
+	}
+}
+func ValidateExtendedInput(p ProductInput) error {
+	if len(p.RentalQuotes) > 4 || p.TradeType == "sale" && len(p.RentalQuotes) > 0 {
+		return errors.New("出售不支持租赁报价，出租最多四种单位")
+	}
+	seen := map[string]bool{}
+	for _, q := range p.RentalQuotes {
+		if (q.Unit != "hour" && q.Unit != "day" && q.Unit != "week" && q.Unit != "month") || seen[q.Unit] || !MoneyPattern.MatchString(q.Amount) {
+			return errors.New("租赁报价单位重复或金额无效")
+		}
+		seen[q.Unit] = true
+	}
+	if p.PrivateCredentials != nil {
+		c := p.PrivateCredentials
+		if !regexp.MustCompile(`^[1-9][0-9]{4,14}$`).MatchString(c.QQAccount) || len(c.QQPassword) < 1 || len(c.QQPassword) > 128 {
+			return errors.New("请同时填写有效的QQ账号与密码")
+		}
+	}
+	for k := range p.Attributes {
+		if IsPrivateAttributeKey(k) {
+			return errors.New("私密账号资料请填写在专用保密栏")
+		}
+	}
+	if tags, ok := p.Attributes["custom_tags"]; ok {
+		var values []string
+		switch v := tags.(type) {
+		case []string:
+			values = v
+		case []any:
+			for _, x := range v {
+				t, ok := x.(string)
+				if !ok {
+					return errors.New("自定义标签须为文本")
+				}
+				values = append(values, t)
+			}
+		default:
+			return errors.New("自定义标签格式无效")
+		}
+		if len(values) > 12 {
+			return errors.New("自定义标签最多12个")
+		}
+		seen := map[string]bool{}
+		for _, t := range values {
+			if strings.TrimSpace(t) == "" || utf8.RuneCountInString(t) > 24 || seen[t] {
+				return errors.New("标签不能重复且限24字")
+			}
+			seen[t] = true
+		}
+	}
+	return nil
+}
+
+// Private account fields share one reserved namespace across product and template writes.
+func IsPrivateAttributeKey(key string) bool {
+	lower := strings.ToLower(key)
+	compact := strings.NewReplacer("_", "", "-", "").Replace(lower)
+	return strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "credential") || strings.Contains(compact, "qqaccount") || strings.Contains(lower, "密码") || strings.Contains(lower, "qq账号")
+}

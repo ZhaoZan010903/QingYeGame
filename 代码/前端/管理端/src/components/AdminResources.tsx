@@ -21,7 +21,7 @@ export type Resource = "contacts" | "pages" | "categories" | "settings";
 const names = {
   contacts: "客服",
   pages: "说明页",
-  categories: "分类",
+  categories: "发布模板",
   settings: "首页与站点配置",
 };
 const text = (error: unknown) =>
@@ -59,7 +59,15 @@ function Field({
     </label>
   );
 }
-export function AdminResources({ resource }: { resource: Resource }) {
+export function AdminResources({
+  resource,
+  onDirtyChange,
+  onBusyChange,
+}: {
+  resource: Resource;
+  onDirtyChange?: (dirty: boolean) => void;
+  onBusyChange?: (busy: boolean) => void;
+}) {
   const [items, setItems] = useState<AdminRecord[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [form, setForm] = useState<AdminRecord>({});
@@ -74,6 +82,11 @@ export function AdminResources({ resource }: { resource: Resource }) {
   const [dirty, setDirty] = useState(false);
   const sequence = useRef(0);
   useUnsavedChanges(dirty, busy);
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+  useEffect(
+    () => onBusyChange?.(busy || loading),
+    [busy, loading, onBusyChange],
+  );
   const idOf = (item: AdminRecord) =>
     String(
       resource === "pages"
@@ -487,7 +500,7 @@ export function AdminResources({ resource }: { resource: Resource }) {
                 {resource === "categories" && (
                   <>
                     <Field
-                      label="分类名称"
+                      label="发布模板名称"
                       value={form.name ?? ""}
                       onChange={(v) => change("name", v)}
                       required

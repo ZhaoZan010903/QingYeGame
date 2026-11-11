@@ -59,7 +59,7 @@ func TestRecommendationConfigurationBounds(t *testing.T) {
 	if _, err := parseRecommendations(raw); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"window_days", "view_weight", "favorite_weight", "new_bonus", "new_hours"} {
+	for _, field := range []string{"window_days", "view_weight", "favorite_weight", "consultation_weight", "new_bonus", "new_hours"} {
 		var data map[string]any
 		_ = json.Unmarshal(raw, &data)
 		data[field] = -1

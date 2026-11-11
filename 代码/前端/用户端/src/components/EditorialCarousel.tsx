@@ -12,27 +12,20 @@ import {
 import type { Product } from '../types';
 import type { HomePresentation } from '../lib/home-content';
 import { isDemo } from '../lib/api';
-import { Artwork, Price } from './shared';
+import { CarouselSlidePreview } from '../../../共享/CarouselSlidePreview';
 import '../live-editorial.css';
 
-function summaryFor(product: Product) {
-  const description = product.editorial?.description || product.description;
-  if (isDemo) return description;
-  // Keep verbose legacy sales copy in the full detail page.
-  if (product.source === 'legacy' && !product.editorial?.description) return '';
-  const normalize = (value: string) => value.replace(/\s+/g, '').trim();
-  const title = normalize(product.title),
-    summary = normalize(description);
-  return !summary || summary.startsWith(title) || title.startsWith(summary) ? '' : description;
-}
-
 export function EditorialCarousel({
-  products,
+  products: inventory,
   presentation,
 }: {
   products: Product[];
   presentation: HomePresentation;
 }) {
+  const slides = (presentation.slides ?? []).filter((slide) =>
+    inventory.some((p) => p.id === slide.productId),
+  );
+  const products = slides.map((slide) => inventory.find((p) => p.id === slide.productId)!);
   const [index, setIndex] = useState(0);
   const activeIndex = Math.min(index, Math.max(0, products.length - 1));
   const [paused, setPaused] = useState(
@@ -45,6 +38,7 @@ export function EditorialCarousel({
   const ref = useRef<HTMLDivElement>(null);
   const start = useRef({ x: 0, y: 0 });
   const manual = (n: number) => {
+    if (!products.length) return;
     setIndex((n + products.length) % products.length);
     setPaused(true);
   };
@@ -79,6 +73,7 @@ export function EditorialCarousel({
     );
     return () => clearInterval(timer);
   }, [paused, hover, hidden, visible, modal, products.length, presentation.editorial.intervalMs]);
+  if (!products.length) return null;
   return (
     <section
       className={`editorial-section page-width mx-auto ${isDemo ? '' : 'live-editorial'}`}
@@ -130,34 +125,19 @@ export function EditorialCarousel({
               aria-hidden={i !== activeIndex}
               aria-label={`${i + 1} / ${products.length}`}
             >
-              <div className="slide-visual">
-                <div className="slide-image-ambience" aria-hidden="true">
-                  <Artwork product={p} />
-                </div>
-                <Artwork product={p} />
-              </div>
-              <div className="slide-copy">
-                <h3>
-                  {p.editorial?.name || (isDemo ? p.title.split(' · ')[0] : p.title)}
-                  {(p.editorial?.collection || isDemo) && (
-                    <span>{p.editorial?.collection || '风格珍藏'}</span>
-                  )}
-                </h3>
-                {summaryFor(p) && <p className="slide-description">{summaryFor(p)}</p>}
-                <p className="slide-meta">
-                  <span>QQ炫舞</span>
-                  <i>/</i>
-                  <span>{p.server}</span>
-                  <i>/</i>
-                  <span>{p.mode === 'sale' ? '账号出售' : '账号租赁'}</span>
-                </p>
-                <div className="slide-action-row">
-                  <Price product={p} compact />
+              <CarouselSlidePreview
+                slide={slides[i]}
+                imageUrl={
+                  Math.abs(i - activeIndex) <= 1
+                    ? (p.images.find((image) => image.id === slides[i].imageId) ?? p.images[0])?.url
+                    : undefined
+                }
+                action={
                   <Link className="button-white" to={`/accounts/${p.id}`}>
-                    探索这个账号 <ArrowRight />
+                    咨询这个账号 <ArrowRight />
                   </Link>
-                </div>
-              </div>
+                }
+              />
             </article>
           ))}
         </div>

@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, isDemo } from '../lib/api';
+import { api, isDemo, request } from '../lib/api';
 import type { Category, PriceUnit, Product, ProductWrite } from '../types';
 import { useUi } from '../context';
 import { ImageUploader } from '../components/ImageUploader';
 import '../member.css';
+import '../service-refinement.css';
+import { Modal } from '../components/shared';
+import {
+  defaultPublishForm,
+  resolvePublishForm,
+  type PublishFormConfig,
+} from '../../../共享/publish-form';
+import type { FilterGroup, RentalQuote } from '../types';
+import { missingPublishField, publishAttributes, rentalPriceForWrite } from '../lib/publish-fields';
 
 const initial: ProductWrite = {
   title: '',
@@ -35,6 +44,13 @@ export function PublishPage() {
   const [form, setForm] = useState<ProductWrite>(initial);
   const [price, setPrice] = useState('');
   const [tags, setTags] = useState('');
+  const [settings, setSettings] = useState<PublishFormConfig>(defaultPublishForm);
+  const [qqAccount, setQQAccount] = useState(''),
+    [qqPassword, setQQPassword] = useState('');
+  const [rentalPrices, setRentalPrices] = useState<Partial<Record<RentalQuote['unit'], string>>>(
+    {},
+  );
+  const [preview, setPreview] = useState(false);
   const [product, setProduct] = useState<Product | null>(null);
   const latest = useRef<Product | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -56,10 +72,31 @@ export function PublishPage() {
     let active = true;
     setLoading(true);
     setLoadError('');
-    Promise.all([api.categories(), id ? api.myProduct(id) : Promise.resolve(null)])
-      .then(([list, value]) => {
+    Promise.all([
+      api.categories(),
+      id ? api.myProduct(id) : Promise.resolve(null),
+      isDemo
+        ? Promise.resolve(defaultPublishForm)
+        : request('/publish-form').then((r) => resolvePublishForm(r.data)),
+    ])
+      .then(([list, value, config]) => {
         if (!active) return;
         setCategories(list);
+        setSettings(config);
+        setQQAccount('');
+        setQQPassword('');
+        setRentalPrices(
+          Object.fromEntries(
+            (value?.rentalQuotes?.length
+              ? value.rentalQuotes
+              : value?.mode === 'rent' &&
+                  value.price !== null &&
+                  ['hour', 'day', 'week', 'month'].includes(value.unit)
+                ? [{ unit: value.unit, amount: String(value.price) }]
+                : []
+            ).map((q) => [q.unit, q.amount]),
+          ),
+        );
         latest.current = value;
         setProduct(value);
         const source: ProductWrite = value
@@ -72,7 +109,9 @@ export function PublishPage() {
               gender: value.gender,
               level: value.level,
               kind: value.kind,
-              tags: value.tags,
+              tags: Array.isArray(value.attributes?.custom_tags)
+                ? value.attributes.custom_tags
+                : [],
               description: value.description,
               attributes: value.attributes,
             }
@@ -151,27 +190,43 @@ export function PublishPage() {
   function input(): ProductWrite {
     if (price && (!/^\d+(?:\.\d{1,2})?$/.test(price) || !Number.isFinite(Number(price))))
       throw new Error('参考报价应为非负金额，最多保留两位小数。');
-    const attributes = { ...form.attributes };
-    delete attributes.tags;
-    // Configured options use string codes. Do not submit an old category's default value
-    // (for example numeric level 0) when the selected category does not offer that choice.
-    for (const group of categories.find((item) => item.id === form.categoryId)?.filters ?? []) {
-      if (!['server', 'gender', 'level', 'kind'].includes(group.key)) continue;
-      const value = String(
-        attributes[group.key] ?? form[group.key as 'server' | 'gender' | 'level' | 'kind'] ?? '',
-      );
-      attributes[group.key] = group.options.some((option) => option.value === value) ? value : '';
-    }
+    const attributes = publishAttributes(
+      form,
+      categories.find((item) => item.id === form.categoryId)?.filters ?? [],
+    );
+    const customTags = tags
+      .split(/[,，、\n]/)
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+    if (customTags.length > 12 || customTags.some((tag) => Array.from(tag).length > 24))
+      throw new Error('自定义标签最多12个，每个最多24字。');
+    if (isDemo && (qqAccount || qqPassword))
+      throw new Error('演示模式不保存私密账号资料，请使用测试环境。');
+    if ((qqAccount && !qqPassword) || (!qqAccount && qqPassword))
+      throw new Error('QQ账号和密码请同时填写；不修改时两项都留空。');
+    const rentalQuotes: RentalQuote[] =
+      form.mode === 'rent'
+        ? Object.entries(rentalPrices).map(([unit, amount]) => {
+            if (!rentUnits.includes(unit as RentalQuote['unit']))
+              throw new Error('交易模板已停用部分租期，请移除停用报价后重新选择。');
+            if (!amount || !/^\d+(?:\.\d{1,2})?$/.test(amount) || !Number.isFinite(Number(amount)))
+              throw new Error('已选择的租赁单位需要填写有效报价，最多两位小数。');
+            return { unit: unit as RentalQuote['unit'], amount: Number(amount).toFixed(2) };
+          })
+        : [];
     return {
       ...form,
-      attributes,
+      attributes: { ...attributes, custom_tags: customTags },
       title: form.title.trim(),
       description: form.description.trim(),
-      price: price.trim() ? Number(price) : null,
-      tags: tags
-        .split(/[,，、\n]/)
-        .map((t) => t.trim())
-        .filter(Boolean),
+      ...(form.mode === 'rent'
+        ? rentalPriceForWrite(rentalQuotes, form.unit, rentUnits)
+        : { price: price.trim() ? Number(price) : null, unit: form.unit }),
+      rentalQuotes,
+      ...(qqAccount && qqPassword
+        ? { privateCredentials: { qqAccount: qqAccount.trim(), qqPassword } }
+        : {}),
+      tags: customTags,
     };
   }
   async function persist(): Promise<Product> {
@@ -184,6 +239,9 @@ export function PublishPage() {
     try {
       const next = await operation;
       updateProduct(next);
+      setForm((previous) => ({ ...previous, unit: next.unit, price: next.price }));
+      setQQAccount('');
+      setQQPassword('');
       setDirty(false);
       return next;
     } finally {
@@ -196,12 +254,26 @@ export function PublishPage() {
     try {
       if (submit) {
         const data = input();
+        if (!data.title || !data.description)
+          throw new Error('提交审核前，请填写账号标题和账号介绍。');
         if (
-          !data.title ||
-          !String(data.attributes?.server ?? data.server).trim() ||
-          !data.description
+          settings.fields.private_credentials.enabled &&
+          settings.fields.private_credentials.required &&
+          !data.privateCredentials &&
+          !latest.current?.hasPrivateCredentials
         )
-          throw new Error('提交审核前，请填写账号标题、区服和账号介绍。');
+          throw new Error('请填写账号交接资料。');
+        if (
+          settings.fields.custom_tags.enabled &&
+          settings.fields.custom_tags.required &&
+          !data.tags.length
+        )
+          throw new Error('请填写至少一个自定义标签。');
+        const missing = missingPublishField(
+          data,
+          categories.find((c) => c.id === form.categoryId)?.filters ?? [],
+        );
+        if (missing) throw new Error('请填写' + missing.label + '。');
         if (pendingImages)
           throw new Error('还有未完成或失败的图片。请完成重试或移除待处理项后提交。');
         if (!latest.current?.imageTotal) throw new Error('请至少添加一张已保存的账号图片。');
@@ -231,18 +303,38 @@ export function PublishPage() {
     void save(true);
   }
   const category = categories.find((c) => c.id === form.categoryId);
-  const serverOptions = category?.filters.find((group) => group.key === 'server')?.options || [];
-  const optionsFor = (key: string) =>
-    category?.filters.find((group) => group.key === key)?.options ?? [];
-  const extraGroups =
-    category?.filters.filter(
-      (group) => !['server', 'gender', 'level', 'kind', 'tags'].includes(group.key),
-    ) ?? [];
-  const allUnits = category?.priceUnits || [];
-  const units =
-    form.mode === 'sale'
-      ? (['account'] as PriceUnit[])
-      : allUnits.filter((unit) => unit !== 'account' && unit !== 'unknown');
+  const groups = (category?.filters ?? []).filter(
+    (g) =>
+      g.enabled !== false &&
+      ![
+        'tags',
+        'game',
+        'custom_tags',
+        'private_credentials',
+        'qq_account',
+        'qq_password',
+        'qqAccount',
+        'qqPassword',
+        'password',
+      ].includes(g.key),
+  );
+  const fieldValue = (key: string): unknown =>
+    form.attributes?.[key] ??
+    (
+      { server: form.server, gender: form.gender, level: form.level, kind: form.kind } as Record<
+        string,
+        unknown
+      >
+    )[key] ??
+    '';
+  const setField = (group: FilterGroup, value: unknown) => {
+    if (['server', 'gender', 'level', 'kind'].includes(group.key))
+      change(group.key as 'server', value as string);
+    else change('attributes', { ...form.attributes, [group.key]: value });
+  };
+  const rentUnits = (['hour', 'day', 'week', 'month'] as const).filter(
+    (unit) => !category?.priceUnits.length || category.priceUnits.includes(unit),
+  );
   const locked = isDemo && (product?.status === 'published' || product?.status === 'pending');
   return (
     <section className="publish-page page-width mx-auto" aria-label="发布账号">
@@ -319,7 +411,20 @@ export function PublishPage() {
             <fieldset disabled={busy || uploadBusy} style={{ border: 0, padding: 0, minWidth: 0 }}>
               <section className="publish-panel">
                 <h2>01 · 账号资料</h2>
-                <p>公开展示的信息请如实填写，不要提交账号密码、验证码或身份材料。</p>
+                <p>展示资料与私密交接信息分开填写。保存后自动生成商品编号。</p>
+                <div className="publish-identity">
+                  <div>
+                    <strong>QQ炫舞 · {form.mode === 'sale' ? '账号出售' : '账号租赁'}</strong>
+                    <small>统一游戏资料，由平台配置发布选项</small>
+                  </div>
+                  <div>
+                    <strong>
+                      {product?.code ||
+                        (form.mode === 'sale' ? 'QYCH · 保存后自动分配' : 'QYZH · 保存后自动分配')}
+                    </strong>
+                    <small>承接历史编号，系统分配唯一新编号</small>
+                  </div>
+                </div>
                 <div className="form-grid">
                   <div className="form-field span-2">
                     <span>发布类型</span>
@@ -332,23 +437,20 @@ export function PublishPage() {
                           <input
                             type="radio"
                             name="tradeType"
-                            value={mode}
                             checked={form.mode === mode}
+                            disabled={!!product}
                             onChange={() => {
                               const next = categories.find(
                                 (c) => !c.tradeType || c.tradeType === mode,
                               );
-                              setForm((previous) => ({
-                                ...previous,
+                              setForm((old) => ({
+                                ...old,
                                 mode,
                                 categoryId: next?.id,
-                                unit:
-                                  mode === 'sale'
-                                    ? 'account'
-                                    : next?.priceUnits.find(
-                                        (u) => u !== 'account' && u !== 'unknown',
-                                      ) || 'day',
+                                unit: mode === 'sale' ? 'account' : 'day',
+                                attributes: {},
                               }));
+                              setPrice('');
                               setDirty(true);
                             }}
                           />
@@ -356,230 +458,235 @@ export function PublishPage() {
                         </label>
                       ))}
                     </div>
+                    {product && <small>租售类型已固定，如需更换请新建资产。</small>}
                   </div>
                   <label className="form-field span-2">
-                    账号标题
+                    {settings.fields.title.label}
                     <input
                       value={form.title}
                       onChange={(e) => change('title', e.target.value)}
-                      maxLength={100}
-                      placeholder="例如：月白 · 典藏衣橱 / 华东一区"
+                      maxLength={1000}
+                      placeholder={settings.fields.title.placeholder}
                     />
-                    <small>准确描述账号特色，最多 100 字。</small>
+                    <small>最多1000字，详细配置也可以放在账号介绍中。</small>
                   </label>
-                  <label className="form-field">
-                    游戏分类
-                    <select
-                      value={form.categoryId || ''}
-                      onChange={(e) => {
-                        change('categoryId', e.target.value);
-                      }}
-                    >
-                      <option value="" disabled>
-                        请选择分类
-                      </option>
-                      {categories
-                        .filter((c) => !c.tradeType || c.tradeType === form.mode)
-                        .map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    所在区服
-                    {serverOptions.length ? (
-                      <select
-                        value={form.server}
-                        onChange={(e) => change('server', e.target.value)}
-                      >
-                        <option value="">请选择区服</option>
-                        {serverOptions.map((server) => (
-                          <option key={server.value} value={server.value}>
-                            {server.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
+                  {groups.length
+                    ? groups.map((group) => (
+                        <div className="form-field" key={group.key}>
+                          <span>
+                            {group.label}
+                            {group.required ? ' *' : ''}
+                          </span>
+                          {group.type === 'text' || !group.options.length ? (
+                            <input
+                              aria-label={group.label}
+                              value={String(fieldValue(group.key))}
+                              maxLength={200}
+                              placeholder={group.placeholder || '填写' + group.label}
+                              onChange={(e) => setField(group, e.target.value)}
+                            />
+                          ) : group.multiple || group.type === 'multiselect' ? (
+                            <div className="attribute-options">
+                              {group.options.map((option) => (
+                                <label className="agreement-check" key={option.value}>
+                                  <input
+                                    type="checkbox"
+                                    checked={
+                                      Array.isArray(fieldValue(group.key)) &&
+                                      (fieldValue(group.key) as string[]).includes(option.value)
+                                    }
+                                    onChange={(e) => {
+                                      const value = Array.isArray(fieldValue(group.key))
+                                        ? (fieldValue(group.key) as string[])
+                                        : [];
+                                      setField(
+                                        group,
+                                        e.target.checked
+                                          ? [...value, option.value]
+                                          : value.filter((v) => v !== option.value),
+                                      );
+                                    }}
+                                  />
+                                  {option.label}
+                                </label>
+                              ))}
+                            </div>
+                          ) : (
+                            <select
+                              aria-label={group.label}
+                              value={String(fieldValue(group.key))}
+                              onChange={(e) => setField(group, e.target.value)}
+                            >
+                              <option value="">
+                                {group.placeholder || '请选择' + group.label}
+                              </option>
+                              {group.options.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      ))
+                    : null}
+                  {form.mode === 'sale' ? (
+                    <label className="form-field">
+                      出售报价（元）
                       <input
-                        value={form.server}
-                        onChange={(e) => change('server', e.target.value)}
-                        maxLength={40}
-                        placeholder="填写游戏区服"
-                      />
-                    )}
-                  </label>
-                  <label className="form-field">
-                    角色性别
-                    <select
-                      value={form.gender}
-                      onChange={(e) => change('gender', e.target.value as Product['gender'])}
-                    >
-                      {(optionsFor('gender').length
-                        ? optionsFor('gender')
-                        : [
-                            { value: 'female', label: '女角色' },
-                            { value: 'male', label: '男角色' },
-                          ]
-                      ).map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    VIP / XVIP 等级
-                    {optionsFor('level').length ? (
-                      <select
-                        value={String(form.attributes?.level ?? form.level)}
+                        inputMode="decimal"
+                        value={price}
                         onChange={(e) => {
-                          const value = e.target.value;
-                          setForm((old) => ({
-                            ...old,
-                            level: value,
-                            attributes: { ...old.attributes, level: value },
-                          }));
+                          setPrice(e.target.value);
                           setDirty(true);
                         }}
-                      >
-                        <option value="">请选择等级</option>
-                        {optionsFor('level').map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type="text"
-                        maxLength={80}
-                        placeholder="例如：9、彩钻"
-                        value={form.level}
-                        onChange={(e) => change('level', e.target.value)}
+                        maxLength={14}
+                        placeholder="留空表示联系客服报价"
                       />
-                    )}
-                  </label>
-                  <label className="form-field">
-                    账号类型
-                    <select
-                      value={form.kind || 'single'}
-                      onChange={(e) => change('kind', e.target.value as Product['kind'])}
-                    >
-                      {(optionsFor('kind').length
-                        ? optionsFor('kind')
-                        : [
-                            { value: 'single', label: '单号独立' },
-                            { value: 'linked', label: '双号连体' },
-                          ]
-                      ).map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    参考报价单位
-                    <select
-                      value={form.unit}
-                      onChange={(e) => change('unit', e.target.value as PriceUnit)}
-                    >
-                      {units.map((unit) => (
-                        <option key={unit} value={unit}>
-                          {unitNames[unit]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    参考报价（人民币）
-                    <input
-                      inputMode="decimal"
-                      value={price}
-                      onChange={(e) => {
-                        setPrice(e.target.value);
-                        setDirty(true);
-                      }}
-                      placeholder="留空表示联系客服报价"
-                      maxLength={14}
-                    />
-                    <small>不同报价单位分别展示和比较。</small>
-                  </label>
-                  <label className="form-field">
-                    账号特点
-                    <input
-                      value={tags}
-                      onChange={(e) => {
-                        setTags(e.target.value);
-                        setDirty(true);
-                      }}
-                      maxLength={200}
-                      placeholder="例如：典藏 ×12、稀有翅膀"
-                    />
-                    <small>用顿号或逗号分隔，不填写未经确认的保障承诺。</small>
-                  </label>
+                    </label>
+                  ) : (
+                    <div className="form-field span-2">
+                      <span>租赁报价 · 可以选择多个单位</span>
+                      <small>分别填写实际报价，不自动换算；第一项用作列表参考价。</small>
+                      {form.unit === 'unknown' &&
+                        product?.legacyPrice &&
+                        !Object.keys(rentalPrices).length && (
+                          <small>
+                            原始参考价 {product.legacyPrice}
+                            ，单位待核对。未填写新报价时保留历史参考信息。
+                          </small>
+                        )}
+                      {Object.keys(rentalPrices)
+                        .filter((unit) => !rentUnits.includes(unit as RentalQuote['unit']))
+                        .map((unit) => (
+                          <p key={unit} className="form-error">
+                            {unitNames[unit as PriceUnit]} 已不在当前模板中。
+                            <button
+                              type="button"
+                              className="text-button"
+                              onClick={() => {
+                                setRentalPrices((old) => {
+                                  const next = { ...old };
+                                  delete next[unit as RentalQuote['unit']];
+                                  return next;
+                                });
+                                setDirty(true);
+                              }}
+                            >
+                              移除此报价
+                            </button>
+                          </p>
+                        ))}
+                      <div className="rental-quote-editor">
+                        {rentUnits.map((unit) => (
+                          <div className="rental-quote-option" key={unit}>
+                            <label className="quote-checkbox">
+                              <input
+                                type="checkbox"
+                                checked={rentalPrices[unit] !== undefined}
+                                onChange={(e) => {
+                                  setRentalPrices((old) => {
+                                    const next = { ...old };
+                                    if (e.target.checked) next[unit] = '';
+                                    else delete next[unit];
+                                    return next;
+                                  });
+                                  setDirty(true);
+                                }}
+                              />
+                              {unitNames[unit]}
+                            </label>
+                            {rentalPrices[unit] !== undefined && (
+                              <input
+                                aria-label={unitNames[unit] + '报价'}
+                                inputMode="decimal"
+                                value={rentalPrices[unit]}
+                                onChange={(e) => {
+                                  setRentalPrices((old) => ({ ...old, [unit]: e.target.value }));
+                                  setDirty(true);
+                                }}
+                                maxLength={14}
+                                placeholder="填写该单位报价"
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {settings.fields.custom_tags.enabled && (
+                    <label className="form-field span-2">
+                      {settings.fields.custom_tags.label}
+                      <input
+                        value={tags}
+                        onChange={(e) => {
+                          setTags(e.target.value);
+                          setDirty(true);
+                        }}
+                        maxLength={200}
+                        placeholder={settings.fields.custom_tags.placeholder}
+                      />
+                      <small>用顿号或逗号分隔，最多12个标签，每个最多24字。</small>
+                      {Array.isArray(form.attributes?.tags) && form.attributes.tags.length > 0 && (
+                        <small>
+                          另有 {form.attributes.tags.length}{' '}
+                          个历史标签，会保留原始资料；此处只编辑新增的自定义标签。
+                        </small>
+                      )}
+                    </label>
+                  )}
                   <label className="form-field span-2">
-                    账号介绍
+                    {settings.fields.description.label}
                     <textarea
                       value={form.description}
                       onChange={(e) => change('description', e.target.value)}
                       maxLength={10000}
-                      placeholder="介绍服饰、典藏、账号特点和需要说明的情况。请勿填写密码、身份证件或私人联系方式。"
+                      placeholder={settings.fields.description.placeholder}
                     />
                     <small>{form.description.length} / 10000</small>
                   </label>
-                  {extraGroups.map((group) => (
-                    <div className="form-field" key={group.key}>
-                      <span>{group.label}</span>
-                      {group.multiple ? (
-                        <div className="attribute-options">
-                          {group.options.map((option) => (
-                            <label className="agreement-check" key={option.value}>
-                              <input
-                                type="checkbox"
-                                checked={
-                                  Array.isArray(form.attributes?.[group.key]) &&
-                                  (form.attributes[group.key] as string[]).includes(option.value)
-                                }
-                                onChange={(e) => {
-                                  const current = Array.isArray(form.attributes?.[group.key])
-                                    ? (form.attributes[group.key] as string[])
-                                    : [];
-                                  change('attributes', {
-                                    ...form.attributes,
-                                    [group.key]: e.target.checked
-                                      ? [...current, option.value]
-                                      : current.filter((v) => v !== option.value),
-                                  });
-                                }}
-                              />
-                              {option.label}
-                            </label>
-                          ))}
-                        </div>
-                      ) : (
-                        <select
-                          value={String(form.attributes?.[group.key] ?? '')}
-                          onChange={(e) =>
-                            change('attributes', {
-                              ...form.attributes,
-                              [group.key]: e.target.value,
-                            })
-                          }
-                        >
-                          <option value="">请选择{group.label}</option>
-                          {group.options.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  ))}
                 </div>
+                {settings.fields.private_credentials.enabled && (
+                  <div className="publish-private">
+                    <h3>{settings.fields.private_credentials.label}</h3>
+                    <p>
+                      {settings.fields.private_credentials.placeholder}{' '}
+                      {product?.hasPrivateCredentials
+                        ? '已保存交接资料；留空保留原值，填写两项后替换。'
+                        : '账号和密码不会出现在公开详情、搜索或上架预览中。'}
+                    </p>
+                    <div className="form-grid">
+                      <label className="form-field">
+                        QQ账号
+                        <input
+                          value={qqAccount}
+                          onChange={(e) => {
+                            setQQAccount(e.target.value);
+                            setDirty(true);
+                          }}
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={20}
+                          placeholder="填写需要交接的QQ账号"
+                        />
+                      </label>
+                      <label className="form-field">
+                        QQ密码
+                        <input
+                          type="password"
+                          value={qqPassword}
+                          onChange={(e) => {
+                            setQQPassword(e.target.value);
+                            setDirty(true);
+                          }}
+                          autoComplete="new-password"
+                          maxLength={128}
+                          placeholder="填写账号密码"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                )}
               </section>
             </fieldset>
             <section className="publish-panel">
@@ -619,6 +726,14 @@ export function PublishPage() {
                 <button
                   type="button"
                   className="button-outline"
+                  onClick={() => setPreview(true)}
+                  disabled={busy || uploadBusy}
+                >
+                  上架预览
+                </button>
+                <button
+                  type="button"
+                  className="button-outline"
                   onClick={() => void save()}
                   disabled={busy || uploadBusy}
                 >
@@ -631,6 +746,81 @@ export function PublishPage() {
             </div>
           </form>
         </>
+      )}
+      {preview && (
+        <Modal
+          title="上架预览"
+          onClose={() => setPreview(false)}
+          className="publish-preview-dialog"
+        >
+          <div className="publish-preview">
+            {product?.images[0] && (
+              <img
+                className="preview-cover"
+                src={product.images[0].thumbnailUrl ?? product.images[0].url}
+                alt="展示封面"
+              />
+            )}
+            <small>{product?.code || '保存后生成编号'} · QQ炫舞</small>
+            <h3>{form.title || '尚未填写标题'}</h3>
+            <div className="preview-meta">
+              <span>{form.mode === 'sale' ? '账号出售' : '账号租赁'}</span>
+              <span>{String(fieldValue('server')) || '未填写区服'}</span>
+            </div>
+            <dl className="preview-attributes">
+              {groups
+                .filter((group) => group.key !== 'server')
+                .map((group) => {
+                  const raw = fieldValue(group.key);
+                  const values = Array.isArray(raw) ? raw : [raw];
+                  const label = values
+                    .map(
+                      (value) =>
+                        group.options.find((option) => option.value === String(value))?.label ??
+                        String(value ?? ''),
+                    )
+                    .filter(Boolean)
+                    .join('、');
+                  return label ? (
+                    <div key={group.key}>
+                      <dt>{group.label}</dt>
+                      <dd>{label}</dd>
+                    </div>
+                  ) : null;
+                })}
+            </dl>
+            <div className="pill-tags">
+              {tags
+                .split(/[,，、\n]/)
+                .map((t) => t.trim())
+                .filter(Boolean)
+                .map((tag, i) => (
+                  <span key={i}>{tag}</span>
+                ))}
+            </div>
+            {form.mode === 'rent' ? (
+              Object.keys(rentalPrices).length ? (
+                Object.entries(rentalPrices).map(([unit, value]) => (
+                  <strong key={unit}>
+                    {value || '待填写'} {unitNames[unit as PriceUnit]}
+                  </strong>
+                ))
+              ) : (
+                <strong>
+                  {form.unit === 'unknown' && product?.legacyPrice
+                    ? `原始参考价 ${product.legacyPrice} · 报价单位待核对`
+                    : '联系客服报价'}
+                </strong>
+              )
+            ) : (
+              <strong>
+                {price || '联系客服'} {price ? '元' : ''}
+              </strong>
+            )}
+            <p>{form.description || '尚未填写介绍'}</p>
+            <small>预览不会提交审核。仅展示公开内容，完整图片以已保存图集为准。</small>
+          </div>
+        </Modal>
       )}
     </section>
   );

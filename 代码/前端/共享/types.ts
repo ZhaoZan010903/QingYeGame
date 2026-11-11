@@ -6,6 +6,10 @@ export type PriceUnit =
 export type ProductStatus =
   "draft" | "pending" | "published" | "rejected" | "offline";
 export type VerificationStatus = "unprovided" | "pending" | "verified";
+export interface RentalQuote {
+  unit: "hour" | "day" | "week" | "month";
+  amount: string;
+}
 export interface ImageItem {
   id: string;
   url?: string;
@@ -14,6 +18,9 @@ export interface ImageItem {
   alt: string;
 }
 export interface Product {
+  rentalQuotes?: RentalQuote[];
+  hasPrivateCredentials?: boolean;
+  consultationCount?: number;
   id: string;
   code?: string;
   categoryId?: string;
@@ -50,6 +57,8 @@ export interface Product {
   };
 }
 export interface ProductWrite {
+  rentalQuotes?: RentalQuote[];
+  privateCredentials?: { qqAccount: string; qqPassword: string };
   attributes?: Record<string, unknown>;
   title: string;
   mode: TradeType;
@@ -112,6 +121,9 @@ export interface FilterOption {
   label: string;
 }
 export interface FilterGroup {
+  required?: boolean;
+  placeholder?: string;
+  enabled?: boolean;
   key: string;
   label: string;
   options: FilterOption[];

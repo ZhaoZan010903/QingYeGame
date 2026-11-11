@@ -1,0 +1,203 @@
+.detail-page {
+  position: relative;
+  isolation: isolate;
+}
+.detail-page::before {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 58% 520px at 16% 12%, rgba(173, 155, 101, 0.13), transparent 80%),
+    radial-gradient(ellipse 36% 480px at 95% 35%, rgba(129, 157, 160, 0.06), transparent 85%);
+}
+.detail-page .detail-title {
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  max-height: none !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  font-size: clamp(20px, 1.5vw, 28px);
+  line-height: 1.55;
+}
+.detail-page .detail-summary {
+  align-self: start;
+  position: relative;
+  top: auto;
+}
+.detail-page .detail-price {
+  margin-top: 28px;
+}
+.detail-page .pill-tags,
+.detail-page .archive-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.detail-page .pill-tags > span,
+.detail-page .archive-tags > span {
+  padding: 7px 12px;
+  border: 1px solid rgba(180, 167, 132, 0.24);
+  background: linear-gradient(135deg, rgba(180, 167, 132, 0.12), rgba(180, 167, 132, 0.03));
+  color: var(--text, #eee);
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.detail-page .archive-tags > span::before {
+  content: '◆';
+  font-size: 7px;
+  vertical-align: middle;
+  margin-right: 7px;
+  color: #b5a376;
+}
+.detail-page .archive-description .archive-tags > span::before {
+  content: none;
+}
+.favorite-button.selected,
+.favorite-button[aria-pressed='true'] {
+  color: #f0526c !important;
+  border-color: rgba(240, 82, 108, 0.35) !important;
+  background: rgba(240, 82, 108, 0.1) !important;
+}
+.favorite-button.selected svg {
+  fill: currentColor;
+}
+.consultation-count {
+  text-align: center;
+  color: var(--text-muted, #999);
+  font-size: 12px;
+  margin-top: 12px;
+}
+.publish-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  background: rgba(160, 150, 120, 0.08);
+  border: 1px solid var(--border-subtle, #303033);
+  padding: 18px 22px;
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+.publish-identity strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.publish-identity small {
+  color: var(--text-muted, #999);
+}
+.rental-quote-editor {
+  grid-column: 1/-1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.rental-quote-editor .rental-quote-option {
+  padding: 16px;
+  border: 1px solid var(--border-subtle, #303033);
+  border-radius: 10px;
+  display: grid;
+  gap: 12px;
+}
+.rental-quote-editor input {
+  width: 100%;
+  min-width: 0;
+}
+.rental-quote-editor .quote-checkbox {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.quote-checkbox input {
+  width: auto;
+}
+.publish-private {
+  border: 1px solid rgba(128, 164, 153, 0.25);
+  background: rgba(128, 164, 153, 0.05);
+  border-radius: 12px;
+  padding: 22px;
+  margin-top: 24px;
+}
+.publish-private h3 {
+  font-size: 17px;
+  margin: 0 0 10px;
+}
+.publish-private > p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-muted, #999);
+  margin-bottom: 20px;
+}
+.publish-preview {
+  display: grid;
+  gap: 16px;
+}
+.publish-preview .preview-cover {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.publish-preview h3 {
+  font-size: 24px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.publish-preview p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.publish-preview .pill-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.publish-preview .pill-tags span {
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle, #303033);
+  border-radius: 8px;
+}
+.publish-preview .preview-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--text-muted, #aaa);
+}
+.preview-attributes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.preview-attributes dt {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.preview-attributes dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .detail-page .detail-title {
+    font-size: 20px;
+  }
+  .detail-page .pill-tags > span,
+  .detail-page .archive-tags > span {
+    font-size: 12px;
+    padding: 6px 9px;
+  }
+  .publish-identity {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .publish-private {
+    padding: 16px;
+  }
+}

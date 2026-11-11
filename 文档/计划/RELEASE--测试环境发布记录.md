@@ -1,5 +1,11 @@
 # RELEASE -- 测试环境发布记录
 
+## R15服务优化发布
+
+2026年11月12日，用户端5179、管理端5181、API5180/5182统一为`20261112-service-r15`。部署前停止API写入并备份`qingye_test`，执行0005/0006事务迁移；配置独立私密资料密钥，原子切换三个current并重启API、重载两个Nginx。健康检查通过，商品原图不移动，生产站和5178不变。
+
+API SHA256 `1009bbc390d4e5ecb5f2f875580a3a70c17e0bab0e50784b1ec1c0f1c98c9dde`。静态包SHA256 `b14a7aace77f17e4ba4860bb29ec66a214fd7d87e82f52aff842a34279fc8b8d`。备份与回执在152的`/root/qingye-private/integration/20261112-service-r15-before.dump`及`20261112-service-r15-receipt.json`。旧版本仍保留，但会话唯一约束已变，回退须核对数据库/配置，不能只切旧API。完整结果见[R15验收](../业务验收与审查记录/SERVICE-R15--服务优化与全栈验收.md)。
+
 ## R14 Gin分层发布
 
 2026年11月11日，API切换至`/opt/qingye-test/releases/20261111-gin-r14`；用户和管理前端仍为`20261111-review-r13`，无需重新构建。最终Linux API 16,404,640字节，SHA256 `210ec3c117b465016fa3f7698dab6704961b1646fc342a89ff3e9e0fbfbf16c0`。Gin1.12.0、Go1.27.4、`nomsgpack`，完成细分层和资源约束；最终聊天连接池与退出流程修复包含在此产物内。
