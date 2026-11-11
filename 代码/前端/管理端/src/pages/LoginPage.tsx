@@ -34,18 +34,17 @@ export function LoginPage() {
       <form className="member-form" onSubmit={submit}>
         <fieldset disabled={busy}>
           <label className="form-field">
-            手机号
+            管理员账号
             <input
-              type="tel"
-              inputMode="tel"
+              type="text"
               autoComplete="username"
-              placeholder="管理员手机号"
+              placeholder="账号名或手机号"
               value={phone}
-              onChange={(e) =>
-                setPhone(e.target.value.replace(/\D/g, "").slice(0, 11))
-              }
+              onChange={(e) => setPhone(e.target.value)}
+              maxLength={32}
+              autoCapitalize="none"
+              spellCheck={false}
               required
-              pattern="1[3-9][0-9]{9}"
             />
           </label>
           <label className="form-field">
@@ -56,8 +55,7 @@ export function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={8}
-              maxLength={128}
+              maxLength={72}
             />
           </label>
           {error && (
