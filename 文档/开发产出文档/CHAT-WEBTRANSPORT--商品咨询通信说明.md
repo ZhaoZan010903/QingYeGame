@@ -1,8 +1,8 @@
-# 商品咨询：WebTransport 实现说明
+# 商品咨询：WebTransport 优先与代理兼容
 
-> R8补充：Chrome对目标解析为系统代理时会拒绝WebTransport连接。需要在系统代理绕过清单或PAC中让该目标DIRECT；仅在Clash内部选择DIRECT可能不够。两端现有手动重连与排查说明，握手错误不再只显示泛化重试；登录失效停止重试。当前用户暂不便关闭代理，绕过后的实机结果尚未确认，详见[连接排查记录](../业务验收与审查记录/HERO-R8--首屏光影与聊天连接排查.md)。
+R10（2026-11-11）：首页恢复的R9背景保持不变，探索图标改为双下箭头，首屏轻微下滑自动完成进入内容区。聊天按最新用户要求保留WebTransport优先，连接失败自动获取新票据并切换同源WebSocket；兼容Clash代理，不自动重发未确认消息。用户站、管理站与API统一部署为`20261111-chat-proxy-r10`。用户79、管理34、后端81项检查通过；双端经本机Clash代理完成WSS连接、只读RPC和心跳验证，公网WebTransport复验通过。浏览器工具故障，实机视觉与Chrome页面收发仍待用户复核。
 
-更新：2026-11-11，R7 / `0.8.0-test.1`。服务器已部署HTTPS与WebTransport监听，公网UDP需以最新验收结果为准。
+更新：2026-11-11，R10 / `0.8.0-test.1`。
 
 ## 1. 用户怎么使用
 
@@ -22,13 +22,17 @@
 sequenceDiagram
     participant U as 会员或管理员浏览器
     participant A as 对应身份的 Go API
-    participant W as 对应身份的 WebTransport 服务
+    participant W as 对应身份的实时连接服务
     participant D as PostgreSQL
     participant R as Redis
     U->>A: 携带本站登录 Cookie 申请连接票据
-    A->>R: 存储绑定会话、身份入口、Origin 的短期票据
-    A-->>U: HTTPS/HTTP3 地址与一次性票据
-    U->>W: 建立 WebTransport 连接
+    A->>R: 存储绑定会话、身份入口、Origin 和传输方式的短期票据
+    A-->>U: 地址与一次性票据
+    U->>W: 优先建立 WebTransport 连接
+    opt QUIC失败或浏览器不支持
+        U->>A: 申请新的 WebSocket 票据
+        U->>W: 通过同源 HTTPS 端口建立 WSS 连接
+    end
     W->>R: 原子消费票据
     W->>D: 核验会话有效性与角色
     U->>W: 可靠双向流发送消息和重试标识
@@ -41,16 +45,18 @@ sequenceDiagram
     W-->>U: 返回消息正文与商品上下文
 ```
 
-- 浏览器使用原生 WebTransport；Go 使用 `webtransport-go v0.13.0` 与 `quic-go v0.62.0`。
-- 每个连接使用一条可靠双向流，消息为 UTF-8 JSON Lines。聊天正文不使用不可靠数据报。
+- 浏览器优先使用原生 WebTransport；Go 使用 `webtransport-go v0.13.0` 与 `quic-go v0.62.0`。兼容通道使用浏览器原生 WebSocket 和 Go `github.com/coder/websocket v1.8.15`，共用原有聊天业务处理器。
+- WebTransport使用一条可靠双向流；WebSocket使用文本消息承载相同的UTF-8 JSON Lines。聊天正文不使用不可靠数据报，禁止二进制帧。
 - 已连接时，会话列表、详情、消息读取、发送、已读、结束和接待心跳都使用该连接。登录和连接票据使用原有 HTTP API。
-- 连接未就绪时，可通过原有鉴权 HTTP 接口只读历史；发送按钮不会切到 SSE、WebSocket 或 HTTP 发送。服务端业务 HTTP 接口仍保留用于接口联调，并使用相同身份和归属校验。
+- WebTransport连接失败或4.5秒内未就绪时，关闭该连接，重新申请WebSocket票据并自动切换；不支持WebTransport的安全上下文直接使用WebSocket。兼容连接就绪超时10秒。当前页面后续重连沿用WebSocket，避免反复尝试受阻QUIC。
+- 登录失效或鉴权失败不会用另一通道绕过权限。两种通道均未就绪时，仅通过原有鉴权HTTP接口只读历史，写操作保持禁用并保留输入；不使用SSE或HTTP自动发送，不自动重放已提交但未确认的消息。
+- 票据申请沿用`POST /api/v1/chat/transport-ticket`及管理端对应路径，新增可选参数`transport: webtransport | websocket`；省略时仍为WebTransport，兼容原客户端。WSS地址由服务端返回相对路径，前端强制校验同源。
 - PostgreSQL 保存消息事实；Redis 负责通知、连接票据、频控和连接数量。Redis 通知不是消息存储，断线后按数据库记录补齐。Redis Pub/Sub 的交付语义参见[官方文档](https://redis.io/docs/latest/develop/pubsub/)。
 - 消息发送成功以数据库提交和服务端确认结果为准。确认丢失后重试原内容，`client_id` 唯一约束保证不重复落库。
 
 ## 3. 协议约定
 
-连接后浏览器先发送一个空行，使服务端能够接收双向流；服务端回复 `{"type":"ready"}`。此后不接受空白心跳，用服务端定时更新帧维持连接检查。
+WebTransport连接后浏览器先发送一个空行，使服务端能够接收双向流；WebSocket无需该握手空行。服务端回复 `{"type":"ready"}`。此后不接受空白心跳，用服务端定时更新帧维持连接检查。
 
 命令示例：
 
@@ -90,8 +96,8 @@ sequenceDiagram
 ## 5. 权限与连接边界
 
 - public/admin 各自运行 HTTP/3 服务，各自使用准确的 Origin 白名单和会话 audience；客户端不能通过协议指定角色、发送者或任意接口路径。
-- 票据有效期 30 秒，只能使用一次，绑定登录会话、身份入口和 Origin。Redis 只保存票据摘要和会话摘要；连接 URL 不携带登录 Cookie 或持久令牌。
-- 同一账号在同一入口最多 4 个连接，使用 Redis 租约计数。额外流、超长帧和突发滥发会被拒绝或关闭。
+- 票据有效期 30 秒，只能使用一次，绑定登录会话、身份入口、Origin和传输方式，不能跨通道重用。WebSocket握手额外核对登录Cookie与票据的会话摘要一致。Redis 只保存票据摘要和会话摘要；连接 URL 不携带登录 Cookie 或持久令牌。
+- 同一账号在同一入口两种传输合计最多4个连接，共用Redis租约计数。额外流、超长帧和突发滥发会被拒绝或关闭。
 - 每次操作核验当前会话；持续连接也定期复核。管理员只能访问分配给自己的会话，会员只能访问自己的会话。重新分配后原管理员失去读取和发送权限。
 - Redis 发送的是刷新通知；真正读取数据时仍执行数据库归属条件。
 - 服务端只把消息当普通文本返回，前端使用 React 文本渲染，不解析消息中的 HTML。
@@ -108,11 +114,19 @@ go run ./代码/工具/chat-dev-cert/main.go --out /private/qingye-local-tls
 
 配置样例在 `代码/部署/qingye-test/chat-webtransport.env.example`。本地 public 使用 `127.0.0.1:5443/UDP`，admin 使用 `127.0.0.1:5444/UDP`；这只是本地开发示例，测试部署使用下述同端口TCP／UDP配置，公网双端连接已实测通过。
 
-前端分别代理各自的 HTTP API。用户端 `ALLOWED_ORIGINS` 只填写用户前端地址，管理端只填写管理前端地址。两个 Go 进程各自配置 `CHAT_WT_ADDR`、`CHAT_WT_URL`、`CHAT_WT_CERT`、`CHAT_WT_KEY`。
+前端Vite开发与预览代理已开启`ws: true`，分别代理各自的HTTP API和WebSocket。用户端 `ALLOWED_ORIGINS` 只填写用户前端地址，管理端只填写管理前端地址。两个 Go 进程各自配置 `CHAT_WT_ADDR`、`CHAT_WT_URL`、`CHAT_WT_CERT`、`CHAT_WT_KEY`。
 
 本地可设置 `CHAT_WT_PIN_CERTIFICATE=true`；代码限制此模式只能使用 loopback 地址、短期 ECDSA 证书。公网使用可信 CA 证书且关闭指纹开发模式，不关闭浏览器证书校验。
 
-R7已使用可信IP证书：TCP5179/5181由Nginx提供HTTPS，UDP5179/5181由对应Go进程直接提供HTTP/3，连接地址为同源 `/chat`，CSP继续保持 `connect-src self`。内部HTTP API仍只监听5180/5182回环。参见 `chat-webtransport-test.env.example`，不能用普通Nginx HTTP proxy_pass代替WebTransport。Caddy原有443站点不变，仅HTTP80增加本IP的ACME验证路径。自动续期timer每日两次检查证书，部署hook原子更换证书对、重载本项目Nginx并重启两个API，现有聊天会短暂重连。
+R7已使用可信IP证书：TCP5179/5181由Nginx提供HTTPS，UDP5179/5181由对应Go进程直接提供HTTP/3，连接地址为同源 `/chat`，CSP仅允许本站以及本站对应端口的显式`wss://`来源。内部HTTP API仍只监听5180/5182回环。参见 `chat-webtransport-test.env.example`，不能用普通Nginx HTTP proxy_pass代替WebTransport。Caddy原有443站点不变，仅HTTP80增加本IP的ACME验证路径。自动续期timer每日两次检查证书，部署hook原子更换证书对、重载本项目Nginx并重启两个API，现有聊天会短暂重连。
+
+### 代理兼容入口
+
+- 用户端：`wss://152.136.252.204:5179/api/v1/chat/socket`。
+- 管理端：`wss://152.136.252.204:5181/api/v1/admin/chat/socket`。
+- Nginx仅对上述精确路径开启HTTP/1.1 Upgrade转发，保留Origin；读超时75秒，服务端20秒更新心跳。无需新增公网端口或关闭Clash。
+- 访问日志继续只记录`$uri`，不记录携带临时票据的查询字符串；前端和探测脚本不输出票据或Cookie。
+- 兼容能力取决于代理节点可达本站且允许WebSocket；不承诺所有代理规则和企业网关均可用。代理实现参考[NGINX官方说明](https://nginx.org/en/docs/http/websocket.html)，Go实现使用[coder/websocket](https://github.com/coder/websocket)。
 
 ## 7. 本次未包含
 

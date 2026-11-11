@@ -1,4 +1,5 @@
-// Protocol only: each app supplies its own authenticated ticket endpoint and lifecycle.
+// One authenticated command protocol, WebTransport first and same-origin WebSocket fallback.
+export type TransportKind = "webtransport" | "websocket";
 export type TransportTicket = {
   url: string;
   ticket: string;
@@ -21,12 +22,12 @@ type Pending = {
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 };
+type Writer = { write: (bytes: Uint8Array) => Promise<void> };
+const FRAME_LIMIT = 1048576;
+
 export class ChatTransport {
-  isConnected() {
-    return this.ready;
-  }
-  private transport: WebTransport | null = null;
-  private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  private writer: Writer | null = null;
+  private closeConnection: (() => void) | undefined;
   private pending = new Map<string, Pending>();
   private sequence = 0;
   private generation = 0;
@@ -34,170 +35,279 @@ export class ChatTransport {
   private retryAction: (() => void) | undefined;
   private ready = false;
   private output = Promise.resolve();
-  private listener:
-    ((state: TransportState, message: string) => void) | undefined;
+  isConnected() {
+    return this.ready;
+  }
+
   connect(
-    ticket: () => Promise<TransportTicket>,
+    ticket: (kind: TransportKind) => Promise<TransportTicket>,
     update: () => void,
     state: (state: TransportState, message: string) => void,
   ) {
     this.disconnect();
     const generation = this.generation;
-    this.listener = state;
-    if (!globalThis.isSecureContext || !("WebTransport" in globalThis)) {
+    if (
+      !globalThis.isSecureContext ||
+      (!("WebTransport" in globalThis) && !("WebSocket" in globalThis))
+    ) {
       state(
         "unavailable",
         "当前浏览器或访问地址不支持在线咨询，请使用新版浏览器通过安全地址打开。",
       );
       return;
     }
+    let preferred: TransportKind =
+      "WebTransport" in globalThis ? "webtransport" : "websocket";
     let failures = 0;
+    const receive = (frame: Frame) => {
+      if (generation !== this.generation) return;
+      if (frame.type === "ready" && !this.ready) {
+        this.ready = true;
+        failures = 0;
+        state("connected", "");
+        update();
+      } else if (frame.type === "update" && this.ready) update();
+      else if (frame.type === "result" && frame.id && this.ready) {
+        const entry = this.pending.get(frame.id);
+        if (!entry) return;
+        clearTimeout(entry.timer);
+        this.pending.delete(frame.id);
+        if ((frame.status || 500) >= 400)
+          entry.reject(
+            Object.assign(
+              new Error(
+                frame.body?.message ||
+                  frame.body?.error?.message ||
+                  "操作未完成，请重试",
+              ),
+              { status: frame.status },
+            ),
+          );
+        else entry.resolve(frame.body);
+      }
+    };
     const attempt = async () => {
       if (generation !== this.generation) return;
       state(
         failures ? "reconnecting" : "connecting",
         failures ? "连接中断，正在重连；未发送的内容会保留。" : "正在连接客服…",
       );
-      let transport: WebTransport | undefined;
-      let watchdog: ReturnType<typeof setTimeout> | undefined;
-      let stage: "ticket" | "handshake" | "stream" | "session" = "ticket";
       let reason = "连接暂不可用，正在重试；未发送的内容会保留。";
-      try {
-        const config = await ticket();
-        if (generation !== this.generation) return;
-        const url = new URL(config.url);
-        if (url.protocol !== "https:") throw new Error("咨询服务地址配置错误");
-        url.searchParams.set("ticket", config.ticket);
-        const pin = config.certificate_sha256;
-        if (pin && !/^[a-f0-9]{64}$/.test(pin))
-          throw new Error("咨询服务证书配置错误");
-        stage = "handshake";
-        transport = new WebTransport(
-          url.toString(),
-          pin
-            ? {
-                serverCertificateHashes: [
-                  {
-                    algorithm: "sha-256",
-                    value: Uint8Array.from(pin.match(/../g)!, (v) =>
-                      parseInt(v, 16),
-                    ).buffer,
-                  },
-                ],
-              }
-            : undefined,
-        );
-        this.transport = transport;
-        // Attach rejection handling immediately; ready and closed can fail independently.
-        void transport.closed.catch(() => {});
-        watchdog = setTimeout(
-          () =>
-            transport?.close({ closeCode: 1, reason: "connection timeout" }),
-          12000,
-        );
-        await transport.ready;
-        stage = "stream";
-        const stream = await transport.createBidirectionalStream();
-        if (generation !== this.generation) {
-          transport.close();
-          return;
-        }
-        this.writer = stream.writable.getWriter();
-        // The first byte makes the stream visible to the server before it sends ready.
-        await this.writer.write(new TextEncoder().encode("\n"));
-        const reader = stream.readable.getReader();
-        const decoder = new TextDecoder("utf-8", { fatal: true });
-        let buffer = "";
+      let stopped = false;
+      for (;;) {
+        let connectionStarted = false;
+        let fallback = false;
         try {
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (generation !== this.generation) break;
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            let newline: number;
-            while ((newline = buffer.indexOf("\n")) !== -1) {
-              if (newline > 1048576) throw new Error("咨询服务响应过大");
-              const raw = buffer.slice(0, newline);
-              buffer = buffer.slice(newline + 1);
-              if (!raw) continue;
-              const frame = JSON.parse(raw) as Frame;
-              if (frame.type === "ready") {
-                stage = "session";
-                clearTimeout(watchdog);
-                this.ready = true;
-                failures = 0;
-                state("connected", "");
-                update();
-              } else if (frame.type === "update") update();
-              else if (frame.type === "result" && frame.id) {
-                const entry = this.pending.get(frame.id);
-                if (!entry) continue;
-                clearTimeout(entry.timer);
-                this.pending.delete(frame.id);
-                if ((frame.status || 500) >= 400)
-                  entry.reject(
-                    Object.assign(
-                      new Error(
-                        frame.body?.message ||
-                          frame.body?.error?.message ||
-                          "操作未完成，请重试",
-                      ),
-                      { status: frame.status },
-                    ),
-                  );
-                else entry.resolve(frame.body);
-              }
-            }
-            if (buffer.length > 1048576) throw new Error("咨询服务响应过大");
+          // Tickets are one-use and bound to a transport. Never reuse the failed QUIC ticket.
+          const config = await ticket(preferred);
+          if (generation !== this.generation) return;
+          connectionStarted = true;
+          await this.runChannel(preferred, config, generation, receive);
+        } catch (e) {
+          const status = (e as { status?: number }).status;
+          if (status === 401 || status === 403) {
+            stopped = true;
+            reason =
+              status === 401
+                ? "登录状态已失效，请重新登录。"
+                : "当前连接未获授权，请刷新页面后重试。";
+          } else if (status === 429)
+            reason = "连接尝试较频繁，稍后会自动重试。未发送的内容已保留。";
+          else if (
+            preferred === "webtransport" &&
+            "WebSocket" in globalThis &&
+            (connectionStarted || status === 503)
+          ) {
+            preferred = "websocket";
+            fallback = true;
           }
         } finally {
-          reader.releaseLock();
-        }
-      } catch (e) {
-        if ((e as { status?: number }).status === 401) {
-          reason = "登录状态已失效，请重新登录。";
-          failures = 100;
-        } else if (
-          e instanceof Error &&
-          (e as { status?: number }).status === 503
-        )
-          reason = e.message;
-        else if ((e as { status?: number }).status === 429)
-          reason = "连接尝试较频繁，稍后会自动重试。未发送的内容已保留。";
-        else if (stage === "handshake")
-          reason =
-            "安全聊天连接未建立。代理或网络限制可能阻止连接；未发送的内容已保留。";
-        else if (stage === "stream")
-          reason = "聊天通道未就绪，正在重试；未发送的内容已保留。";
-      } finally {
-        clearTimeout(watchdog);
-        transport?.close();
-        if (generation === this.generation) {
-          this.ready = false;
-          this.writer = null;
-          this.output = Promise.resolve();
-          this.rejectPending(
-            new Error(
-              "连接已中断；消息可能已送达，使用原内容重试不会重复发送。",
-            ),
-          );
-          state(failures >= 100 ? "unavailable" : "reconnecting", reason);
-          if (failures < 100)
-            this.retry = setTimeout(
-              () => {
-                this.retry = undefined;
-                void attempt();
-              },
-              Math.min(30000, 1000 * 2 ** Math.min(failures++, 5)) +
-                Math.random() * 400,
+          if (generation === this.generation) {
+            this.closeConnection?.();
+            this.closeConnection = undefined;
+            this.ready = false;
+            this.writer = null;
+            this.output = Promise.resolve();
+            this.rejectPending(
+              new Error(
+                "连接已中断；消息可能已送达，使用原内容重试不会重复发送。",
+              ),
             );
+          }
         }
+        if (generation !== this.generation) return;
+        if (!fallback) break;
+        state("connecting", "正在尝试兼容连接，未发送的内容会保留…");
       }
+      state(stopped ? "unavailable" : "reconnecting", reason);
+      if (!stopped)
+        this.retry = setTimeout(
+          () => {
+            this.retry = undefined;
+            void attempt();
+          },
+          Math.min(30000, 1000 * 2 ** Math.min(failures++, 5)) +
+            Math.random() * 400,
+        );
     };
     this.retryAction = () => void attempt();
     void attempt();
   }
-  /** Retry only a scheduled attempt; never create a parallel session or resend a message. */
+
+  private runChannel(
+    kind: TransportKind,
+    config: TransportTicket,
+    generation: number,
+    receive: (frame: Frame) => void,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let finished = false;
+      let buffer = "";
+      let close = () => {};
+      const finish = (error?: Error) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(watchdog);
+        close();
+        if (error) reject(error);
+        else resolve();
+      };
+      const watchdog = setTimeout(
+        () => finish(new Error("connection timeout")),
+        kind === "webtransport" ? 4500 : 10000,
+      );
+      this.closeConnection = () => finish();
+      const push = (text: string) => {
+        if (finished || generation !== this.generation) return;
+        buffer += text;
+        let newline: number;
+        while ((newline = buffer.indexOf("\n")) !== -1) {
+          if (newline > FRAME_LIMIT) throw new Error("咨询服务响应过大");
+          const raw = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          if (!raw) continue;
+          const frame = JSON.parse(raw) as Frame;
+          if (!frame || typeof frame.type !== "string")
+            throw new Error("无效的咨询响应");
+          if (frame.type === "ready") clearTimeout(watchdog);
+          receive(frame);
+        }
+        if (buffer.length > FRAME_LIMIT) throw new Error("咨询服务响应过大");
+      };
+      try {
+        if (kind === "websocket") {
+          const base = new URL(globalThis.location.href);
+          const url = new URL(config.url, base);
+          // Only this app's HTTPS origin may receive the short-lived ticket and cookie.
+          if (
+            url.origin !== base.origin ||
+            !["http:", "https:"].includes(url.protocol) ||
+            url.username ||
+            url.password
+          )
+            throw new Error("咨询服务地址配置错误");
+          url.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+          url.searchParams.set("ticket", config.ticket);
+          const socket = new WebSocket(url.toString());
+          close = () => {
+            socket.onopen =
+              socket.onmessage =
+              socket.onerror =
+              socket.onclose =
+                null;
+            socket.close();
+          };
+          socket.onopen = () => {
+            if (finished || generation !== this.generation) {
+              close();
+              return;
+            }
+            this.writer = {
+              write: async (bytes) => {
+                if (
+                  socket.readyState !== WebSocket.OPEN ||
+                  socket.bufferedAmount > 65536
+                )
+                  throw new Error("connection busy");
+                socket.send(new TextDecoder().decode(bytes));
+              },
+            };
+          };
+          socket.onmessage = (event: MessageEvent) => {
+            try {
+              if (
+                typeof event.data !== "string" ||
+                new TextEncoder().encode(event.data).byteLength > FRAME_LIMIT
+              )
+                throw new Error("无效的咨询响应");
+              push(event.data);
+            } catch (e) {
+              finish(e as Error);
+            }
+          };
+          socket.onerror = () =>
+            finish(new Error("WebSocket connection failed"));
+          socket.onclose = () => finish(new Error("connection closed"));
+        } else {
+          const url = new URL(config.url);
+          if (url.protocol !== "https:" || url.username || url.password)
+            throw new Error("咨询服务地址配置错误");
+          url.searchParams.set("ticket", config.ticket);
+          const pin = config.certificate_sha256;
+          if (pin && !/^[a-f0-9]{64}$/.test(pin))
+            throw new Error("咨询服务证书配置错误");
+          const transport = new WebTransport(
+            url.toString(),
+            pin
+              ? {
+                  serverCertificateHashes: [
+                    {
+                      algorithm: "sha-256",
+                      value: Uint8Array.from(pin.match(/../g)!, (v) =>
+                        parseInt(v, 16),
+                      ).buffer,
+                    },
+                  ],
+                }
+              : undefined,
+          );
+          close = () => transport.close();
+          void transport.closed.then(
+            () => finish(new Error("connection closed")),
+            (e: Error) => finish(e),
+          );
+          void (async () => {
+            await transport.ready;
+            if (finished) return;
+            const stream = await transport.createBidirectionalStream();
+            if (finished || generation !== this.generation) {
+              transport.close();
+              return;
+            }
+            const writer = stream.writable.getWriter();
+            this.writer = writer;
+            await writer.write(new TextEncoder().encode("\n"));
+            const reader = stream.readable.getReader();
+            const decoder = new TextDecoder("utf-8", { fatal: true });
+            try {
+              while (!finished) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                push(decoder.decode(value, { stream: true }));
+              }
+              finish(new Error("connection closed"));
+            } finally {
+              reader.releaseLock();
+            }
+          })().catch((e: Error) => finish(e));
+        }
+      } catch (e) {
+        finish(e as Error);
+      }
+    });
+  }
+
+  /** Retry a scheduled attempt only; never open parallel sessions or replay a draft. */
   reconnect(): boolean {
     if (!this.retry || !this.retryAction || this.ready) return false;
     clearTimeout(this.retry);
@@ -213,7 +323,8 @@ export class ChatTransport {
     if (this.pending.size >= 16)
       return Promise.reject(new Error("操作较多，请稍候再试。"));
     const id = String(++this.sequence),
-      writer = this.writer;
+      writer = this.writer,
+      generation = this.generation;
     const bytes = new TextEncoder().encode(
       JSON.stringify({ id, op, conversation, payload }) + "\n",
     );
@@ -228,7 +339,15 @@ export class ChatTransport {
       }, 12000);
       this.pending.set(id, { resolve, reject, timer });
       this.output = this.output
-        .then(() => writer.write(bytes))
+        .then(() => {
+          if (
+            generation !== this.generation ||
+            writer !== this.writer ||
+            !this.pending.has(id)
+          )
+            throw new Error("connection changed");
+          return writer.write(bytes);
+        })
         .catch(() => {
           const entry = this.pending.get(id);
           if (entry) {
@@ -252,11 +371,10 @@ export class ChatTransport {
     this.retry = undefined;
     this.retryAction = undefined;
     this.ready = false;
-    this.transport?.close();
-    this.transport = null;
+    this.closeConnection?.();
+    this.closeConnection = undefined;
     this.writer = null;
     this.output = Promise.resolve();
     this.rejectPending(new Error("咨询连接已关闭"));
-    this.listener = undefined;
   }
 }

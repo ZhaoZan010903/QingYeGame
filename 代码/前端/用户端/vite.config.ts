@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   const proxy = {
-    '/api': { target: env.QINGYE_API_PROXY || 'http://127.0.0.1:8080', changeOrigin: true },
+    '/api': { target: env.QINGYE_API_PROXY || 'http://127.0.0.1:8080', changeOrigin: true, ws: true },
   };
   return {
     plugins: [react(), tailwindcss()],

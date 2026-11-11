@@ -29,15 +29,11 @@ export function ChatConnectionNotice({ message }: { message: string }) {
       )}
       <details className="chat-connection-help">
         <summary>网页正常打开，为什么聊天连不上？</summary>
-        <p>聊天使用独立的实时连接。网页能打开，不代表这条连接已经建立。</p>
+        <p>系统会自动尝试兼容连接，使用 Clash 等代理时通常无需调整设置。</p>
         <ol>
-          <li>
-            如使用 Clash 等系统代理，可将 <code>{window.location.hostname}</code>{' '}
-            加入“系统代理绕过／排除地址”，保留其他网站走代理。仅在代理软件中添加 DIRECT
-            分流规则可能仍不生效。
-          </li>
-          <li>若使用 TUN 或公司网络，请检查该站点的 UDP 连接是否允许；也可换一个网络对照测试。</li>
-          <li>确认通过 HTTPS 访问，并使用更新的浏览器。调整网络设置后点击“重新连接”。</li>
+          <li>确认通过 HTTPS 打开页面，并等待连接完成。</li>
+          <li>如果仍无法连接，请检查代理节点能否正常访问本站，再点击“重新连接”。</li>
+          <li>也可更换代理节点或网络后重试。</li>
         </ol>
         <p>连接恢复前无法发送消息，当前输入不会自动重发。仍失败时，请反馈浏览器版本和上方提示。</p>
       </details>

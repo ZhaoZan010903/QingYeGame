@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
+import { EntranceGesture } from './entrance-gesture';
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ease = (value: number) => value * value * (3 - 2 * value);
@@ -42,6 +43,8 @@ export function useHomeEntranceMotion() {
     let lastProgress = Number.NaN;
     let viewportWidth = document.documentElement.clientWidth;
     let pieces: TitlePiece[] = [];
+    const gesture = new EntranceGesture();
+    let touch: { x: number; y: number } | null = null;
 
     const cancelScroll = () => {
       cancelAnimationFrame(scrollFrame);
@@ -189,8 +192,55 @@ export function useHomeEntranceMotion() {
         window.scrollTo({ top: from + (to - from) * ease(progress), behavior: 'instant' });
         draw();
         if (progress < 1) scrollFrame = requestAnimationFrame(step);
+        else scrollFrame = 0;
       };
       scrollFrame = requestAnimationFrame(step);
+    };
+
+    const excluded = (target: EventTarget | null) =>
+      document.body.style.overflow === 'hidden' ||
+      (target instanceof Element &&
+        !!target.closest(
+          'input, textarea, select, button, a, nav, [role="dialog"], [contenteditable="true"], [data-scroll-native]',
+        ));
+    const move = (x: number, y: number, event: WheelEvent | TouchEvent) => {
+      if (motion.matches || excluded(event.target)) return;
+      if (needsMeasure) flush();
+      if (!scrollFrame && window.scrollY <= startScroll + 8) gesture.rearm();
+      const eligible =
+        window.scrollY >= startScroll - 8 &&
+        window.scrollY < startScroll + (endScroll - startScroll) * 0.35;
+      const result = gesture.move(x, y, performance.now(), eligible, !!scrollFrame);
+      if (result === 'cancel') cancelScroll();
+      if (result === 'hold' || result === 'enter') {
+        if (event.cancelable) event.preventDefault();
+        if (result === 'enter') enterAction.current();
+      }
+    };
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) return;
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+      move(event.deltaX * unit, event.deltaY * unit, event);
+    };
+    const touchStart = (event: TouchEvent) => {
+      cancelScroll();
+      touch =
+        event.touches.length === 1 && !excluded(event.target)
+          ? { x: event.touches[0].clientX, y: event.touches[0].clientY }
+          : null;
+    };
+    const touchMove = (event: TouchEvent) => {
+      if (!touch || event.touches.length !== 1) return;
+      const current = event.touches[0];
+      move(touch.x - current.clientX, touch.y - current.clientY, event);
+      touch = { x: current.clientX, y: current.clientY };
+    };
+    const touchEnd = () => {
+      touch = null;
+    };
+    const interrupt = () => {
+      if (scrollFrame) gesture.cancel();
+      cancelScroll();
     };
 
     // svh keeps the intro stable while the mobile address bar changes visual height.
@@ -208,8 +258,13 @@ export function useHomeEntranceMotion() {
     window.addEventListener('scroll', schedule, { passive: true });
     window.addEventListener('resize', resize);
     motion.addEventListener('change', motionChanged);
-    for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown'])
-      window.addEventListener(event, cancelScroll, { passive: true });
+    window.addEventListener('wheel', wheel, { passive: false });
+    window.addEventListener('touchstart', touchStart, { passive: true });
+    window.addEventListener('touchmove', touchMove, { passive: false });
+    window.addEventListener('touchend', touchEnd, { passive: true });
+    window.addEventListener('touchcancel', touchEnd, { passive: true });
+    window.addEventListener('pointerdown', interrupt, { passive: true });
+    window.addEventListener('keydown', interrupt);
     return () => {
       disposed = true;
       enterAction.current = () => {};
@@ -219,8 +274,13 @@ export function useHomeEntranceMotion() {
       window.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', resize);
       motion.removeEventListener('change', motionChanged);
-      for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown'])
-        window.removeEventListener(event, cancelScroll);
+      window.removeEventListener('wheel', wheel);
+      window.removeEventListener('touchstart', touchStart);
+      window.removeEventListener('touchmove', touchMove);
+      window.removeEventListener('touchend', touchEnd);
+      window.removeEventListener('touchcancel', touchEnd);
+      window.removeEventListener('pointerdown', interrupt);
+      window.removeEventListener('keydown', interrupt);
     };
   }, []);
 

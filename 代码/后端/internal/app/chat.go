@@ -28,6 +28,7 @@ func (a *App) registerChat(m *http.ServeMux) {
 	m.HandleFunc("POST "+prefix+"/conversations/{id}/read", a.memberMutation(a.chatRead))
 	m.HandleFunc("POST "+prefix+"/conversations/{id}/close", a.memberMutation(a.chatClose))
 	m.HandleFunc("POST "+prefix+"/transport-ticket", a.memberMutation(a.chatTransportTicket))
+	m.HandleFunc("GET "+prefix+"/socket", a.chatWebSocket)
 	if a.surface() == "admin" {
 		m.HandleFunc("GET "+prefix+"/presence", a.chatPresence)
 		m.HandleFunc("POST "+prefix+"/presence", a.memberMutation(a.chatPresence))

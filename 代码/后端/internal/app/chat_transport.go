@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/webtransport-go"
@@ -25,7 +26,7 @@ import (
 
 const chatFrameLimit = 16 << 10
 
-type chatTicket struct{ User, Session, Surface, Origin string }
+type chatTicket struct{ User, Session, Surface, Origin, Transport string }
 type chatCommand struct {
 	ID           string          `json:"id"`
 	Op           string          `json:"op"`
@@ -92,26 +93,48 @@ func (a *App) chatTransportTicket(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "ORIGIN_REQUIRED", "缺少有效请求来源")
 		return
 	}
-	if a.Config.ChatWTAddr == "" {
+	var in struct {
+		Transport string `json:"transport"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.Transport == "" {
+		in.Transport = "webtransport"
+	}
+	if in.Transport != "webtransport" && in.Transport != "websocket" {
+		fail(w, 422, "INVALID_TRANSPORT", "不支持的连接方式")
+		return
+	}
+	if in.Transport == "webtransport" && a.Config.ChatWTAddr == "" {
 		fail(w, 503, "CHAT_NOT_CONFIGURED", "在线咨询尚未启用，请稍后重试")
 		return
 	}
 	if !a.memberLimit(w, r, "chat-ticket:"+u.ID, 12, time.Minute) {
 		return
 	}
-	_, pin, e := a.chatTLS()
-	if e != nil {
-		fail(w, 503, "CHAT_TLS_UNAVAILABLE", "在线咨询连接暂不可用")
-		return
+	endpoint, pin := a.Config.ChatWTURL, ""
+	if in.Transport == "webtransport" {
+		var e error
+		_, pin, e = a.chatTLS()
+		if e != nil {
+			fail(w, 503, "CHAT_TLS_UNAVAILABLE", "在线咨询连接暂不可用")
+			return
+		}
+	} else {
+		endpoint = "/api/v1/chat/socket"
+		if a.surface() == "admin" {
+			endpoint = "/api/v1/admin/chat/socket"
+		}
 	}
 	ticket := randomToken()
-	data, _ := json.Marshal(chatTicket{u.ID, a.requestSessionHash(r), a.surface(), r.Header.Get("Origin")})
-	if e = a.Redis.Set(r.Context(), "qingye:chat:ticket:"+a.surface()+":"+tokenHash(ticket), data, 30*time.Second).Err(); e != nil {
+	data, _ := json.Marshal(chatTicket{u.ID, a.requestSessionHash(r), a.surface(), r.Header.Get("Origin"), in.Transport})
+	if e := a.Redis.Set(r.Context(), "qingye:chat:ticket:"+a.surface()+":"+tokenHash(ticket), data, 30*time.Second).Err(); e != nil {
 		fail(w, 503, "CHAT_UNAVAILABLE", "在线咨询暂不可用")
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"data": map[string]any{"url": a.Config.ChatWTURL, "ticket": ticket, "certificate_sha256": pin, "expires_in": 30}})
+	writeJSON(w, 200, map[string]any{"data": map[string]any{"url": endpoint, "ticket": ticket, "certificate_sha256": pin, "expires_in": 30}})
 }
 
 func (a *App) NewChatTransport() (*webtransport.Server, error) {
@@ -125,47 +148,11 @@ func (a *App) NewChatTransport() (*webtransport.Server, error) {
 			http.NotFound(w, r)
 			return
 		}
-		if !a.chatOrigin(r.Header.Get("Origin")) {
-			fail(w, 403, "ORIGIN_REJECTED", "请求来源不允许")
+		binding, key, lease, ok := a.acceptChatTicket(w, r, "webtransport")
+		if !ok {
 			return
 		}
-		ticket := r.URL.Query().Get("ticket")
-		if len(ticket) != 64 {
-			fail(w, 401, "INVALID_TICKET", "请重新连接")
-			return
-		}
-		// Only a short-lived, one-use random ticket is ever carried in the URL; no access logging here.
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		raw, err := a.Redis.GetDel(ctx, "qingye:chat:ticket:"+a.surface()+":"+tokenHash(ticket)).Bytes()
-		var binding chatTicket
-		if err != nil || json.Unmarshal(raw, &binding) != nil || binding.Surface != a.surface() || binding.Origin != r.Header.Get("Origin") {
-			cancel()
-			fail(w, 401, "INVALID_TICKET", "连接凭据已过期，请重新连接")
-			return
-		}
-		auth := r.WithContext(context.WithValue(ctx, chatSessionKey{}, binding.Session))
-		u, err := a.currentUser(auth)
-		if err != nil || u.ID != binding.User {
-			cancel()
-			fail(w, 401, "SESSION_EXPIRED", "请重新登录")
-			return
-		}
-		key, lease := "qingye:chat:streams:"+a.surface()+":"+u.ID, newID()
-		n, err := a.Redis.Eval(ctx, `redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',ARGV[1]-50);if redis.call('ZCARD',KEYS[1])>=4 then return 0 end;redis.call('ZADD',KEYS[1],ARGV[1],ARGV[2]);redis.call('EXPIRE',KEYS[1],70);return 1`, []string{key}, time.Now().Unix(), lease).Int()
-		cancel()
-		if err != nil {
-			fail(w, 503, "CHAT_UNAVAILABLE", "连接暂不可用")
-			return
-		}
-		if n != 1 {
-			fail(w, 429, "CHAT_LIMIT", "同时打开的咨询页面较多，请关闭多余页面")
-			return
-		}
-		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			_ = a.Redis.ZRem(ctx, key, lease).Err()
-		}()
+		defer a.releaseChatLease(key, lease)
 		session, err := s.Upgrade(w, r)
 		if err != nil {
 			return
@@ -173,6 +160,85 @@ func (a *App) NewChatTransport() (*webtransport.Server, error) {
 		a.serveChatSession(session, binding, key, lease, r.RemoteAddr)
 	})
 	return s, nil
+}
+
+// Both transports share exact-origin checks, single-use tickets and one connection quota.
+func (a *App) acceptChatTicket(w http.ResponseWriter, r *http.Request, transport string) (chatTicket, string, string, bool) {
+	if !a.chatOrigin(r.Header.Get("Origin")) {
+		fail(w, 403, "ORIGIN_REJECTED", "请求来源不允许")
+		return chatTicket{}, "", "", false
+	}
+	ticket := r.URL.Query().Get("ticket")
+	if len(ticket) != 64 {
+		fail(w, 401, "INVALID_TICKET", "请重新连接")
+		return chatTicket{}, "", "", false
+	}
+	// Only a short-lived, one-use random ticket is ever carried in the URL; no access logging here.
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	raw, err := a.Redis.GetDel(ctx, "qingye:chat:ticket:"+a.surface()+":"+tokenHash(ticket)).Bytes()
+	var binding chatTicket
+	if err != nil || json.Unmarshal(raw, &binding) != nil || binding.Surface != a.surface() || binding.Origin != r.Header.Get("Origin") || binding.Transport != transport {
+		cancel()
+		fail(w, 401, "INVALID_TICKET", "连接凭据已过期，请重新连接")
+		return chatTicket{}, "", "", false
+	}
+	if transport == "websocket" && a.requestSessionHash(r) != binding.Session {
+		cancel()
+		fail(w, 401, "SESSION_MISMATCH", "请重新连接")
+		return chatTicket{}, "", "", false
+	}
+	auth := r.WithContext(context.WithValue(ctx, chatSessionKey{}, binding.Session))
+	u, err := a.currentUser(auth)
+	if err != nil || u.ID != binding.User {
+		cancel()
+		fail(w, 401, "SESSION_EXPIRED", "请重新登录")
+		return chatTicket{}, "", "", false
+	}
+	key, lease := "qingye:chat:streams:"+a.surface()+":"+u.ID, newID()
+	n, err := a.Redis.Eval(ctx, `redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',ARGV[1]-50);if redis.call('ZCARD',KEYS[1])>=4 then return 0 end;redis.call('ZADD',KEYS[1],ARGV[1],ARGV[2]);redis.call('EXPIRE',KEYS[1],70);return 1`, []string{key}, time.Now().Unix(), lease).Int()
+	cancel()
+	if err != nil {
+		fail(w, 503, "CHAT_UNAVAILABLE", "连接暂不可用")
+		return chatTicket{}, "", "", false
+	}
+	if n != 1 {
+		fail(w, 429, "CHAT_LIMIT", "同时打开的咨询页面较多，请关闭多余页面")
+		return chatTicket{}, "", "", false
+	}
+	return binding, key, lease, true
+}
+
+func (a *App) releaseChatLease(key, lease string) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = a.Redis.ZRem(ctx, key, lease).Err()
+}
+
+func (a *App) chatWebSocket(w http.ResponseWriter, r *http.Request) {
+	binding, key, lease, ok := a.acceptChatTicket(w, r, "websocket")
+	if !ok {
+		return
+	}
+	defer a.releaseChatLease(key, lease)
+	// Exact allow-list validation already ran above, including the originating login session.
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: []string{binding.Origin}, CompressionMode: websocket.CompressionDisabled})
+	if err != nil {
+		return
+	}
+	defer conn.CloseNow()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
+	defer cancel()
+	stream := websocket.NetConn(ctx, conn, websocket.MessageText)
+	// NetConn disables the library's default limit; restore the protocol limit explicitly.
+	conn.SetReadLimit(chatFrameLimit)
+	defer func() { _ = conn.CloseNow(); _ = stream.Close() }()
+	a.serveChatStream(ctx, cancel, stream, binding, key, lease, r.RemoteAddr)
+}
+
+type chatDuplexStream interface {
+	io.Reader
+	io.Writer
+	SetWriteDeadline(time.Time) error
 }
 
 func (a *App) serveChatSession(session *webtransport.Session, binding chatTicket, key, lease, remote string) {
@@ -200,6 +266,11 @@ func (a *App) serveChatSession(session *webtransport.Session, binding chatTicket
 			_ = session.CloseWithError(1, "unexpected stream")
 		}
 	}()
+	a.serveChatStream(ctx, cancel, stream, binding, key, lease, remote)
+}
+
+// One JSON-lines protocol and the same business handlers on QUIC and TCP.
+func (a *App) serveChatStream(ctx context.Context, cancel context.CancelFunc, stream chatDuplexStream, binding chatTicket, key, lease, remote string) {
 	var writeMu sync.Mutex
 	send := func(frame chatFrame) bool {
 		writeMu.Lock()
@@ -226,7 +297,7 @@ func (a *App) serveChatSession(session *webtransport.Session, binding chatTicket
 	sub := a.Redis.Subscribe(ctx, chatChannel(binding.User))
 	defer sub.Close()
 	subCtx, stop := context.WithTimeout(ctx, 3*time.Second)
-	_, e = sub.Receive(subCtx)
+	_, e := sub.Receive(subCtx)
 	stop()
 	if e != nil {
 		return

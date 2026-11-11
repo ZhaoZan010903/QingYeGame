@@ -63,38 +63,6 @@ async function opened(f: ReturnType<typeof fixture>) {
   await vi.waitFor(() => expect(f.state).toHaveBeenCalledWith('connected', ''));
 }
 describe('WebTransport reliable protocol', () => {
-  it('explains handshake failures and retries without parallel sessions or replaying drafts', async () => {
-    vi.useFakeTimers();
-    let connections = 0;
-    class FailedTransport {
-      ready = Promise.reject(new Error('Opening handshake failed'));
-      closed = Promise.resolve();
-      constructor() {
-        connections++;
-      }
-      close() {}
-    }
-    vi.stubGlobal('isSecureContext', true);
-    vi.stubGlobal('WebTransport', FailedTransport);
-    const client = new ChatTransport();
-    clients.push(client);
-    const state = vi.fn();
-    client.connect(tickets, vi.fn(), state);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(state).toHaveBeenLastCalledWith(
-      'reconnecting',
-      expect.stringContaining('代理或网络限制'),
-    );
-    expect(connections).toBe(1);
-    expect(client.reconnect()).toBe(true);
-    expect(client.reconnect()).toBe(false);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(connections).toBe(2);
-    client.disconnect();
-    expect(client.reconnect()).toBe(false);
-    await vi.advanceTimersByTimeAsync(60000);
-    expect(connections).toBe(2);
-  });
   it('stops retrying an expired session instead of displaying a network failure', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('isSecureContext', true);

@@ -1,5 +1,9 @@
 import { request } from './api';
-import { ChatTransport, type TransportTicket } from '../../../共享/chat-transport';
+import {
+  ChatTransport,
+  type TransportKind,
+  type TransportTicket,
+} from '../../../共享/chat-transport';
 export const chatTransport = new ChatTransport();
 import type { ChatList, Conversation, MessagePage, ChatPresence } from '../../../共享/chat-types';
 export const chatAdmin = false;
@@ -7,8 +11,8 @@ export const chatRoute = '/messages';
 const prefix = '/chat';
 
 export const chatApi = {
-  async ticket(): Promise<TransportTicket> {
-    const r = await request(`${prefix}/transport-ticket`, 'POST', {});
+  async ticket(transport: TransportKind = 'webtransport'): Promise<TransportTicket> {
+    const r = await request(`${prefix}/transport-ticket`, 'POST', { transport });
     return r.data as TransportTicket;
   },
   async list(offset = 0): Promise<ChatList> {

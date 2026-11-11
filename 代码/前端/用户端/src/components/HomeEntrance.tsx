@@ -72,9 +72,10 @@ export function HomeEntrance({ children }: { children: ReactNode }) {
         >
           <span>向下探索</span>
           <span className="intro-scroll-icon" aria-hidden="true">
-            <span className="intro-scroll-track">
-              <span className="intro-scroll-wheel" />
-            </span>
+            <svg className="intro-chevrons" viewBox="0 0 32 36" fill="none">
+              <path d="m5 7 11 9L27 7" />
+              <path d="m5 19 11 9 11-9" />
+            </svg>
           </span>
         </button>
       </section>

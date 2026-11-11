@@ -1,6 +1,7 @@
 import { request } from "./api";
 import {
   ChatTransport,
+  type TransportKind,
   type TransportTicket,
 } from "../../../共享/chat-transport";
 export const chatTransport = new ChatTransport();
@@ -15,7 +16,9 @@ export const chatRoute = "/chat";
 const prefix = "/admin/chat";
 
 export const chatApi = {
-  async ticket(): Promise<TransportTicket> {
+  async ticket(
+    transport: TransportKind = "webtransport",
+  ): Promise<TransportTicket> {
     const r = await request(`${prefix}/transport-ticket`, "POST", {});
     return r.data as TransportTicket;
   },
