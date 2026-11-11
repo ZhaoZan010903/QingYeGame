@@ -19,9 +19,12 @@ go build -o qingye ./cmd/qingye
 
 ```sh
 ./qingye migrate
+./qingye refresh-itemcf
 ./qingye seed-user --file /private/test-admin.json
 ./qingye serve
 ```
+
+`refresh-itemcf` 手动重算商品协同过滤快照。正常运行时仅 public 进程在启动时及每小时自动执行；PostgreSQL 事务锁避免重叠运行。浏览明细、ItemCF 快照均保存在 PostgreSQL，不增加 Redis 缓存或新的中间件。运行前先应用增量迁移 `0004_itemcf.sql`；算法、资源边界和回退规则见[推荐说明](../../文档/开发产出文档/10-recommendation-design--热门推荐算法.md)。
 
 `seed-user` 文件格式为 `{"phone":"测试登录标识","nickname":"测试管理员","password":"专用强密码","role":"admin"}`。省略 `--file` 时从标准输入读取；密码不出现在命令参数和日志。密码至少12字节，使用 bcrypt 散列；同一个手机号重复执行不会修改原账号、权限或密码。会员使用 `role=member`。管理界面不提供自助提权。
 

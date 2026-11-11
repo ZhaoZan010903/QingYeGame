@@ -46,6 +46,8 @@ func run() error {
 	switch command {
 	case "migrate":
 		return a.Migrate(ctx)
+	case "refresh-itemcf":
+		return a.RefreshItemCF(ctx)
 	case "seed-user":
 		var input io.Reader = os.Stdin
 		if *file != "" {
@@ -84,12 +86,13 @@ func run() error {
 	case "serve":
 		return serve(ctx, a)
 	default:
-		return fmt.Errorf("unknown command %q; use serve, migrate, seed-user, import-legacy, reconcile-media", command)
+		return fmt.Errorf("unknown command %q; use serve, migrate, seed-user, import-legacy, reconcile-media, refresh-itemcf", command)
 	}
 }
 func serve(ctx context.Context, a *app.App) error {
 	if a.Config.Surface != "admin" {
 		go a.RunChatDispatch(ctx)
+		go a.RunItemCF(ctx)
 	}
 	server := &http.Server{Addr: a.Config.Addr, Handler: a.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	errors := make(chan error, 2)

@@ -23,6 +23,7 @@ type interestProfile struct {
 	SampleCount int                `json:"sample_count"`
 	Categories  []interestCategory `json:"categories"`
 	weights     map[string]map[string]float64
+	products    map[string]float64
 }
 
 func (a *App) recommendationIdentity(r *http.Request) (string, error) {
@@ -49,7 +50,7 @@ func (a *App) recommendationIdentity(r *http.Request) (string, error) {
 // recently viewed visible products bound the profile. Repeat refreshes of one
 // product on one day never multiply its weight; a week's age halves its weight.
 func (a *App) interestProfile(r *http.Request) (interestProfile, error) {
-	p := interestProfile{Enabled: true, Categories: []interestCategory{}, weights: map[string]map[string]float64{"category": {}, "trade": {}, "server": {}, "price": {}}}
+	p := interestProfile{Enabled: true, Categories: []interestCategory{}, weights: map[string]map[string]float64{"category": {}, "trade": {}, "server": {}, "price": {}}, products: map[string]float64{}}
 	id, e := a.recommendationIdentity(r)
 	if e != nil || id == "" {
 		return p, e
@@ -62,7 +63,7 @@ func (a *App) interestProfile(r *http.Request) (interestProfile, error) {
 	if !p.Enabled {
 		return p, nil
 	}
-	rows, e := a.DB.Query(r.Context(), `SELECT p.category_id,c.name,p.trade_type,COALESCE(p.attributes->>'server',''),
+	rows, e := a.DB.Query(r.Context(), `SELECT p.id,p.category_id,c.name,p.trade_type,COALESCE(p.attributes->>'server',''),
  CASE WHEN p.price_amount>0 AND p.price_unit<>'unknown' THEN p.price_unit||':'||floor(log(2,p.price_amount+1))::text ELSE '' END,
  sum(power(0.5,extract(epoch FROM (now()-COALESCE(v.last_seen_at,v.created_at)))/604800))::float8 AS weight
  FROM product_views_daily v JOIN products p ON p.id=v.product_id JOIN categories c ON c.id=p.category_id
@@ -77,9 +78,9 @@ func (a *App) interestProfile(r *http.Request) (interestProfile, error) {
 	names := map[string]string{}
 	total := 0.0
 	for rows.Next() {
-		var category, name, trade, server, price string
+		var id, category, name, trade, server, price string
 		var weight float64
-		if e = rows.Scan(&category, &name, &trade, &server, &price, &weight); e != nil {
+		if e = rows.Scan(&id, &category, &name, &trade, &server, &price, &weight); e != nil {
 			return p, e
 		}
 		for group, value := range map[string]string{"category": category, "trade": trade, "server": server, "price": price} {
@@ -88,6 +89,7 @@ func (a *App) interestProfile(r *http.Request) (interestProfile, error) {
 			}
 		}
 		names[category] = name
+		p.products[id] = weight
 		p.SampleCount++
 		total += weight
 	}
@@ -95,6 +97,9 @@ func (a *App) interestProfile(r *http.Request) (interestProfile, error) {
 		return p, e
 	}
 	if total > 0 {
+		for id, weight := range p.products {
+			p.products[id] = weight / total
+		}
 		for _, group := range p.weights {
 			for key, w := range group {
 				group[key] = w / total
@@ -125,6 +130,9 @@ func (a *App) personalizedOrder(r *http.Request, where *string, args *[]any) (st
 	if profile.SampleCount == 0 {
 		return hot, "cold-start", nil
 	}
+	if e = a.applyItemCF(r.Context(), &profile); e != nil {
+		return "", "", e
+	}
 	raw, e := json.Marshal(profile.weights)
 	if e != nil {
 		return "", "", e
@@ -133,7 +141,8 @@ func (a *App) personalizedOrder(r *http.Request, where *string, args *[]any) (st
 	n := len(*args)
 	// The parameter is also present in productRows' count query; no user input is SQL.
 	*where += fmt.Sprintf(" AND $%d::jsonb IS NOT NULL", n)
-	order := fmt.Sprintf(`(6*COALESCE(($%[1]d::jsonb->'category'->>p.category_id)::float8,0)
+	order := fmt.Sprintf(`COALESCE(($%[1]d::jsonb->'itemcf'->>p.id)::float8,0) DESC,
+ (6*COALESCE(($%[1]d::jsonb->'category'->>p.category_id)::float8,0)
  +2*COALESCE(($%[1]d::jsonb->'trade'->>p.trade_type)::float8,0)
  +3*COALESCE(($%[1]d::jsonb->'server'->>(p.attributes->>'server'))::float8,0)
  +COALESCE(($%[1]d::jsonb->'price'->>(CASE WHEN p.price_amount>0 AND p.price_unit<>'unknown' THEN p.price_unit||':'||floor(log(2,p.price_amount+1))::text ELSE '' END))::float8,0)) DESC,`, n)
