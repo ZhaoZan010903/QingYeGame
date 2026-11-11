@@ -66,7 +66,7 @@ VITE_SMS_ENABLED=false
 
 管理端在`代码/前端/管理端`独立执行`pnpm install --frozen-lockfile`，构建配置使用`VITE_API_BASE_URL=/api/v1`、`VITE_PUBLIC_SITE_URL=https://152.136.252.204:5179`。所有`VITE_`变量都是浏览器可见内容，不能放服务器凭据。两个前端分别执行`pnpm test`、`pnpm build`，分别发布各自`dist`，不混用依赖或构建目录。
 
-后端执行单元和真实数据库/Redis检查、`go vet ./...`，再以`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o qingye-api ./cmd/qingye`构建。具体本地启动及测试变量见[后端说明](../../后端/README--后端开发说明.md)。先在独立验收环境完成业务、并发、安全验证，再发布业务测试站。
+后端执行单元和真实数据库/Redis检查、`go vet -tags=nomsgpack ./...`，再以`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -tags=nomsgpack -trimpath -o qingye-api ./cmd/qingye`构建。R14使用Go1.27.4、Gin1.12.0。具体本地启动及测试变量见[后端说明](../../后端/README--后端开发说明.md)。先在独立验收环境完成业务、并发、安全验证，再发布业务测试站。
 
 上传产物到新的版本目录并核对SHA256，分别验证用户与管理Nginx配置。API、用户静态页、管理静态页各自切换`current`链接；每个链接用原子替换，三个链接不是一个跨目录事务，需按接口兼容性安排顺序并完成切换后核验。首次业务部署执行`maintenance.py migrate`、`seed-users`、`import-legacy`、`reconcile-media`；随后启动`qingye-test-api`、`qingye-test-admin-api`、`qingye-test-web`、`qingye-test-admin-web`。导入以旧站源ID去重，重复执行不会覆盖管理员后续修改。
 

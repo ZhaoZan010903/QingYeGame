@@ -1,6 +1,13 @@
 # 项目协作约定
 
-- R13当前交付：已审阅e7994067/aad55d91/fc4402dd及整体业务，三端20261111-review-r13。保留此次修复：会话refresh稳定引用、ChatOutbox跨会话幂等键、DB权威时钟、未来热门快照回退、聊天标识和精确枚举校验；不要恢复子串枚举判断。源码和测试依据见[审查记录](../业务验收与审查记录/REVIEW-R13--最新三次提交与全局业务审查.md)。下文R12及更早内容为历史或仍适用业务约定。
+- R14最新决定：用户选定Gin，并要求细化分层、优先安全与性能、加入简洁注释。Gin 1.12.0和细分层源码已实现；Go 1.27.4构建/测试/扫描统一 `-tags=nomsgpack`。架构以 [Gin分层与安全性能设计](../开发产出文档/ADR-GIN-LAYERS--Gin分层与安全性能设计.md) 为准。
+- R14源码已从 `internal/app` 迁到 `internal/transport/httpapi`；依赖装配在 `internal/bootstrap`，部署校验在 `internal/config`，迁移与维护在 `internal/maintenance`，纯规则/用例/适配分别在 `internal/domain`、`internal/application`、`internal/infrastructure`。不要恢复HTTP层SQL、向服务传Gin Context，或拆开已有事务和锁边界。
+- R14最终验证：后端全量及Linux `-race` 均185项通过、0失败、0跳过，React119项通过；vet、源码及最终二进制govuln检查通过；最终隔离功能107、并发28、安全67项断言通过。API已部署 `/opt/qingye-test/releases/20261111-gin-r14` 并通过健康检查，前端仍R13，未修改部署配置或迁移业务库。浏览器最终两轮各9项检查通过，覆盖两端登录及WebTransport／WebSocket，无pageerror或5xx；GitHub随本提交交付，用 `git rev-parse HEAD` 与服务器 `20261111-gin-r14-receipt.json` 的 `git_commit` 核对确切提交。详见 [R14验收](../业务验收与审查记录/GIN-R14--Gin分层与安全性能验收.md)。
+- R14最终修复需保留：普通Redis命令池与受聊天租约约束的PubSub连接不能互相误阻塞；WebSocket退出保留服务器取消并释放租约，停止后拒绝新会话；7处测试fixture显式构造，禁止整体复制包含生命周期锁的实例。
+- 注释应简洁解释权限边界、事务/并发约束、性能限制及特殊兼容原因，避免逐行复述实现。安全与性能结论必须对应同版本实际验证，不以引入Gin直接宣称提升。
+- SeaweedFS接入和相关图片迁移仍暂停。R14不授权恢复另一工作区的暂停存储代码，不删除、迁移或覆盖原图。
+
+- 历史R13交付：已审阅e7994067/aad55d91/fc4402dd及整体业务，三端20261111-review-r13。保留此次修复：会话refresh稳定引用、ChatOutbox跨会话幂等键、DB权威时钟、未来热门快照回退、聊天标识和精确枚举校验；不要恢复子串枚举判断。源码和测试依据见[审查记录](../业务验收与审查记录/REVIEW-R13--最新三次提交与全局业务审查.md)。下文R12及更早内容为历史或仍适用业务约定。
 
 - R12最新确认与实现：为你推荐采用 ItemCF 商品协同过滤＋原属性匹配补齐。public Go每小时计算，PostgreSQL保存每商品Top30快照；Redis不增加推荐缓存。最新API `20261111-itemcf-r12`，两端前端仍R11。算法、资源边界及90项后端和HTTP验收见[R12记录](../业务验收与审查记录/ITEMCF-R12--商品协同过滤验收.md)。不得把“browsing”响应误解为只有属性匹配，也不得声称每个用户都已命中协同过滤。
 - R12从干净工作树构建，原工作区的SeaweedFS代码继续保留为未提交改动；尤其main.go可能同时含R12已提交的任务入口与暂停的迁移命令。后续构建必须排除暂停改动，不能恢复图片迁移或覆盖图片。
