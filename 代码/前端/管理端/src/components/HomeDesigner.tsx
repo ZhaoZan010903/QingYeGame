@@ -216,46 +216,74 @@ export function HomeDesigner({
         </div>
         {zone === "editorial" && (
           <>
-            <TextField
-              label="轮播区标题"
-              max={32}
-              value={value.editorial.title}
-              onChange={(title) =>
-                onChange({ ...value, editorial: { ...value.editorial, title } })
-              }
-            />
-            <TextField
-              label="轮播区说明"
-              value={value.editorial.description}
-              onChange={(description) =>
-                onChange({
-                  ...value,
-                  editorial: { ...value.editorial, description },
-                })
-              }
-            />
-            <label className="form-field">
-              每张轮播停留时间（秒）
-              <input
-                type="number"
-                min={4}
-                max={30}
-                step={0.5}
-                required
-                value={value.editorial.intervalMs / 1000}
-                onChange={(e) =>
+            <details className="carousel-region-settings">
+              <summary>轮播区域设置 · 标题、数量与速度</summary>
+              <TextField
+                label="轮播区标题"
+                max={32}
+                value={value.editorial.title}
+                onChange={(title) =>
                   onChange({
                     ...value,
-                    editorial: {
-                      ...value.editorial,
-                      intervalMs: Number(e.target.value) * 1000,
-                    },
+                    editorial: { ...value.editorial, title },
                   })
                 }
               />
-              <small>建议 7.5 秒，允许 4–30 秒。</small>
-            </label>
+              <TextField
+                label="轮播区说明"
+                value={value.editorial.description}
+                onChange={(description) =>
+                  onChange({
+                    ...value,
+                    editorial: { ...value.editorial, description },
+                  })
+                }
+              />
+              <label className="form-field">
+                每张轮播停留时间（秒）
+                <input
+                  type="number"
+                  min={4}
+                  max={30}
+                  step={0.5}
+                  required
+                  value={value.editorial.intervalMs / 1000}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      editorial: {
+                        ...value.editorial,
+                        intervalMs: Number(e.target.value) * 1000,
+                      },
+                    })
+                  }
+                />
+                <small>建议 7.5 秒，允许 4–30 秒。</small>
+              </label>
+              <label className="form-field">
+                轮播数量上限
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  step={1}
+                  required
+                  value={value.maxSlides ?? 12}
+                  onChange={(event) =>
+                    onChange({
+                      ...value,
+                      maxSlides: Number(event.target.value),
+                    })
+                  }
+                />
+                <small>
+                  可设 1–30
+                  张。降低上限不会删除已有轮播，请先移除多余内容再保存。
+                </small>
+              </label>
+            </details>
             <CarouselEditor
+              maxSlides={value.maxSlides ?? 12}
               slides={value.slides ?? []}
               onChange={(slides) => onChange({ ...value, slides })}
             />

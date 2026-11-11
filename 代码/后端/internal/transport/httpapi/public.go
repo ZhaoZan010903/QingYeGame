@@ -12,6 +12,7 @@ import (
 )
 
 func (a *App) registerPublic(m routeRegistrar) {
+	m.HandleFunc("GET /api/v1/dictionaries", a.publicDictionaries)
 	m.HandleFunc("GET /api/v1/publish-form", a.publicPublishForm)
 	m.HandleFunc("GET /api/v1/categories", a.publicCategories)
 	m.HandleFunc("GET /api/v1/products", a.publicProducts)

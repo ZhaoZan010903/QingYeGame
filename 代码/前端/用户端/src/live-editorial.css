@@ -133,3 +133,17 @@
     min-height: 54px;
   }
 }
+
+@media (max-width: 540px) {
+  .live-editorial .carousel-dots {
+    display: none;
+  }
+  .live-editorial .carousel-controls {
+    min-width: 0;
+  }
+  .live-editorial .slide-number {
+    display: inline-flex;
+    font-size: 11px;
+    gap: 4px;
+  }
+}

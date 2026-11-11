@@ -64,41 +64,13 @@
   overflow: hidden;
   margin: 14px 0 22px;
 }
-.carousel-preview .curated-copy {
-  padding: 26px;
-  gap: 16px;
-}
-.carousel-preview .curated-copy h3 {
-  color: inherit;
-  font-size: 28px;
-}
-.carousel-preview .curated-copy p {
-  font-size: 14px;
-}
-.carousel-preview .curated-action strong {
-  font-size: 23px;
+.carousel-preview-stage {
+  transform-origin: top left;
+  display: flow-root;
 }
 .carousel-preview.mobile {
   max-width: 390px;
   margin-inline: auto;
-}
-.carousel-preview.mobile .curated-slide {
-  grid-template-columns: 1fr;
-  min-height: 0;
-}
-.carousel-preview.mobile .curated-image {
-  grid-column: 1;
-  grid-row: 1;
-  min-height: 240px;
-}
-.carousel-preview.mobile .curated-copy {
-  grid-column: 1;
-  grid-row: 2;
-  padding: 24px;
-}
-.carousel-preview.mobile .layout-overlay .curated-copy {
-  grid-row: 1;
-  min-height: 380px;
 }
 .carousel-image-picker {
   display: grid;
@@ -859,7 +831,7 @@
 .full-width-resource fieldset > .form-error {
   margin-inline: 26px;
 }
-.admin-resource-form h3 {
+.admin-resource-form h3:not(.curated-copy h3) {
   font-size: 16px;
   font-weight: 550;
   margin: 20px 0 16px;
@@ -2118,4 +2090,235 @@
   .admin-product-read-panel {
     padding: 16px;
   }
+}
+
+/* Shared dictionaries and carousel editing keep controls usable in narrow panels. */
+.dictionary-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(230px, 1fr);
+  gap: 18px;
+  margin: 20px 0 10px;
+}
+.dictionary-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: white;
+}
+.dictionary-search input {
+  border: 0 !important;
+  box-shadow: none !important;
+  min-width: 0;
+  width: 100%;
+  background: transparent;
+}
+.dictionary-add {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.dictionary-add input {
+  min-width: 0;
+  flex: 1;
+}
+.dictionary-add button {
+  flex-shrink: 0;
+}
+.dictionary-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 90px 72px;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.dictionary-row .form-field {
+  margin: 0;
+  min-width: 0;
+}
+.dictionary-row .form-field small {
+  overflow-wrap: anywhere;
+}
+.dictionary-row.disabled {
+  background: #f8f9fc;
+}
+.dictionary-order {
+  display: flex;
+}
+.dictionary-settings .zone-tabs {
+  margin: 18px 0;
+}
+.carousel-product-picker,
+.carousel-copy-fields {
+  border: 1px solid var(--line);
+  padding: 18px;
+  border-radius: 12px;
+  margin: 18px 0;
+  min-width: 0;
+}
+.carousel-selected-product {
+  display: flex;
+  gap: 12px;
+  background: var(--soft);
+  padding: 12px;
+  border-radius: 10px;
+}
+.carousel-selected-product > img {
+  width: 72px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 7px;
+}
+.carousel-selected-product > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.carousel-selected-product strong {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.carousel-selected-product span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--blue);
+  font-size: 12px;
+}
+.carousel-selected-product small {
+  font-size: 12px;
+}
+.carousel-search-panel {
+  margin-top: 15px;
+}
+.carousel-search-results button {
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.carousel-search-results button img {
+  width: 48px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+.carousel-search-results button > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.preview-drag-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.preview-drag-tools button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: white;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+.preview-drag-tools button.active {
+  background: var(--soft);
+  border-color: var(--blue);
+  color: var(--blue);
+}
+.preview-drag-active {
+  touch-action: none;
+  user-select: none;
+  cursor: move;
+}
+.preview-drag-active img {
+  pointer-events: none;
+}
+.preview-cta {
+  background: #f2f2f4;
+  color: #16161b;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.carousel-advanced {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.carousel-advanced summary {
+  cursor: pointer;
+  font-weight: 650;
+  padding: 6px 0 15px;
+}
+.carousel-range > span,
+.carousel-color {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.carousel-range output {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.carousel-color input[type="color"] {
+  padding: 3px;
+  width: 55px;
+  height: 35px;
+}
+@media (max-width: 720px) {
+  .dictionary-toolbar {
+    grid-template-columns: 1fr;
+  }
+  .dictionary-row {
+    grid-template-columns: minmax(0, 1fr) 72px;
+    gap: 10px;
+  }
+  .dictionary-row .form-field {
+    grid-column: 1/-1;
+  }
+  .dictionary-order {
+    justify-content: flex-end;
+  }
+  .carousel-product-picker,
+  .carousel-copy-fields {
+    padding: 12px;
+  }
+}
+
+.carousel-region-settings {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+.carousel-region-settings summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.carousel-region-settings[open] summary {
+  margin-bottom: 20px;
+}
+
+.dictionary-settings > .panel {
+  padding: 20px;
+}
+.dictionary-row .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

@@ -8,6 +8,7 @@ import (
 )
 
 type Repository interface {
+	DeleteDraft(context.Context, member.Actor, string, int) (map[string]any, error)
 	Detail(context.Context, member.Actor, string) (map[string]any, error)
 	List(ctx context.Context, u member.Actor, in member.ListInput) (map[string]any, error)
 	Favorite(ctx context.Context, u member.Actor, id string, add bool) (map[string]any, error)
@@ -19,6 +20,13 @@ type Repository interface {
 	ChangeImage(ctx context.Context, u member.Actor, id, mid string, input member.ChangeImageInput, remove bool) (map[string]any, error)
 }
 type Service struct{ store Repository }
+
+func (s *Service) DeleteDraft(ctx context.Context, u member.Actor, id string, version int) (map[string]any, error) {
+	if err := member.ValidateActor(u); err != nil {
+		return nil, err
+	}
+	return s.store.DeleteDraft(ctx, u, id, version)
+}
 
 func New(store Repository) *Service { return &Service{store: store} }
 func (s *Service) List(ctx context.Context, u member.Actor, in member.ListInput) (map[string]any, error) {

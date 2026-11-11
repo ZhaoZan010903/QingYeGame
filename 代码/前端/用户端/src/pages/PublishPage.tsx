@@ -6,12 +6,14 @@ import { useUi } from '../context';
 import { ImageUploader } from '../components/ImageUploader';
 import '../member.css';
 import '../service-refinement.css';
-import { Modal } from '../components/shared';
+import { PublishPreview } from '../components/PublishPreview';
 import {
-  defaultPublishForm,
-  resolvePublishForm,
-  type PublishFormConfig,
-} from '../../../共享/publish-form';
+  canDeleteDraft,
+  customPublishTags,
+  fixedPublishFields,
+  publishAttributeLabel,
+  type PublishDictionary,
+} from '../lib/publish-dictionaries';
 import type { FilterGroup, RentalQuote } from '../types';
 import { missingPublishField, publishAttributes, rentalPriceForWrite } from '../lib/publish-fields';
 
@@ -22,8 +24,7 @@ const initial: ProductWrite = {
   price: null,
   server: '',
   gender: 'female',
-  level: 0,
-  kind: 'single',
+  level: '',
   tags: [],
   description: '',
 };
@@ -44,7 +45,8 @@ export function PublishPage() {
   const [form, setForm] = useState<ProductWrite>(initial);
   const [price, setPrice] = useState('');
   const [tags, setTags] = useState('');
-  const [settings, setSettings] = useState<PublishFormConfig>(defaultPublishForm);
+  const [tagsEdited, setTagsEdited] = useState(false);
+  const [dictionaries, setDictionaries] = useState<PublishDictionary[]>([]);
   const [qqAccount, setQQAccount] = useState(''),
     [qqPassword, setQQPassword] = useState('');
   const [rentalPrices, setRentalPrices] = useState<Partial<Record<RentalQuote['unit'], string>>>(
@@ -76,13 +78,18 @@ export function PublishPage() {
       api.categories(),
       id ? api.myProduct(id) : Promise.resolve(null),
       isDemo
-        ? Promise.resolve(defaultPublishForm)
-        : request('/publish-form').then((r) => resolvePublishForm(r.data)),
+        ? Promise.resolve([])
+        : request('/dictionaries')
+            .then((r) => r.data as PublishDictionary[])
+            .catch((e) => {
+              if (e.status === 404) return [];
+              throw e;
+            }),
     ])
       .then(([list, value, config]) => {
         if (!active) return;
         setCategories(list);
-        setSettings(config);
+        setDictionaries(config);
         setQQAccount('');
         setQQPassword('');
         setRentalPrices(
@@ -121,6 +128,7 @@ export function PublishPage() {
         setForm(source);
         setPrice(source.price == null ? '' : String(source.price));
         setTags(source.tags.join('、'));
+        setTagsEdited(false);
         setDirty(false);
       })
       .catch((e) => {
@@ -190,16 +198,13 @@ export function PublishPage() {
   function input(): ProductWrite {
     if (price && (!/^\d+(?:\.\d{1,2})?$/.test(price) || !Number.isFinite(Number(price))))
       throw new Error('参考报价应为非负金额，最多保留两位小数。');
-    const attributes = publishAttributes(
-      form,
-      categories.find((item) => item.id === form.categoryId)?.filters ?? [],
+    const attributes = publishAttributes(form, []);
+    for (const group of groups) attributes[group.key] = fieldValue(group.key);
+    const originalTags = latest.current?.attributes?.custom_tags;
+    const customTags = customPublishTags(
+      tags,
+      !tagsEdited && Array.isArray(originalTags) ? originalTags : undefined,
     );
-    const customTags = tags
-      .split(/[,，、\n]/)
-      .map((tag) => tag.trim())
-      .filter(Boolean);
-    if (customTags.length > 12 || customTags.some((tag) => Array.from(tag).length > 24))
-      throw new Error('自定义标签最多12个，每个最多24字。');
     if (isDemo && (qqAccount || qqPassword))
       throw new Error('演示模式不保存私密账号资料，请使用测试环境。');
     if ((qqAccount && !qqPassword) || (!qqAccount && qqPassword))
@@ -239,7 +244,18 @@ export function PublishPage() {
     try {
       const next = await operation;
       updateProduct(next);
-      setForm((previous) => ({ ...previous, unit: next.unit, price: next.price }));
+      const savedTags = Array.isArray(next.attributes?.custom_tags)
+        ? next.attributes.custom_tags
+        : data.tags;
+      setTags(savedTags.join('、'));
+      setTagsEdited(false);
+      setForm((previous) => ({
+        ...previous,
+        unit: next.unit,
+        price: next.price,
+        tags: savedTags,
+        attributes: { ...previous.attributes, custom_tags: savedTags },
+      }));
       setQQAccount('');
       setQQPassword('');
       setDirty(false);
@@ -256,23 +272,7 @@ export function PublishPage() {
         const data = input();
         if (!data.title || !data.description)
           throw new Error('提交审核前，请填写账号标题和账号介绍。');
-        if (
-          settings.fields.private_credentials.enabled &&
-          settings.fields.private_credentials.required &&
-          !data.privateCredentials &&
-          !latest.current?.hasPrivateCredentials
-        )
-          throw new Error('请填写账号交接资料。');
-        if (
-          settings.fields.custom_tags.enabled &&
-          settings.fields.custom_tags.required &&
-          !data.tags.length
-        )
-          throw new Error('请填写至少一个自定义标签。');
-        const missing = missingPublishField(
-          data,
-          categories.find((c) => c.id === form.categoryId)?.filters ?? [],
-        );
+        const missing = missingPublishField(data, groups);
         if (missing) throw new Error('请填写' + missing.label + '。');
         if (pendingImages)
           throw new Error('还有未完成或失败的图片。请完成重试或移除待处理项后提交。');
@@ -302,22 +302,29 @@ export function PublishPage() {
     e.preventDefault();
     void save(true);
   }
+  async function deleteDraft() {
+    if (
+      !product ||
+      busy ||
+      uploadBusy ||
+      !window.confirm('删除这份草稿及其已关联图片？删除后无法继续编辑。')
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.deleteDraft(product.id, product.version);
+      skipLeave.current = true;
+      notify('草稿已删除。');
+      navigate('/me/listings');
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   const category = categories.find((c) => c.id === form.categoryId);
-  const groups = (category?.filters ?? []).filter(
-    (g) =>
-      g.enabled !== false &&
-      ![
-        'tags',
-        'game',
-        'custom_tags',
-        'private_credentials',
-        'qq_account',
-        'qq_password',
-        'qqAccount',
-        'qqPassword',
-        'password',
-      ].includes(g.key),
-  );
+  const groups = fixedPublishFields(dictionaries, categories);
   const fieldValue = (key: string): unknown =>
     form.attributes?.[key] ??
     (
@@ -411,20 +418,7 @@ export function PublishPage() {
             <fieldset disabled={busy || uploadBusy} style={{ border: 0, padding: 0, minWidth: 0 }}>
               <section className="publish-panel">
                 <h2>01 · 账号资料</h2>
-                <p>展示资料与私密交接信息分开填写。保存后自动生成商品编号。</p>
-                <div className="publish-identity">
-                  <div>
-                    <strong>QQ炫舞 · {form.mode === 'sale' ? '账号出售' : '账号租赁'}</strong>
-                    <small>统一游戏资料，由平台配置发布选项</small>
-                  </div>
-                  <div>
-                    <strong>
-                      {product?.code ||
-                        (form.mode === 'sale' ? 'QYCH · 保存后自动分配' : 'QYZH · 保存后自动分配')}
-                    </strong>
-                    <small>承接历史编号，系统分配唯一新编号</small>
-                  </div>
-                </div>
+                {product?.code && <p className="mono">{product.code}</p>}
                 <div className="form-grid">
                   <div className="form-field span-2">
                     <span>发布类型</span>
@@ -454,82 +448,52 @@ export function PublishPage() {
                               setDirty(true);
                             }}
                           />
-                          {mode === 'sale' ? '账号出售' : '账号租赁'}
+                          <span>{mode === 'sale' ? '账号出售' : '账号租赁'}</span>
                         </label>
                       ))}
                     </div>
                     {product && <small>租售类型已固定，如需更换请新建资产。</small>}
                   </div>
                   <label className="form-field span-2">
-                    {settings.fields.title.label}
+                    账号标题
                     <input
                       value={form.title}
                       onChange={(e) => change('title', e.target.value)}
                       maxLength={1000}
-                      placeholder={settings.fields.title.placeholder}
+                      placeholder="填写账号标题"
                     />
-                    <small>最多1000字，详细配置也可以放在账号介绍中。</small>
                   </label>
-                  {groups.length
-                    ? groups.map((group) => (
-                        <div className="form-field" key={group.key}>
-                          <span>
-                            {group.label}
-                            {group.required ? ' *' : ''}
-                          </span>
-                          {group.type === 'text' || !group.options.length ? (
-                            <input
-                              aria-label={group.label}
-                              value={String(fieldValue(group.key))}
-                              maxLength={200}
-                              placeholder={group.placeholder || '填写' + group.label}
-                              onChange={(e) => setField(group, e.target.value)}
-                            />
-                          ) : group.multiple || group.type === 'multiselect' ? (
-                            <div className="attribute-options">
-                              {group.options.map((option) => (
-                                <label className="agreement-check" key={option.value}>
-                                  <input
-                                    type="checkbox"
-                                    checked={
-                                      Array.isArray(fieldValue(group.key)) &&
-                                      (fieldValue(group.key) as string[]).includes(option.value)
-                                    }
-                                    onChange={(e) => {
-                                      const value = Array.isArray(fieldValue(group.key))
-                                        ? (fieldValue(group.key) as string[])
-                                        : [];
-                                      setField(
-                                        group,
-                                        e.target.checked
-                                          ? [...value, option.value]
-                                          : value.filter((v) => v !== option.value),
-                                      );
-                                    }}
-                                  />
-                                  {option.label}
-                                </label>
-                              ))}
-                            </div>
-                          ) : (
-                            <select
-                              aria-label={group.label}
-                              value={String(fieldValue(group.key))}
-                              onChange={(e) => setField(group, e.target.value)}
-                            >
-                              <option value="">
-                                {group.placeholder || '请选择' + group.label}
-                              </option>
-                              {group.options.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
+                  {groups.map((group) => {
+                    const raw = fieldValue(group.key);
+                    const value = Array.isArray(raw) ? String(raw[0] ?? '') : String(raw);
+                    const historical =
+                      value && !group.options.some((option) => option.value === value);
+                    return (
+                      <label className="form-field" key={group.key}>
+                        <span>
+                          {group.label}
+                          {group.required ? ' *' : ''}
+                        </span>
+                        <select
+                          aria-label={group.label}
+                          value={value}
+                          onChange={(e) => setField(group, e.target.value)}
+                        >
+                          <option value="">请选择{group.label}</option>
+                          {historical && (
+                            <option value={value}>
+                              {publishAttributeLabel(group, raw, product)}（历史值）
+                            </option>
                           )}
-                        </div>
-                      ))
-                    : null}
+                          {group.options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })}
                   {form.mode === 'sale' ? (
                     <label className="form-field">
                       出售报价（元）
@@ -546,8 +510,7 @@ export function PublishPage() {
                     </label>
                   ) : (
                     <div className="form-field span-2">
-                      <span>租赁报价 · 可以选择多个单位</span>
-                      <small>分别填写实际报价，不自动换算；第一项用作列表参考价。</small>
+                      <span>租赁报价（可多选）</span>
                       {form.unit === 'unknown' &&
                         product?.legacyPrice &&
                         !Object.keys(rentalPrices).length && (
@@ -594,7 +557,7 @@ export function PublishPage() {
                                   setDirty(true);
                                 }}
                               />
-                              {unitNames[unit]}
+                              <span>{unitNames[unit]}</span>
                             </label>
                             {rentalPrices[unit] !== undefined && (
                               <input
@@ -614,46 +577,40 @@ export function PublishPage() {
                       </div>
                     </div>
                   )}
-                  {settings.fields.custom_tags.enabled && (
+                  {
                     <label className="form-field span-2">
-                      {settings.fields.custom_tags.label}
+                      自定义标签
                       <input
                         value={tags}
                         onChange={(e) => {
                           setTags(e.target.value);
+                          setTagsEdited(true);
                           setDirty(true);
                         }}
-                        maxLength={200}
-                        placeholder={settings.fields.custom_tags.placeholder}
+                        maxLength={400}
+                        placeholder="输入标签，用逗号分隔"
                       />
-                      <small>用顿号或逗号分隔，最多12个标签，每个最多24字。</small>
-                      {Array.isArray(form.attributes?.tags) && form.attributes.tags.length > 0 && (
-                        <small>
-                          另有 {form.attributes.tags.length}{' '}
-                          个历史标签，会保留原始资料；此处只编辑新增的自定义标签。
-                        </small>
-                      )}
                     </label>
-                  )}
+                  }
                   <label className="form-field span-2">
-                    {settings.fields.description.label}
+                    账号介绍
                     <textarea
+                      aria-label="账号介绍"
                       value={form.description}
                       onChange={(e) => change('description', e.target.value)}
                       maxLength={10000}
-                      placeholder={settings.fields.description.placeholder}
+                      placeholder="介绍账号配置、服饰与需要说明的情况"
                     />
                     <small>{form.description.length} / 10000</small>
                   </label>
                 </div>
-                {settings.fields.private_credentials.enabled && (
+                {
                   <div className="publish-private">
-                    <h3>{settings.fields.private_credentials.label}</h3>
+                    <h3>私密交接资料</h3>
                     <p>
-                      {settings.fields.private_credentials.placeholder}{' '}
                       {product?.hasPrivateCredentials
-                        ? '已保存交接资料；留空保留原值，填写两项后替换。'
-                        : '账号和密码不会出现在公开详情、搜索或上架预览中。'}
+                        ? '已保存，留空保留原值。'
+                        : '仅平台核验，公开页面不展示。'}
                     </p>
                     <div className="form-grid">
                       <label className="form-field">
@@ -686,7 +643,7 @@ export function PublishPage() {
                       </label>
                     </div>
                   </div>
-                )}
+                }
               </section>
             </fieldset>
             <section className="publish-panel">
@@ -701,9 +658,11 @@ export function PublishPage() {
                 disabled={busy}
               />
             </section>
-            <p className="profile-note" style={{ margin: '20px 0' }}>
-              提交审核后，商品需要经过平台审核才能公开展示。发布审核与账号资料核验分别处理，审核通过不代表验号或包赔承诺。
-            </p>
+            {(!product || product.draftExpiresAt) && (
+              <p className="profile-note" style={{ margin: '20px 0' }}>
+                草稿保留3天，提交审核后不再自动到期。
+              </p>
+            )}
             {error && (
               <p className="form-error" role="alert">
                 {error}
@@ -715,7 +674,7 @@ export function PublishPage() {
                   '图片正在处理，请稍候'
                 ) : product ? (
                   <>
-                    <span className="mono">{product.id}</span> ·{' '}
+                    <span className="mono">{product.code || product.id}</span> ·{' '}
                     {dirty ? '有未保存修改' : '草稿已保存'}
                   </>
                 ) : (
@@ -723,6 +682,16 @@ export function PublishPage() {
                 )}
               </p>
               <div>
+                {product && canDeleteDraft(product) && (
+                  <button
+                    type="button"
+                    className="text-button delete-draft"
+                    disabled={busy || uploadBusy}
+                    onClick={() => void deleteDraft()}
+                  >
+                    删除草稿
+                  </button>
+                )}
                 <button
                   type="button"
                   className="button-outline"
@@ -748,79 +717,37 @@ export function PublishPage() {
         </>
       )}
       {preview && (
-        <Modal
-          title="上架预览"
+        <PublishPreview
+          product={product}
+          title={form.title}
+          description={form.description}
+          mode={form.mode}
+          tags={[
+            ...new Set([
+              ...(Array.isArray(form.attributes?.tags) ? (form.attributes.tags as string[]) : []),
+              ...(!tagsEdited && Array.isArray(latest.current?.attributes?.custom_tags)
+                ? latest.current.attributes.custom_tags
+                : tags
+                    .split(/[,，、\n]/)
+                    .map((tag) => tag.trim())
+                    .filter(Boolean)),
+            ]),
+          ]}
+          quotes={
+            form.mode === 'rent'
+              ? Object.entries(rentalPrices).map(([unit, amount]) => ({
+                  unit: unit as RentalQuote['unit'],
+                  amount: amount || '待填写',
+                }))
+              : []
+          }
+          price={price}
+          fields={groups.map((group) => ({
+            label: group.label,
+            value: publishAttributeLabel(group, fieldValue(group.key), product),
+          }))}
           onClose={() => setPreview(false)}
-          className="publish-preview-dialog"
-        >
-          <div className="publish-preview">
-            {product?.images[0] && (
-              <img
-                className="preview-cover"
-                src={product.images[0].thumbnailUrl ?? product.images[0].url}
-                alt="展示封面"
-              />
-            )}
-            <small>{product?.code || '保存后生成编号'} · QQ炫舞</small>
-            <h3>{form.title || '尚未填写标题'}</h3>
-            <div className="preview-meta">
-              <span>{form.mode === 'sale' ? '账号出售' : '账号租赁'}</span>
-              <span>{String(fieldValue('server')) || '未填写区服'}</span>
-            </div>
-            <dl className="preview-attributes">
-              {groups
-                .filter((group) => group.key !== 'server')
-                .map((group) => {
-                  const raw = fieldValue(group.key);
-                  const values = Array.isArray(raw) ? raw : [raw];
-                  const label = values
-                    .map(
-                      (value) =>
-                        group.options.find((option) => option.value === String(value))?.label ??
-                        String(value ?? ''),
-                    )
-                    .filter(Boolean)
-                    .join('、');
-                  return label ? (
-                    <div key={group.key}>
-                      <dt>{group.label}</dt>
-                      <dd>{label}</dd>
-                    </div>
-                  ) : null;
-                })}
-            </dl>
-            <div className="pill-tags">
-              {tags
-                .split(/[,，、\n]/)
-                .map((t) => t.trim())
-                .filter(Boolean)
-                .map((tag, i) => (
-                  <span key={i}>{tag}</span>
-                ))}
-            </div>
-            {form.mode === 'rent' ? (
-              Object.keys(rentalPrices).length ? (
-                Object.entries(rentalPrices).map(([unit, value]) => (
-                  <strong key={unit}>
-                    {value || '待填写'} {unitNames[unit as PriceUnit]}
-                  </strong>
-                ))
-              ) : (
-                <strong>
-                  {form.unit === 'unknown' && product?.legacyPrice
-                    ? `原始参考价 ${product.legacyPrice} · 报价单位待核对`
-                    : '联系客服报价'}
-                </strong>
-              )
-            ) : (
-              <strong>
-                {price || '联系客服'} {price ? '元' : ''}
-              </strong>
-            )}
-            <p>{form.description || '尚未填写介绍'}</p>
-            <small>预览不会提交审核。仅展示公开内容，完整图片以已保存图集为准。</small>
-          </div>
-        </Modal>
+        />
       )}
     </section>
   );

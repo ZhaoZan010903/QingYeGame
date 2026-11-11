@@ -72,6 +72,9 @@ func (s *Service) SaveSetting(ctx context.Context, actor management.Actor, key s
 	if err := management.ValidateActor(actor); err != nil {
 		return nil, err
 	}
+	if key == "publish_form" {
+		return nil, fault.New(fault.Gone, "FORM_DESIGNER_RETIRED", "发布表单已固定，请在共享字典中维护选项")
+	}
 	if key != "home_presentation" && key != "recommendation" && key != "publish_form" {
 		return nil, fault.New(fault.Invalid, "UNKNOWN_SETTING", "此配置项尚未开放编辑")
 	}

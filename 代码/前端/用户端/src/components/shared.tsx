@@ -115,7 +115,7 @@ export function AssetCard({ product: p }: { product: Product }) {
             <i />
             <span>{p.server}</span>
             <i />
-            <span>{genderLabel(p.gender)}</span>
+            <span>{p.attributeLabels?.gender || genderLabel(p.gender)}</span>
           </div>
           <div className="pill-tags">
             {p.tags.slice(0, 3).map((t) => (

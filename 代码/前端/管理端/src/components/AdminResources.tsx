@@ -7,7 +7,6 @@ import {
 } from "../lib/home-content";
 import { StateView } from "./shared";
 import { HomeDesigner } from "./HomeDesigner";
-import { CategoryFields } from "./CategoryFields";
 import { GuideButton } from "./AdminGuide";
 import {
   locations,
@@ -21,7 +20,7 @@ export type Resource = "contacts" | "pages" | "categories" | "settings";
 const names = {
   contacts: "客服",
   pages: "说明页",
-  categories: "发布模板",
+  categories: "交易分类",
   settings: "首页与站点配置",
 };
 const text = (error: unknown) =>
@@ -211,7 +210,6 @@ export function AdminResources({
         input = {
           name: form.name ?? "",
           price_units: form.price_units ?? [],
-          filter_config: JSON.parse(json),
           sort_order: Number(form.sort_order ?? 0),
           enabled: !!form.enabled,
         };
@@ -500,7 +498,7 @@ export function AdminResources({
                 {resource === "categories" && (
                   <>
                     <Field
-                      label="发布模板名称"
+                      label="交易分类名称"
                       value={form.name ?? ""}
                       onChange={(v) => change("name", v)}
                       required
@@ -574,33 +572,10 @@ export function AdminResources({
                       />
                       <small>数字越小，分类排得越靠前。</small>
                     </label>
-                    <CategoryFields
-                      value={json}
-                      onChange={(v) => {
-                        setJson(v);
-                        setDirty(true);
-                        setNotice("");
-                      }}
-                    />
-                    <details className="admin-advanced">
-                      <summary>高级配置（供技术维护）</summary>
-                      <p>
-                        一般操作请使用上方表单。保留已有编码，避免影响商品关联。
-                      </p>
-                      <Field
-                        label="筛选分组（JSON）"
-                        value={json}
-                        onChange={(v) => {
-                          setJson(v);
-                          setDirty(true);
-                        }}
-                        multiline
-                      />
-                      <p className="muted">
-                        保留已有分组和选项的编码。停用已有选项时使用 enabled:
-                        false，避免破坏已发布商品。
-                      </p>
-                    </details>
+                    <p className="field-hint">
+                      区服、性别、VIP
+                      等级与账号结构统一在“共享字典”管理，出售与租赁使用同一组选项。
+                    </p>
                   </>
                 )}
                 {resource === "settings" &&

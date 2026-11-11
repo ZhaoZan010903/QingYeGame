@@ -65,7 +65,7 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 	} else {
 		var version int
 		var originalTrade string
-		e = tx.QueryRow(ctx, "SELECT version,trade_type FROM products WHERE id=$1 FOR UPDATE", id).Scan(&version, &originalTrade)
+		e = tx.QueryRow(ctx, "SELECT version,trade_type,attributes,source='legacy' OR published_at IS NOT NULL FROM products WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", id).Scan(&version, &originalTrade, &in.PreviousAttributes, &in.LegacyAttributes)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil, fault.New(fault.NotFound, "NOT_FOUND", "商品不存在")
 		}
@@ -109,7 +109,7 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 	defer tx.Rollback(ctx)
 	var status, source, title, description, tradeType string
 	var version int
-	e = tx.QueryRow(ctx, "SELECT status,source,title,description,version,trade_type FROM products WHERE id=$1 FOR UPDATE", id).Scan(&status, &source, &title, &description, &version, &tradeType)
+	e = tx.QueryRow(ctx, "SELECT status,source,title,description,version,trade_type FROM products WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", id).Scan(&status, &source, &title, &description, &version, &tradeType)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, fault.New(fault.NotFound, "NOT_FOUND", "商品不存在")
 	}
@@ -130,6 +130,10 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 		var input catalog.ProductInput
 		e = tx.QueryRow(ctx, "SELECT category_id,title,trade_type,price_unit,price_amount::text,attributes,description,rental_quotes,EXISTS(SELECT 1 FROM product_private_credentials pc WHERE pc.product_id=products.id) FROM products WHERE id=$1", id).Scan(&input.CategoryID, &input.Title, &input.TradeType, &input.PriceUnit, &input.PriceAmount, &input.Attributes, &input.Description, &input.RentalQuotes, &input.HasPrivateCredentials)
 		if e != nil {
+			return nil, managementStoreError(e)
+		}
+		input.PreviousAttributes = input.Attributes
+		if e = tx.QueryRow(ctx, `SELECT source='legacy' OR published_at IS NOT NULL FROM products WHERE id=$1`, id).Scan(&input.LegacyAttributes); e != nil {
 			return nil, managementStoreError(e)
 		}
 		if source == "legacy" && utf8.RuneCountInString(input.Title) > 1000 {
@@ -204,7 +208,7 @@ func (s *ManagementStore) FeatureProduct(ctx context.Context, actor management.A
 }
 
 func (s *ManagementStore) Products(ctx context.Context, in management.ProductQuery) (map[string]any, error) {
-	where := "true"
+	where := "p.deleted_at IS NULL"
 	args := []any{}
 	// 列名固定，用户输入只作为绑定参数。
 	for _, item := range []struct{ column, value string }{{"status", in.Status}, {"source", in.Source}} {

@@ -49,7 +49,7 @@ func pageCursor(offset, limit, total int) any {
 func lockedOwner(ctx context.Context, tx pgx.Tx, id, user string) (int, string, error) {
 	var version int
 	var status string
-	err := tx.QueryRow(ctx, `SELECT version,status FROM products WHERE id=$1 AND owner_id=$2 FOR UPDATE`, id, user).Scan(&version, &status)
+	err := tx.QueryRow(ctx, `SELECT version,status FROM products WHERE id=$1 AND owner_id=$2 AND deleted_at IS NULL FOR UPDATE`, id, user).Scan(&version, &status)
 	return version, status, err
 }
 func lockedImageOwner(ctx context.Context, tx pgx.Tx, u member.Actor, id string) (int, string, error) {
@@ -58,7 +58,7 @@ func lockedImageOwner(ctx context.Context, tx pgx.Tx, u member.Actor, id string)
 	}
 	var version int
 	var status string
-	err := tx.QueryRow(ctx, `SELECT version,status FROM products WHERE id=$1 FOR UPDATE`, id).Scan(&version, &status)
+	err := tx.QueryRow(ctx, `SELECT version,status FROM products WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, id).Scan(&version, &status)
 	return version, status, err
 }
 func (s *MemberStore) imageAudit(ctx context.Context, tx pgx.Tx, u member.Actor, id, action string) error {
@@ -126,9 +126,9 @@ func (s *MemberStore) List(ctx context.Context, u member.Actor, in member.ListIn
 		}
 	} else {
 		status := in.Status
-		err = s.DB.QueryRow(ctx, `SELECT count(*) FROM products WHERE owner_id=$1 AND ($2='' OR status=$2)`, u.ID, status).Scan(&count)
+		err = s.DB.QueryRow(ctx, `SELECT count(*) FROM products WHERE owner_id=$1 AND deleted_at IS NULL AND ($2='' OR status=$2)`, u.ID, status).Scan(&count)
 		if err == nil {
-			rows, err = s.DB.Query(ctx, `SELECT id FROM products WHERE owner_id=$1 AND ($2='' OR status=$2) ORDER BY updated_at DESC,id DESC LIMIT $3 OFFSET $4`, u.ID, status, limit, offset)
+			rows, err = s.DB.Query(ctx, `SELECT id FROM products WHERE owner_id=$1 AND deleted_at IS NULL AND ($2='' OR status=$2) ORDER BY updated_at DESC,id DESC LIMIT $3 OFFSET $4`, u.ID, status, limit, offset)
 		}
 	}
 	if err != nil {
@@ -237,12 +237,15 @@ func (s *MemberStore) Create(ctx context.Context, u member.Actor, input catalog.
 		tx.Rollback(ctx)
 		return s.productResult(ctx, replay)
 	}
+	if err = checkDraftQuota(ctx, tx, u.ID); err != nil {
+		return nil, err
+	}
 	id := s.NewID()
 	code, err := nextProductCode(ctx, tx, input.TradeType)
 	if err != nil {
 		return nil, memberStoreError(err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO products(id,product_code,owner_id,category_id,title,trade_type,price_amount,price_unit,attributes,description,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'member')`, id, code, u.ID, input.CategoryID, input.Title, input.TradeType, input.PriceAmount, input.PriceUnit, input.Attributes, input.Description)
+	_, err = tx.Exec(ctx, `INSERT INTO products(id,product_code,owner_id,category_id,title,trade_type,price_amount,price_unit,attributes,description,source,draft_expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'member',now()+interval '72 hours')`, id, code, u.ID, input.CategoryID, input.Title, input.TradeType, input.PriceAmount, input.PriceUnit, input.Attributes, input.Description)
 	if err == nil {
 		err = saveProductExtras(ctx, tx, id, s.CredentialKey, input)
 	}
@@ -276,7 +279,7 @@ func (s *MemberStore) Edit(ctx context.Context, u member.Actor, id string, input
 		return nil, err
 	}
 	var originalTrade string
-	if err = tx.QueryRow(ctx, "SELECT trade_type FROM products WHERE id=$1", id).Scan(&originalTrade); err != nil {
+	if err = tx.QueryRow(ctx, "SELECT trade_type,attributes,source='legacy' OR published_at IS NOT NULL FROM products WHERE id=$1", id).Scan(&originalTrade, &input.PreviousAttributes, &input.LegacyAttributes); err != nil {
 		return nil, memberStoreError(err)
 	}
 	if originalTrade != input.TradeType {
@@ -321,6 +324,10 @@ func (s *MemberStore) Transition(ctx context.Context, u member.Actor, id string,
 		if err != nil {
 			return nil, memberStoreError(err)
 		}
+		p.PreviousAttributes = p.Attributes
+		if err = tx.QueryRow(ctx, `SELECT source='legacy' OR published_at IS NOT NULL FROM products WHERE id=$1`, id).Scan(&p.LegacyAttributes); err != nil {
+			return nil, memberStoreError(err)
+		}
 		if err = ValidateProductInput(ctx, tx, p, true); err != nil {
 			return nil, fault.New(fault.Invalid, "INCOMPLETE_PRODUCT", err.Error())
 		}
@@ -357,7 +364,7 @@ func (s *MemberStore) Gallery(ctx context.Context, u member.Actor, id string, in
 	}
 	defer tx.Rollback(ctx)
 	var version, total int
-	err = tx.QueryRow(ctx, `SELECT version FROM products WHERE id=$1 AND (owner_id=$2 OR $3)`, id, u.ID, u.Admin).Scan(&version)
+	err = tx.QueryRow(ctx, `SELECT version FROM products WHERE id=$1 AND deleted_at IS NULL AND (owner_id=$2 OR $3)`, id, u.ID, u.Admin).Scan(&version)
 	if err != nil {
 		return nil, memberStoreError(err)
 	}
@@ -473,7 +480,7 @@ func (s *MemberStore) AppendImages(ctx context.Context, u member.Actor, id strin
 		return nil, memberStoreError(err)
 	}
 	// Lock shared media in one stable order even when clients request opposite display orders.
-	mediaRows, err := tx.Query(ctx, `SELECT id,COALESCE(owner_id,''),status FROM media_files WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE`, input.MediaIDs)
+	mediaRows, err := tx.Query(ctx, `SELECT id,COALESCE(owner_id,''),status FROM media_files WHERE id=ANY($1::text[]) AND deleted_at IS NULL ORDER BY id FOR UPDATE`, input.MediaIDs)
 	if err != nil {
 		return nil, memberStoreError(err)
 	}
@@ -517,7 +524,9 @@ func (s *MemberStore) AppendImages(ctx context.Context, u member.Actor, id strin
 			return nil, memberStoreError(err)
 		}
 	}
-	_, err = tx.Exec(ctx, `UPDATE products SET version=version+1,status='draft',approved_version=NULL,review_note='',updated_at=now() WHERE id=$1`, id)
+	_, err = tx.Exec(ctx, `UPDATE products SET version=version+1,status='draft',approved_version=NULL,review_note='',updated_at=now(),
+ last_media_upload_at=(SELECT max(COALESCE(ready_at,created_at)) FROM media_files WHERE id=ANY($2::text[])),
+ draft_expires_at=CASE WHEN source='member' AND published_at IS NULL AND legacy_id IS NULL THEN GREATEST(COALESCE(draft_expires_at,created_at+interval '72 hours'),(SELECT max(COALESCE(ready_at,created_at))+interval '72 hours' FROM media_files WHERE id=ANY($2::text[]))) ELSE NULL END WHERE id=$1`, id, input.MediaIDs)
 	if err == nil {
 		err = recordProductReplay(ctx, tx, u.ID, "append:"+id, input.RequestID, hash, id)
 	}
@@ -625,7 +634,7 @@ func productReplayError(err error) error {
 // 所有权与私有详情在同一查询中约束，不先查权限再读另一份数据。
 func (s *MemberStore) Detail(ctx context.Context, u member.Actor, id string) (map[string]any, error) {
 	var raw []byte
-	err := s.DB.QueryRow(ctx, "SELECT "+fmt.Sprintf(ProductJSON, 20)+" FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=$1 AND p.owner_id=$2", id, u.ID).Scan(&raw)
+	err := s.DB.QueryRow(ctx, "SELECT "+fmt.Sprintf(ProductJSON, 20)+" FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=$1 AND p.owner_id=$2 AND p.deleted_at IS NULL", id, u.ID).Scan(&raw)
 	if err != nil {
 		return nil, memberStoreError(err)
 	}

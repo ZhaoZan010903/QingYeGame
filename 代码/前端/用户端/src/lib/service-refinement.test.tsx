@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
+import { AssetCard } from '../components/shared';
 import { productFrom, productToWire } from './api';
 import {
   readHomePresentation,
@@ -28,7 +30,7 @@ const slide: HomeSlide = {
 describe('手工首页装修与预览', () => {
   it('没有手工配置时不会生成商品轮播', () => expect(resolveHomePresentation().slides).toEqual([]));
   it('保存并解析布局、独立文案和图片焦点', () =>
-    expect(readHomePresentation({ slides: [slide] }).slides).toEqual([slide]));
+    expect(readHomePresentation({ slides: [slide] }).slides).toMatchObject([slide]));
   it('拒绝重复商品与非法布局值，避免编辑器预览和线上结果不同', () => {
     expect(() => readHomePresentation({ slides: [slide, slide] })).toThrow();
     expect(() => readHomePresentation({ slides: [{ ...slide, imagePositionX: 101 }] })).toThrow();
@@ -110,6 +112,36 @@ describe('动态表单与历史配置兼容', () => {
   });
 });
 describe('发布输入与私密资料边界', () => {
+  it('字典名称用于展示，编辑和提交仍保留原始属性编码', () => {
+    const product = productFrom({
+      id: 'dictionary-product',
+      attributes: { server: 'server_east', gender: 'female', level: 'diamond', kind: 'linked' },
+      attribute_labels: { server: '华东区', gender: '女角色', level: '金钻', kind: '双号连体' },
+    });
+    expect(product.server).toBe('华东区');
+    expect(product.attributeLabels).toEqual({
+      server: '华东区',
+      gender: '女角色',
+      level: '金钻',
+      kind: '双号连体',
+    });
+    expect(product.gender).toBe('female');
+    expect(product.kind).toBe('linked');
+    const card = renderToStaticMarkup(
+      <MemoryRouter>
+        <AssetCard product={product} />
+      </MemoryRouter>,
+    );
+    expect(card).toContain('华东区');
+    expect(card).toContain('女角色');
+    expect(card).not.toContain('server_east');
+    expect(productToWire(product).attributes).toMatchObject({
+      server: 'server_east',
+      gender: 'female',
+      level: 'diamond',
+      kind: 'linked',
+    });
+  });
   const product = productFrom({
     id: 'product-1',
     title: '商品',

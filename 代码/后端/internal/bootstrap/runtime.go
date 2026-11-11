@@ -77,6 +77,7 @@ func redisOptions(c config.Config) (*redis.Options, error) {
 	ro.WriteTimeout = time.Second
 	ro.PoolSize = c.RedisPoolSize
 	ro.PoolTimeout = time.Second
+	ro.ContextTimeoutEnabled = true
 	// PoolSize限制普通命令并发。PubSub另开连接，不能让已填满的普通池阻止聊天订阅。
 	// 聊天连接数量由单用户租约和会话期限约束。
 	ro.MaxActiveConns = 0

@@ -9,12 +9,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"qingye/backend/internal/domain/catalog"
 	"qingye/backend/internal/domain/fault"
-	"qingye/backend/internal/domain/management"
 	"strconv"
 	"strings"
 )
 
-type CatalogStore struct{ DB *pgxpool.Pool }
+type HomeDocumentCache interface {
+	Load(context.Context, string, func(context.Context) (json.RawMessage, error)) (json.RawMessage, error)
+}
+type CatalogStore struct {
+	DB        *pgxpool.Pool
+	HomeCache HomeDocumentCache
+}
 type RowQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
@@ -32,49 +37,26 @@ func ValidateProductInput(ctx context.Context, q RowQuerier, p catalog.ProductIn
 	if err := q.QueryRow(ctx, "SELECT enabled,trade_type,price_units,filter_config FROM categories WHERE id=$1 FOR SHARE", p.CategoryID).Scan(&c.Enabled, &c.TradeType, &c.PriceUnits, &c.Filters); err != nil {
 		return errors.New("分类不存在或已停用")
 	}
+	// R16 uses fixed shared attributes; old category designers no longer govern submission.
+	c.Filters = []byte("[]")
 	if err := catalog.ValidateInput(p, complete, c); err != nil {
 		return err
 	}
-	var raw []byte
-	err := q.QueryRow(ctx, "SELECT value FROM site_settings WHERE key='publish_form' FOR SHARE").Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return errors.New("发布表单配置暂不可用")
-	}
-	var form management.PublishForm
-	if json.Unmarshal(raw, &form) != nil {
-		return errors.New("发布表单配置无效")
-	}
-	if complete {
-		for k, f := range form.Fields {
-			if !f.Required || !f.Enabled {
-				continue
-			}
-			if k == "custom_tags" {
-				tags, ok := p.Attributes["custom_tags"]
-				if !ok || fmt.Sprint(tags) == "[]" || tags == nil {
-					return fmt.Errorf("请填写%s", f.Label)
-				}
-			}
-			if k == "private_credentials" && p.PrivateCredentials == nil && !p.HasPrivateCredentials {
-				return fmt.Errorf("请填写%s", f.Label)
-			}
-		}
-	}
-	return nil
+	return validateDictionaryAttributes(ctx, q, p, complete)
 }
 
-const VisibleSQL = "p.status='published' AND p.approved_version=p.version AND c.enabled=true"
+const VisibleSQL = "p.deleted_at IS NULL AND p.status='published' AND p.approved_version=p.version AND c.enabled=true"
 
 // Explicit projection avoids materializing the large private legacy payload for
 // each card, and prevents future internal columns from silently becoming API fields.
 const ProductJSON = `jsonb_build_object(
  'id',p.id,'product_code',p.product_code,'category_id',p.category_id,'title',p.title,
  'trade_type',p.trade_type,'price_unit',p.price_unit,'attributes',p.attributes,'description',p.description,
+ 'attribute_labels',COALESCE((SELECT jsonb_object_agg(g.key,COALESCE((SELECT string_agg(COALESCE(o.label,v.value #>> '{}'),'、' ORDER BY v.position)
+ FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.attributes->g.key)='array' THEN p.attributes->g.key ELSE jsonb_build_array(p.attributes->g.key) END) WITH ORDINALITY v(value,position)
+ LEFT JOIN product_dictionary_options o ON o.dictionary_key=g.key AND o.value=v.value #>> '{}'),'')) FROM product_dictionary_groups g WHERE p.attributes ? g.key),'{}'::jsonb),
  'status',p.status,'source',p.source,'version',p.version,'approved_version',p.approved_version,
- 'manual_rank',p.manual_rank,'review_note',p.review_note,'legacy_price',p.legacy_price,
+ 'draft_expires_at',p.draft_expires_at,'manual_rank',p.manual_rank,'review_note',p.review_note,'legacy_price',p.legacy_price,
  'legacy_category',p.legacy_category,'verification_status',p.verification_status,
  'created_at',p.created_at,'updated_at',p.updated_at,'published_at',p.published_at,
  'price_amount',p.price_amount::text,'price_note',CASE WHEN p.price_unit='unknown' THEN '原站报价，单位待核对' ELSE '' END,
@@ -88,7 +70,7 @@ const ProductJSON = `jsonb_build_object(
  FROM product_images pi JOIN media_files m ON m.id=pi.media_id WHERE pi.product_id=p.id ORDER BY pi.sort_order,pi.media_id LIMIT %d) i),'[]'::jsonb))`
 
 func (a *CatalogStore) ProductView(ctx context.Context, id string, private bool) (map[string]any, error) {
-	where := "p.id=$1"
+	where := "p.id=$1 AND p.deleted_at IS NULL"
 	if !private {
 		where += " AND " + VisibleSQL
 	}
@@ -142,33 +124,21 @@ func (a *CatalogStore) productRows(ctx context.Context, where string, args []any
 	return out, total, rows.Err()
 }
 func (a *CatalogStore) FilterOptions(ctx context.Context) (map[string]map[string]bool, error) {
-	rows, e := a.DB.Query(ctx, "SELECT filter_config FROM categories WHERE enabled")
-	if e != nil {
-		return nil, e
+	rows, err := a.DB.Query(ctx, "SELECT dictionary_key,value FROM product_dictionary_options WHERE enabled")
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 	out := map[string]map[string]bool{}
 	for rows.Next() {
-		var b []byte
-		if e = rows.Scan(&b); e != nil {
-			return nil, e
+		var key, value string
+		if err = rows.Scan(&key, &value); err != nil {
+			return nil, err
 		}
-		var groups []catalog.FilterGroup
-		_ = json.Unmarshal(b, &groups)
-		for _, g := range groups {
-			if g.Enabled != nil && !*g.Enabled {
-				continue
-			}
-			if out[g.Key] == nil {
-				out[g.Key] = map[string]bool{}
-			}
-			for _, o := range g.Options {
-				if o.Enabled != nil && !*o.Enabled {
-					continue
-				}
-				out[g.Key][o.Value] = true
-			}
+		if out[key] == nil {
+			out[key] = map[string]bool{}
 		}
+		out[key][value] = true
 	}
 	return out, rows.Err()
 }

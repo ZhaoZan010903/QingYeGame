@@ -1,3 +1,4 @@
+import { canDeleteDraft } from '../lib/publish-dictionaries';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -23,6 +24,8 @@ export const listingStatus: Record<Product['status'], string> = {
   published: '已展示',
   rejected: '退回修改',
   offline: '已下架',
+  sold: '已售出',
+  rented: '租用中',
 };
 const message = (e: unknown) => (e instanceof Error ? e.message : '操作失败，请重试。');
 const units = { account: ' 元', hour: ' 元/小时', day: ' 元/日', week: ' 元/周', month: ' 元/月' };
@@ -219,6 +222,20 @@ export function MemberPage() {
       await api.withdrawProduct(product.id, product.version);
       setReload((v) => v + 1);
       notify(isDemo ? `演示记录已${verb}。` : `已${verb}。`);
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setBusy('');
+    }
+  }
+  async function deleteDraft(product: Product) {
+    if (!window.confirm('删除这份草稿？删除后无法继续编辑。')) return;
+    setBusy(product.id);
+    setError('');
+    try {
+      await api.deleteDraft(product.id, product.version);
+      setItems((rows) => rows.filter((row) => row.id !== product.id));
+      notify('草稿已删除。');
     } catch (e) {
       setError(message(e));
     } finally {
@@ -473,6 +490,19 @@ export function MemberPage() {
                                 : `¥ ${product.price.toLocaleString()}${units[product.unit]}`}
                           </span>
                         </p>
+                        {tab === 'listings' &&
+                          product.status === 'draft' &&
+                          product.draftExpiresAt && (
+                            <p className="draft-expiry">
+                              有效期至{' '}
+                              {new Date(product.draftExpiresAt).toLocaleString('zh-CN', {
+                                month: 'numeric',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </p>
+                          )}
                         {product.reviewNote && tab === 'listings' && (
                           <p className="review-note">审核意见：{product.reviewNote}</p>
                         )}
@@ -506,6 +536,15 @@ export function MemberPage() {
                                   {product.status === 'rejected' ? '修改后重新提交' : '继续编辑'} →
                                 </Link>
                               )
+                            )}
+                            {canDeleteDraft(product) && (
+                              <button
+                                className="text-button delete-draft"
+                                disabled={!!busy}
+                                onClick={() => void deleteDraft(product)}
+                              >
+                                删除草稿
+                              </button>
                             )}
                             {['published', 'pending'].includes(product.status) && (
                               <button

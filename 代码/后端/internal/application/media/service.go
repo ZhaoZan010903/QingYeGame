@@ -167,7 +167,11 @@ func (s *Service) Complete(ctx context.Context, actor domain.Actor, id string) (
 			return err
 		}
 		rawKey = upload.Key
-		return mutation.Ready(ctx, processed)
+		if err := mutation.Ready(ctx, processed); err != nil {
+			s.files.RemoveRaw(processed.Key)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

@@ -18,6 +18,8 @@ type PrivateCredentials struct {
 	QQPassword string `json:"qq_password"`
 }
 type ProductInput struct {
+	PreviousAttributes    map[string]any      `json:"-"`
+	LegacyAttributes      bool                `json:"-"`
 	HasPrivateCredentials bool                `json:"-"`
 	RentalQuotes          []RentalQuote       `json:"rental_quotes"`
 	PrivateCredentials    *PrivateCredentials `json:"private_credentials,omitempty"`
@@ -193,7 +195,7 @@ func PublicFields(p map[string]any) {
 
 var publicFields = map[string]bool{
 	"id": true, "product_code": true, "category_id": true, "title": true, "trade_type": true, "price_unit": true,
-	"attributes": true, "description": true, "status": true, "source": true, "version": true, "manual_rank": true,
+	"attributes": true, "attribute_labels":true, "description": true, "status": true, "source": true, "version": true, "manual_rank": true,
 	"legacy_price": true, "legacy_category": true, "verification_status": true, "created_at": true, "updated_at": true,
 	"published_at": true, "rental_quotes": true, "consultation_count": true, "price_amount": true, "price_note": true, "image_total": true, "images": true,
 }
@@ -252,13 +254,21 @@ func ValidateExtendedInput(p ProductInput) error {
 		default:
 			return errors.New("自定义标签格式无效")
 		}
-		if len(values) > 12 {
-			return errors.New("自定义标签最多12个")
+		oldRaw, _ := json.Marshal(p.PreviousAttributes["custom_tags"])
+		newRaw, _ := json.Marshal(values)
+		if len(values) > 20 && string(oldRaw) != string(newRaw) {
+			return errors.New("自定义标签最多20个；历史超量标签可原样保留或删减")
+		}
+		oldTags := map[string]bool{}
+		var retained []string
+		_ = json.Unmarshal(oldRaw, &retained)
+		for _, tag := range retained {
+			oldTags[tag] = true
 		}
 		seen := map[string]bool{}
 		for _, t := range values {
-			if strings.TrimSpace(t) == "" || utf8.RuneCountInString(t) > 24 || seen[t] {
-				return errors.New("标签不能重复且限24字")
+			if strings.TrimSpace(t) == "" || (utf8.RuneCountInString(t) > 5 && !oldTags[t]) || seen[t] {
+				return errors.New("新标签不能重复且每个最多5个字")
 			}
 			seen[t] = true
 		}

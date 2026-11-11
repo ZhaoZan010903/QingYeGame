@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { DemoContent, guides, type DemoKind } from "./AdminGuide";
 import { HomeDesigner } from "./HomeDesigner";
-import { CategoryFields } from "./CategoryFields";
+import { DictionaryOptions } from "./DictionarySettings";
 import {
   readHomePresentation,
   resolveHomePresentation,
@@ -43,30 +43,28 @@ describe("管理后台操作辅助", () => {
       expect(() => updateAttribute(raw, "server", "new")).toThrow();
     },
   );
-  it("可视化筛选保留原编码、停用选项和分组扩展字段", () => {
-    const original = [
-      {
-        key: "server",
-        label: "区服",
-        type: "choices",
-        multiple: true,
-        options: [{ value: "east", label: "华东", enabled: false }],
-      },
-    ];
-    expect(parseFilters(JSON.stringify(original))).toEqual(original);
+  it("共享字典保留固定标识，允许标签改名与停用", () => {
     const html = renderToStaticMarkup(
-      <CategoryFields value={JSON.stringify(original)} onChange={() => {}} />,
+      <DictionaryOptions
+        group={{
+          key: "server",
+          label: "所在区服",
+          version: 1,
+          options: [
+            { value: "east", label: "华东", enabled: false, sort_order: 0 },
+          ],
+        }}
+        query=""
+        onChange={() => {}}
+      />,
     );
     expect(html).toContain("华东");
-    expect(html).not.toContain("JSON");
-  });
-  it("未知筛选格式保留数据并提示修复", () => {
-    expect(() => parseFilters('{"filters":[]}')).toThrow();
-    const html = renderToStaticMarkup(
-      <CategoryFields value="broken" onChange={() => {}} />,
-    );
-    expect(html).toContain("已保留原内容");
+    expect(html).toContain("east");
+    expect(html).toContain("已停用");
     expect(html).not.toContain("添加筛选分组");
+  });
+  it("未知旧筛选格式不会被悄悄丢弃", () => {
+    expect(() => parseFilters('{"filters":[]}')).toThrow();
   });
   it.each(Object.keys(guides) as DemoKind[])(
     "%s 演示只显示练习内容，不请求接口",

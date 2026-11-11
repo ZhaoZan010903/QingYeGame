@@ -6,6 +6,7 @@ import (
 	"net/url"
 	catalogapp "qingye/backend/internal/application/catalog"
 	"qingye/backend/internal/domain/catalog"
+	"qingye/backend/internal/infrastructure/cache"
 	"qingye/backend/internal/infrastructure/postgres"
 )
 
@@ -13,7 +14,9 @@ type ProductInput = catalog.ProductInput
 
 var moneyPattern = catalog.MoneyPattern
 
-func (a *App) catalogStore() *postgres.CatalogStore { return &postgres.CatalogStore{DB: a.DB} }
+func (a *App) catalogStore() *postgres.CatalogStore {
+	return &postgres.CatalogStore{DB: a.DB, HomeCache: cache.HomeDocument{Client: a.Redis}}
+}
 
 func decodePage(q url.Values) (int, int, error) {
 	return catalog.DecodePage(q.Get("limit"), q.Get("cursor"))

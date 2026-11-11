@@ -15,6 +15,15 @@ export interface HomeSlide {
   layout: "image-right" | "image-left" | "overlay";
   textAlign: "left" | "center" | "right";
   verticalAlign: "top" | "center" | "bottom";
+  placement?: "flow" | "free";
+  textPositionX?: number;
+  textPositionY?: number;
+  textWidth?: number;
+  titleSize?: number;
+  descriptionSize?: number;
+  fontFamily?: "sans" | "serif";
+  titleColor?: string;
+  descriptionColor?: string;
 }
 export interface HomeSectionConfig {
   source: HomeSectionSource;
@@ -29,6 +38,7 @@ export interface HomeShortcut {
   icon: "arrow" | "plus";
 }
 export interface HomePresentation {
+  maxSlides?: number;
   slides?: HomeSlide[];
   editorial: { title: string; description: string; intervalMs: number };
   sections: HomeSectionConfig[];
@@ -40,6 +50,7 @@ export interface HomePresentation {
  * Inventory, ranking, category filters and contact details always belong to their own APIs.
  */
 export const defaultHomePresentation: HomePresentation = {
+  maxSlides: 12,
   slides: [],
   editorial: {
     title: "本期甄选",
@@ -104,7 +115,7 @@ const record = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 const text = (value: unknown, fallback: string, max = 120) =>
-  typeof value === "string" && value.trim() && value.length <= max
+  typeof value === "string" && value.trim() && Array.from(value).length <= max
     ? value.trim()
     : fallback;
 const integer = (value: unknown, fallback: number, min: number, max: number) =>
@@ -175,8 +186,9 @@ export function resolveHomePresentation(value?: unknown): HomePresentation {
       })
     : defaults.shortcuts.map((shortcut) => ({ ...shortcut }));
   return {
+    maxSlides: integer(input.maxSlides, 12, 1, 30),
     slides: Array.isArray(input.slides)
-      ? input.slides.slice(0, 12).flatMap((entry): HomeSlide[] => {
+      ? input.slides.slice(0, integer(input.maxSlides, 12, 1, 30)).flatMap((entry): HomeSlide[] => {
           const slide = record(entry);
           if (
             typeof slide.productId !== "string" ||
@@ -198,6 +210,15 @@ export function resolveHomePresentation(value?: unknown): HomePresentation {
               imagePositionX: integer(slide.imagePositionX, 50, 0, 100),
               imagePositionY: integer(slide.imagePositionY, 50, 0, 100),
               imageFit: slide.imageFit === "cover" ? "cover" : "contain",
+              placement: slide.placement === "free" && slide.layout === "overlay" ? "free" : "flow",
+              textPositionX: integer(slide.textPositionX, 0, 0, 100),
+              textPositionY: integer(slide.textPositionY, 50, 0, 100),
+              textWidth: integer(slide.textWidth, 55, 25, 85),
+              titleSize: integer(slide.titleSize, 40, 24, 72),
+              descriptionSize: integer(slide.descriptionSize, 16, 12, 24),
+              fontFamily: slide.fontFamily === "serif" ? "serif" : "sans",
+              titleColor: typeof slide.titleColor === "string" && /^#[0-9a-f]{6}$/i.test(slide.titleColor) ? slide.titleColor : "",
+              descriptionColor: typeof slide.descriptionColor === "string" && /^#[0-9a-f]{6}$/i.test(slide.descriptionColor) ? slide.descriptionColor : "",
               layout:
                 slide.layout === "overlay" || slide.layout === "image-left"
                   ? slide.layout
@@ -246,8 +267,9 @@ export function readHomePresentation(value?: unknown): HomePresentation {
   };
   if (typeof value !== "object" || Array.isArray(value)) return invalid();
   const input = value as Record<string, unknown>;
+  if (input.maxSlides !== undefined && (typeof input.maxSlides !== "number" || !Number.isInteger(input.maxSlides) || input.maxSlides < 1 || input.maxSlides > 30)) return invalid();
   if (input.slides !== undefined) {
-    if (!Array.isArray(input.slides) || input.slides.length > 12)
+    if (!Array.isArray(input.slides) || input.slides.length > (input.maxSlides as number ?? 12))
       return invalid();
     const seen = new Set<string>();
     for (const entry of input.slides) {
@@ -270,11 +292,11 @@ export function readHomePresentation(value?: unknown): HomePresentation {
       })) {
         if (
           s[key] !== undefined &&
-          (typeof s[key] !== "string" || (s[key] as string).length > max)
+          (typeof s[key] !== "string" || Array.from(s[key] as string).length > max)
         )
           return invalid();
       }
-      for (const key of ["imagePositionX", "imagePositionY"])
+      for (const key of ["imagePositionX", "imagePositionY", "textPositionX", "textPositionY"])
         if (
           s[key] !== undefined &&
           (typeof s[key] !== "number" ||
@@ -283,7 +305,14 @@ export function readHomePresentation(value?: unknown): HomePresentation {
             (s[key] as number) > 100)
         )
           return invalid();
+      for (const [key, [min, max]] of Object.entries({ textWidth: [25, 85], titleSize: [24, 72], descriptionSize: [12, 24] }))
+        if (s[key] !== undefined && (typeof s[key] !== "number" || !Number.isInteger(s[key]) || (s[key] as number) < min || (s[key] as number) > max)) return invalid();
+      for (const key of ["titleColor", "descriptionColor"])
+        if (s[key] !== undefined && s[key] !== "" && (typeof s[key] !== "string" || !/^#[0-9a-f]{6}$/i.test(s[key] as string))) return invalid();
+      if (s.placement === "free" && s.layout !== "overlay") return invalid();
       for (const [key, allowed] of Object.entries({
+        placement: ["flow", "free"],
+        fontFamily: ["sans", "serif"],
         imageFit: ["cover", "contain"],
         layout: ["image-right", "image-left", "overlay"],
         textAlign: ["left", "center", "right"],
@@ -305,7 +334,7 @@ export function readHomePresentation(value?: unknown): HomePresentation {
       item[key] !== undefined &&
       (typeof item[key] !== "string" ||
         (!allowEmpty && !(item[key] as string).trim()) ||
-        (item[key] as string).length > max)
+        Array.from(item[key] as string).length > max)
     )
       invalid();
   };

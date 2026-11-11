@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
 import { api, isDemo, uploadConfig, createRequestId } from '../lib/api';
 import type { ImageItem, Product } from '../types';
+import { runOrderedUploads, UploadSelectionOrder } from '../../../共享/ordered-uploads';
 
 type UploadState = 'queued' | 'uploading' | 'saving' | 'failed' | 'cancelled' | 'done';
 interface QueueItem {
@@ -50,7 +51,7 @@ export function ImageUploader({
   const createdHere = useRef(false);
   const running = useRef(false);
   const alive = useRef(true);
-  const serial = useRef<Promise<void>>(Promise.resolve());
+  const selectionOrder = useRef(new UploadSelectionOrder());
   const productId = product?.id;
   current.current = product;
   useEffect(() => {
@@ -117,54 +118,59 @@ export function ImageUploader({
       setQueue((items) => items.map((item) => (item.key === key ? { ...item, ...values } : item)));
   }
   async function transfer(item: QueueItem) {
-    if (cancelled.current.has(item.key)) return;
+    if (!alive.current || cancelled.current.has(item.key))
+      throw new DOMException('已取消', 'AbortError');
     const controller = new AbortController();
     controllers.current.set(item.key, controller);
     update(item.key, { status: 'uploading', error: undefined, progress: item.uploaded ? 100 : 0 });
-    try {
-      const image =
-        item.uploaded ||
-        (await api.upload(
-          item.file,
-          (progress) => update(item.key, { progress }),
-          controller.signal,
-        ));
-      update(item.key, { uploaded: image, status: 'saving' });
-      const append = serial.current
-        .catch(() => {})
-        .then(async () => {
-          if (controller.signal.aborted) throw new DOMException('已取消', 'AbortError');
-          const p = current.current;
-          if (!p) throw new Error('草稿已失效，请重新保存后再试。');
-          const next = await transport.appendImages(p.id, [image.id], p.version);
-          apply(next);
-          if (cursor) {
-            const page = await transport.myImages(next.id, undefined, next.version);
-            galleryVersion.current = page.version;
-            if (alive.current) {
-              setImages(page.items);
-              setCursor(page.nextCursor);
-            }
-          } else if (alive.current) {
-            galleryVersion.current = next.version;
-            setImages((previous) =>
-              previous.some((i) => i.id === image.id) ? previous : [...previous, image],
-            );
-          }
-        });
-      serial.current = append;
-      await append;
-      update(item.key, { status: 'done', progress: 100 });
-      URL.revokeObjectURL(item.preview);
-      previews.current.delete(item.preview);
-    } catch (e) {
-      update(item.key, {
-        status: controller.signal.aborted ? 'cancelled' : 'failed',
-        error: text(e),
-      });
-    } finally {
-      controllers.current.delete(item.key);
+    const image =
+      item.uploaded ||
+      (await api.upload(
+        item.file,
+        (progress) => update(item.key, { progress }),
+        controller.signal,
+      ));
+    update(item.key, { uploaded: image, status: 'saving' });
+    return image;
+  }
+  async function associate(item: QueueItem, image: ImageItem) {
+    if (!alive.current || controllers.current.get(item.key)?.signal.aborted)
+      throw new DOMException('已取消', 'AbortError');
+    let next = current.current;
+    if (!next) throw new Error('草稿已失效，请重新保存后再试。');
+    if (!selectionOrder.current.attached(item.key)) {
+      next = await transport.appendImages(next.id, [image.id], next.version);
+      apply(next);
+      // A later move/read failure must not append this image again on retry.
+      selectionOrder.current.markAttached(item.key, image.id);
+    } else {
+      next = await transport.myProduct(next.id);
+      apply(next);
     }
+    const before = selectionOrder.current.before(item.key);
+    if (before) {
+      next = await transport.moveImage(next.id, image.id, before, next.version);
+      apply(next);
+    }
+    if (cursor) {
+      const page = await transport.myImages(next.id, undefined, next.version);
+      galleryVersion.current = page.version;
+      if (alive.current) {
+        setImages(page.items);
+        setCursor(page.nextCursor);
+      }
+    } else if (alive.current) {
+      galleryVersion.current = next.version;
+      setImages((previous) => {
+        const list = previous.filter((entry) => entry.id !== image.id);
+        const at = before ? list.findIndex((entry) => entry.id === before) : -1;
+        list.splice(at < 0 ? list.length : at, 0, image);
+        return list;
+      });
+    }
+    update(item.key, { status: 'done', progress: 100 });
+    URL.revokeObjectURL(item.preview);
+    previews.current.delete(item.preview);
   }
   async function run(items: QueueItem[]) {
     if (!items.length || running.current || busy || disabled) return;
@@ -176,20 +182,24 @@ export function ImageUploader({
         createdHere.current = true;
         apply(await ensureDraft());
       }
-      let index = 0;
-      const worker = async () => {
-        while (index < items.length && alive.current) {
-          const item = items[index++];
-          await transfer(item);
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(uploadConfig.concurrency, items.length) }, worker),
+      await runOrderedUploads(
+        items,
+        uploadConfig.concurrency,
+        transfer,
+        associate,
+        (item, error) => {
+          update(item.key, {
+            status:
+              error instanceof DOMException && error.name === 'AbortError' ? 'cancelled' : 'failed',
+            error: text(error),
+          });
+        },
       );
     } catch (e) {
       setError(text(e));
       items.forEach((item) => update(item.key, { status: 'failed', error: text(e) }));
     } finally {
+      items.forEach((item) => controllers.current.delete(item.key));
       running.current = false;
       if (alive.current) setBusy(false);
     }
@@ -221,6 +231,7 @@ export function ImageUploader({
       valid.push({ key: createRequestId(), file, preview, status: 'queued', progress: 0 });
     }
     setError(rejected.join('\n'));
+    selectionOrder.current.register(valid.map((item) => item.key));
     setQueue((previous) => [...previous.filter((item) => item.status !== 'done'), ...valid]);
     void run(valid).then(() => {
       if (rejected.length && alive.current) setError(rejected.join('\n'));
@@ -237,6 +248,7 @@ export function ImageUploader({
   }
   function removeQueued(key: string) {
     cancelled.current.add(key);
+    selectionOrder.current.forget(key);
     controllers.current.get(key)?.abort();
     const item = queue.find((value) => value.key === key);
     if (item) {
@@ -253,6 +265,7 @@ export function ImageUploader({
     try {
       if (action === 'remove') {
         apply(await transport.removeImage(p.id, image.id, p.version));
+        selectionOrder.current.removeImage(image.id);
         setImages((list) => list.filter((i) => i.id !== image.id));
       } else {
         const at = images.findIndex((i) => i.id === image.id);

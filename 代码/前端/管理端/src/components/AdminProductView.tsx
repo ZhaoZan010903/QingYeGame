@@ -205,7 +205,9 @@ export function AdminProductView({ id }: { id: string }) {
             </div>
             <div>
               <dt>角色等级</dt>
-              <dd>{product.level || "未填写"}</dd>
+              <dd>
+                {product.attributeLabels?.level || product.level || "未填写"}
+              </dd>
             </div>
             <div>
               <dt>资料版本</dt>

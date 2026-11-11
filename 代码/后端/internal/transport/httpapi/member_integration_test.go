@@ -237,7 +237,10 @@ func TestMemberMediaIntegration(t *testing.T) {
 	h.call("POST", "/api/v1/auth/sms", map[string]any{"phone": phones[ownerID]}, nil, 503)
 	h.call("POST", "/api/v1/auth/register", map[string]any{}, nil, 503)
 	h.call("POST", "/api/v1/me/products", map[string]any{"owner_id": otherID}, owner, 422)
-	input := map[string]any{"category_id": "test-sale", "title": "联调商品", "trade_type": "sale", "price_unit": "account", "price_amount": "123.45", "attributes": map[string]any{"server": "测试区"}, "description": "集成测试资料", "request_id": newID()}
+	if _, err := a.DB.Exec(ctx, `INSERT INTO product_dictionary_options(dictionary_key,value,label) VALUES('server','测试区','测试区')`); err != nil {
+		t.Fatal(err)
+	}
+	input := map[string]any{"category_id": "test-sale", "title": "联调商品", "trade_type": "sale", "price_unit": "account", "price_amount": "123.45", "attributes": map[string]any{"server": "测试区", "gender": "female"}, "description": "集成测试资料", "request_id": newID()}
 	first := memberData(t, h.call("POST", "/api/v1/me/products", input, owner, 200))
 	pid := first["id"].(string)
 	path := "/api/v1/me/products/" + pid

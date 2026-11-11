@@ -20,7 +20,7 @@ type Repository interface {
 	Page(context.Context, string) (json.RawMessage, error)
 	VisibleOwner(context.Context, string) (*string, error)
 	RecordView(context.Context, string, string) (bool, error)
-	Featured(context.Context) ([]map[string]any, error)
+	Featured(context.Context, json.RawMessage) ([]map[string]any, error)
 	HomePresentation(context.Context) (json.RawMessage, error)
 	RecommendationState(context.Context) (map[string]any, time.Time, error)
 }
@@ -154,16 +154,16 @@ type homeSection struct {
 }
 
 func (s *Service) Home(ctx context.Context, identity string) (map[string]any, error) {
-	featured, e := s.repo.Featured(ctx)
+	presentation, e := s.repo.HomePresentation(ctx)
+	if e != nil {
+		return nil, storageError(e)
+	}
+	featured, e := s.repo.Featured(ctx, presentation)
 	if e != nil {
 		return nil, storageError(e)
 	}
 	for _, p := range featured {
 		catalog.PublicFields(p)
-	}
-	presentation, e := s.repo.HomePresentation(ctx)
-	if e != nil {
-		return nil, storageError(e)
 	}
 	sections := []homeSection{{"hot", 6}, {"recommended", 6}, {"newest", 6}}
 	if len(presentation) > 0 {

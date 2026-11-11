@@ -1,5 +1,6 @@
 import { idempotentRequest, imagePageFrom, productFrom, request } from "./api";
 import type { Product, ProductPage, User } from "../types";
+import type { DictionaryGroup, DictionaryKey } from "./dictionaries";
 
 export type AdminRecord = Record<string, any>;
 const unwrap = (response: AdminRecord): AdminRecord =>
@@ -14,6 +15,21 @@ export const canManage = (user: User | null | undefined) =>
 
 /** Admin requests always reach the server; there is no local or fixture-backed admin mode. */
 export const adminApi = {
+  async dictionaries(): Promise<DictionaryGroup[]> {
+    return rows(await request("/admin/dictionaries")) as DictionaryGroup[];
+  },
+  async saveDictionary(group: DictionaryGroup): Promise<DictionaryGroup> {
+    return unwrap(
+      await request(
+        `/admin/dictionaries/${encodeURIComponent(group.key as DictionaryKey)}`,
+        "PUT",
+        {
+          expected_version: group.version,
+          options: group.options,
+        },
+      ),
+    ) as DictionaryGroup;
+  },
   async users(params: URLSearchParams) {
     const response = await request(`/admin/users?${params}`);
     return {

@@ -100,27 +100,35 @@ func TestCoreCatalogImportAndAdministration(t *testing.T) {
 		input["title"] = "不同载荷"
 		h.call("POST", "/api/v1/admin/products", input, cookie, 409)
 	})
-	t.Run("editable filters and arrays", func(t *testing.T) {
+	t.Run("shared buyer filters and legacy arrays", func(t *testing.T) {
 		filter := `[{"key":"tags","label":"标签","multiple":true,"options":[{"value":"active","label":"启用"},{"value":"retired","label":"停用","enabled":false}]}]`
 		_, err := a.DB.Exec(ctx, "UPDATE categories SET filter_config=$1 WHERE id='legacy-long-rent'", filter)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = a.DB.Exec(ctx, `UPDATE products SET attributes=attributes||'{"tags":["active"]}'::jsonb WHERE id=$1`, id)
+		_, err = a.DB.Exec(ctx, `UPDATE products SET attributes=attributes||'{"server":["active"]}'::jsonb WHERE id=$1`, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		w := h.call("GET", `/api/v1/products?filters=%7B%22tags%22%3A%5B%22active%22%5D%7D`, nil, nil, 200)
+		_, err = a.DB.Exec(ctx, `INSERT INTO product_dictionary_options(dictionary_key,value,label,enabled) VALUES('server','active','启用',true),('server','retired','停用',false)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := h.call("GET", `/api/v1/products?filters=%7B%22server%22%3A%5B%22active%22%5D%7D`, nil, nil, 200)
 		if !strings.Contains(w.Body.String(), id) {
 			t.Fatal("array filter missed product")
 		}
-		h.call("GET", `/api/v1/products?filters=%7B%22tags%22%3A%5B%22retired%22%5D%7D`, nil, nil, 422)
+		h.call("GET", `/api/v1/products?filters=%7B%22server%22%3A%5B%22retired%22%5D%7D`, nil, nil, 422)
 		w = h.call("GET", "/api/v1/categories", nil, nil, 200)
 		if strings.Contains(w.Body.String(), "retired") {
 			t.Fatal("disabled option exposed")
 		}
-		category := map[string]any{"name": "周月租号", "price_units": []string{"week", "month", "unknown"}, "filter_config": []any{}, "sort_order": 1, "enabled": true}
-		h.call("PUT", "/api/v1/admin/categories/legacy-long-rent", category, cookie, 409)
+		category := map[string]any{"name": "周月租号", "price_units": []string{"week", "month", "unknown"}, "sort_order": 1, "enabled": true}
+		h.call("PUT", "/api/v1/admin/categories/legacy-long-rent", category, cookie, 200)
+		var retained string
+		if err = a.DB.QueryRow(ctx, "SELECT filter_config->0->>'key' FROM categories WHERE id='legacy-long-rent'").Scan(&retained); err != nil || retained != "tags" {
+			t.Fatalf("category edit lost historical metadata: %s %v", retained, err)
+		}
 	})
 	t.Run("pages and hidden settings", func(t *testing.T) {
 		h.call("PUT", "/api/v1/admin/pages/test-about", map[string]any{"title": "说明", "body": "测试正文", "published": false}, cookie, 200)

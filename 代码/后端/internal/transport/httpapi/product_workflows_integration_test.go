@@ -163,11 +163,7 @@ func TestR15ConfigStatesAndManualSlides(t *testing.T) {
 	tags := form.Fields["custom_tags"]
 	tags.Required = true
 	form.Fields["custom_tags"] = tags
-	ah.call("PUT", "/api/v1/admin/settings/publish_form", map[string]any{"value": form}, adminToken, 200)
-	settings := ah.call("GET", "/api/v1/admin/settings", nil, adminToken, 200)
-	if !strings.Contains(settings.Body.String(), `"key":"publish_form"`) || !strings.Contains(settings.Body.String(), `"custom_tags"`) {
-		t.Fatal("saved publish form missing from administrator settings")
-	}
+	ah.call("PUT", "/api/v1/admin/settings/publish_form", map[string]any{"value": form}, adminToken, 410)
 	h.call("GET", "/api/v1/publish-form", nil, nil, 200)
 	input := catalog.ProductInput{CategoryID: "r15-config-sale", Title: "测试完整商品", TradeType: "sale", PriceUnit: "account", Description: "测试介绍", RequestID: newID()}
 	p := memberData(t, h.call("POST", "/api/v1/me/products", input, userToken, 200))
@@ -182,7 +178,10 @@ func TestR15ConfigStatesAndManualSlides(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.call("POST", "/api/v1/me/products/"+id+"/submit", map[string]any{"expected_version": 1}, userToken, 422)
-	input.Attributes = map[string]any{"custom_tags": []string{"限定装扮"}}
+	if _, err = a.DB.Exec(ctx, `INSERT INTO product_dictionary_options(dictionary_key,value,label) VALUES('server','r15-config-region','测试区')`); err != nil {
+		t.Fatal(err)
+	}
+	input.Attributes = map[string]any{"custom_tags": []string{"限定装扮"}, "server": "r15-config-region", "gender": "female"}
 	input.ExpectedVersion = 1
 	h.call("PATCH", "/api/v1/me/products/"+id, input, userToken, 200)
 	h.call("POST", "/api/v1/me/products/"+id+"/submit", map[string]any{"expected_version": 2}, userToken, 200)

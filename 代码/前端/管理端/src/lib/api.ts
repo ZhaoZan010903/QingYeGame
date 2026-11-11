@@ -126,6 +126,7 @@ function imageFrom(i: RecordData): ImageItem {
 }
 export function productFrom(value: RecordData): Product {
   const a = value.attributes ?? {};
+  const labels = value.attribute_labels ?? {};
   const images = (
     Array.isArray(value.images) ? value.images : (value.images?.items ?? [])
   ).map(imageFrom);
@@ -148,6 +149,7 @@ export function productFrom(value: RecordData): Product {
     hasPrivateCredentials: !!value.has_private_credentials,
     consultationCount: Number(value.consultation_count ?? 0),
     attributes: a,
+    attributeLabels: labels,
     title: value.title ?? "未命名账号",
     mode: value.trade_type ?? value.mode ?? "sale",
     unit: value.price_unit ?? value.unit ?? "account",
@@ -155,7 +157,7 @@ export function productFrom(value: RecordData): Product {
       price === undefined || price === null || price === ""
         ? null
         : Number(price),
-    server: a.server ?? value.server ?? "未填写",
+    server: labels.server ?? a.server ?? value.server ?? "未填写",
     gender: a.gender ?? value.gender ?? "unknown",
     level: readLevel(a.level ?? a.xvip ?? value.level),
     kind: a.kind ?? value.kind ?? "single",

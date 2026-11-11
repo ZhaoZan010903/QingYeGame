@@ -132,12 +132,20 @@ function imageFrom(i: RecordData): ImageItem {
 }
 export function productFrom(value: RecordData): Product {
   const a = value.attributes ?? {};
+  const attributeLabels = Object.fromEntries(
+    ['server', 'gender', 'level', 'kind'].flatMap((key) =>
+      typeof value.attribute_labels?.[key] === 'string' && value.attribute_labels[key]
+        ? [[key, value.attribute_labels[key]]]
+        : [],
+    ),
+  );
   const images = (Array.isArray(value.images) ? value.images : (value.images?.items ?? [])).map(
     imageFrom,
   );
   const price = value.price_amount ?? value.price;
   return {
     id: String(value.id),
+    draftExpiresAt: value.draft_expires_at ?? null,
     code: String(value.product_code ?? value.public_id ?? value.id),
     categoryId: value.category_id,
     source: value.source,
@@ -145,11 +153,12 @@ export function productFrom(value: RecordData): Product {
     legacyCategory: value.legacy_category,
     priceNote: value.price_note,
     attributes: a,
+    attributeLabels,
     title: value.title ?? '未命名账号',
     mode: value.trade_type ?? value.mode ?? 'sale',
     unit: value.price_unit ?? value.unit ?? 'account',
     price: price === undefined || price === null || price === '' ? null : Number(price),
-    server: a.server ?? value.server ?? '未填写',
+    server: attributeLabels.server ?? a.server ?? value.server ?? '未填写',
     gender: a.gender ?? value.gender ?? 'unknown',
     level: readLevel(a.level ?? a.xvip ?? value.level),
     kind: a.kind ?? value.kind ?? 'single',
@@ -778,6 +787,20 @@ export const api = {
         expected_version: version,
       }),
     );
+  },
+  async deleteDraft(id: string, version: number): Promise<void> {
+    if (isDemo) {
+      const state = requireDemo();
+      const product = state.products.find((item) => item.id === id);
+      if (!product || product.status !== 'draft' || product.publishedAt)
+        throw new ApiError('只能删除未上架的草稿。', 409, 'INVALID_STATUS');
+      state.products = state.products.filter((item) => item.id !== id);
+      writeState(state);
+      return;
+    }
+    await request(`/me/products/${encodeURIComponent(id)}`, 'DELETE', {
+      expected_version: version,
+    });
   },
   async withdrawProduct(id: string, version: number): Promise<Product> {
     if (isDemo)

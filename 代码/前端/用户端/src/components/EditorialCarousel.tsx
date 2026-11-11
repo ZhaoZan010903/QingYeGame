@@ -14,6 +14,7 @@ import type { HomePresentation } from '../lib/home-content';
 import { isDemo } from '../lib/api';
 import { CarouselSlidePreview } from '../../../共享/CarouselSlidePreview';
 import '../live-editorial.css';
+import { carouselWindow, preloadCarouselSlide } from '../lib/carousel-window';
 
 export function EditorialCarousel({
   products: inventory,
@@ -128,13 +129,13 @@ export function EditorialCarousel({
               <CarouselSlidePreview
                 slide={slides[i]}
                 imageUrl={
-                  Math.abs(i - activeIndex) <= 1
+                  preloadCarouselSlide(i, activeIndex, products.length)
                     ? (p.images.find((image) => image.id === slides[i].imageId) ?? p.images[0])?.url
                     : undefined
                 }
                 action={
                   <Link className="button-white" to={`/accounts/${p.id}`}>
-                    咨询这个账号 <ArrowRight />
+                    查看详情 <ArrowRight />
                   </Link>
                 }
               />
@@ -156,10 +157,10 @@ export function EditorialCarousel({
               <span>/ {String(products.length).padStart(2, '0')}</span>
             </span>
             <div className="carousel-dots">
-              {products.map((p, i) => (
+              {carouselWindow(products.length, activeIndex).map((i) => (
                 <button
-                  key={p.id}
-                  aria-label={`第 ${i + 1} 张：${p.title}`}
+                  key={products[i].id}
+                  aria-label={`第 ${i + 1} 张：${slides[i].title}`}
                   aria-current={i === activeIndex}
                   onClick={() => manual(i)}
                 />

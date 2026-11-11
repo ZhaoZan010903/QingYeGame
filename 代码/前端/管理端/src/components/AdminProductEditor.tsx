@@ -18,12 +18,8 @@ import {
   customTagsForEditing,
   parseCustomTags,
 } from "../lib/product-input";
+import { fixedProductFields, type DictionaryGroup } from "../lib/dictionaries";
 import {
-  defaultPublishForm,
-  resolvePublishForm,
-} from "../../../共享/publish-form";
-import {
-  parseFilters,
   publicSite,
   unitLabels,
   updateAttribute,
@@ -96,7 +92,26 @@ export function AdminProductEditor({
   const [privateVisible, setPrivateVisible] = useState(false);
   const [tags, setTags] = useState("");
   const [quotes, setQuotes] = useState<Record<string, string>>({});
-  const [formFields, setFormFields] = useState(defaultPublishForm.fields);
+  const [dictionaries, setDictionaries] = useState<DictionaryGroup[]>([]);
+  const formFields = {
+    title: { label: "账号标题", placeholder: "填写账号特点与标题" },
+    description: {
+      label: "账号介绍",
+      placeholder: "介绍账号特点与交易说明，私密资料请填写专用区域",
+    },
+    custom_tags: {
+      label: "自定义标签",
+      placeholder: "例如：典藏、可议价",
+      required: false,
+      enabled: true,
+    },
+    private_credentials: {
+      label: "账号交接资料",
+      placeholder: "仅供授权管理员核验，不公开展示。",
+      required: false,
+      enabled: true,
+    },
+  };
   const [showPreview, setShowPreview] = useState(false);
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -118,10 +133,18 @@ export function AdminProductEditor({
   let groups: EditableGroup[] = [],
     attributes: Record<string, unknown> = {};
   try {
-    groups = parseFilters(JSON.stringify(category?.filter_config ?? []));
+    groups = fixedProductFields.map((field) => ({
+      ...field,
+      type: "select",
+      multiple: false,
+      enabled: true,
+      options: (
+        dictionaries.find((group) => group.key === field.key)?.options ?? []
+      ).map((option) => ({ ...option })),
+    }));
     attributes = JSON.parse(form.attributes);
   } catch {
-    /* The original value remains available in advanced fields. */
+    /* Preserve malformed legacy data for server validation instead of replacing it. */
   }
   function accept(value: AdminRecord) {
     setRow(value);
@@ -144,18 +167,14 @@ export function AdminProductEditor({
     setLoading(true);
     setError("");
     try {
-      const [list, value, settings] = await Promise.all([
+      const [list, value, sharedDictionaries] = await Promise.all([
         adminApi.list("categories"),
         (row?.id ?? id)
           ? adminApi.product(row?.id ?? id!)
           : Promise.resolve(null),
-        adminApi.list("settings"),
+        adminApi.dictionaries(),
       ]);
-      setFormFields(
-        resolvePublishForm(
-          settings.find((s) => s.key === "publish_form")?.value,
-        ).fields,
-      );
+      setDictionaries(sharedDictionaries);
       setCategories(list);
       if (value) accept(value);
       else
@@ -215,7 +234,10 @@ export function AdminProductEditor({
         attributes: {
           ...attributes,
           game: "QQ炫舞",
-          custom_tags: parseCustomTags(tags),
+          custom_tags: parseCustomTags(
+            tags,
+            row?.attributes?.custom_tags ?? [],
+          ),
         },
         rental_quotes: buildRentalQuotes(
           form.trade_type,
@@ -521,13 +543,13 @@ export function AdminProductEditor({
                     {row && <small>租售类型已固定，如需更换请新建资产。</small>}
                   </label>
                   <label className="form-field">
-                    发布模板
+                    交易分类
                     <select
                       required
                       value={form.category_id}
                       onChange={(e) => change("category_id", e.target.value)}
                     >
-                      <option value="">选择发布模板</option>
+                      <option value="">选择交易分类</option>
                       {categories
                         .filter(
                           (c) =>
@@ -565,7 +587,7 @@ export function AdminProductEditor({
                     >
                       {unsupportedPrimary && (
                         <option value={form.price_unit} disabled>
-                          {units[form.price_unit]}（当前模板不支持）
+                          {units[form.price_unit]}（当前分类不支持）
                         </option>
                       )}
                       {Object.entries(units)
@@ -606,13 +628,13 @@ export function AdminProductEditor({
                     <h3>更多租期报价</h3>
                     {unsupportedPrimary && (
                       <p className="admin-warning">
-                        当前模板不支持原主报价单位，金额仍保留。请重新选择报价单位并核对金额。
+                        当前分类不支持原主报价单位，金额仍保留。请重新选择报价单位并核对金额。
                       </p>
                     )}
                     {unsupportedQuotes.length > 0 && (
                       <div className="admin-warning" role="status">
                         <p>
-                          以下旧报价不适用于当前模板，尚未删除。请切回原模板，或确认后逐项移除。
+                          以下旧报价不适用于当前分类，尚未删除。请切回原分类，或确认后逐项移除。
                         </p>
                         {unsupportedQuotes.map(([unit, amount]) => (
                           <div key={unit}>
@@ -711,7 +733,7 @@ export function AdminProductEditor({
                       }}
                     />
                     <small>
-                      用逗号分隔，最多 12 个新增标签，每个最多 24
+                      用逗号分隔，最多 20 个标签，新标签每个最多 5
                       字。历史标签保留在原始属性中，不计入这里的额度。
                     </small>
                   </label>
@@ -775,141 +797,66 @@ export function AdminProductEditor({
                     </label>
                   </section>
                 )}
-                <div className="admin-grid">
-                  {groups
-                    .filter((group) => group.enabled !== false)
-                    .map((group) => {
-                      const existing = attributes?.[group.key];
-                      const selected = Array.isArray(existing)
-                        ? existing.map(String)
-                        : existing
-                          ? [String(existing)]
-                          : [];
-                      return (
-                        <div key={group.key} className="form-field">
-                          <span>{group.label}</span>
-                          {group.type === "text" ? (
-                            <input
-                              aria-label={group.label}
-                              required={!!group.required}
-                              placeholder={group.placeholder}
-                              maxLength={200}
-                              value={selected[0] ?? ""}
-                              onChange={(e) =>
-                                change(
-                                  "attributes",
-                                  updateAttribute(
-                                    form.attributes,
-                                    group.key,
-                                    e.target.value,
-                                  ),
-                                )
-                              }
-                            />
-                          ) : group.multiple || group.type === "multiselect" ? (
-                            <div className="attribute-options">
-                              {group.options.map((option) => (
-                                <label
-                                  className="agreement-check"
-                                  key={option.value}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={selected.includes(option.value)}
-                                    disabled={
-                                      option.enabled === false &&
-                                      !selected.includes(option.value)
-                                    }
-                                    onChange={(e) => {
-                                      try {
-                                        change(
-                                          "attributes",
-                                          updateAttribute(
-                                            form.attributes,
-                                            group.key,
-                                            e.target.checked
-                                              ? [...selected, option.value]
-                                              : selected.filter(
-                                                  (v) => v !== option.value,
-                                                ),
-                                          ),
-                                        );
-                                      } catch (e) {
-                                        fail(e);
-                                      }
-                                    }}
-                                  />
-                                  {option.label}
-                                  {option.enabled === false ? "（已停用）" : ""}
-                                </label>
-                              ))}
-                            </div>
-                          ) : (
-                            <select
-                              aria-label={group.label}
-                              required={!!group.required}
-                              value={selected[0] ?? ""}
-                              onChange={(e) => {
-                                try {
-                                  change(
-                                    "attributes",
-                                    updateAttribute(
-                                      form.attributes,
-                                      group.key,
-                                      e.target.value,
-                                    ),
-                                  );
-                                } catch (e) {
-                                  fail(e);
-                                }
-                              }}
-                            >
-                              <option value="">
-                                {group.placeholder ||
-                                  (group.required ? "请选择" : "暂不填写")}
-                              </option>
-                              {group.options.map((option) => (
-                                <option
-                                  value={option.value}
-                                  key={option.value}
-                                  disabled={option.enabled === false}
-                                >
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
+                <div className="admin-grid fixed-product-fields">
+                  {groups.map((group) => {
+                    const existing = attributes[group.key];
+                    const selected = Array.isArray(existing)
+                      ? existing.map(String)
+                      : existing
+                        ? [String(existing)]
+                        : [];
+                    const current = selected[0] ?? "";
+                    const active = group.options.filter(
+                      (option) => option.enabled !== false,
+                    );
+                    const legacy =
+                      current &&
+                      !active.some((option) => option.value === current);
+                    return (
+                      <label className="form-field" key={group.key}>
+                        {group.label}
+                        {group.required ? " *" : ""}
+                        <select
+                          aria-label={group.label}
+                          required={!!group.required}
+                          value={current}
+                          onChange={(event) =>
+                            change(
+                              "attributes",
+                              updateAttribute(
+                                form.attributes,
+                                group.key,
+                                event.target.value,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="">
+                            {group.required ? "请选择" : "暂不填写"}
+                          </option>
+                          {legacy && (
+                            <option value={current}>
+                              {group.options.find(
+                                (option) => option.value === current,
+                              )?.label ?? current}
+                              （原资料）
+                            </option>
                           )}
-                          {group.type !== "text" &&
-                            selected.some(
-                              (v) =>
-                                !group.options.some(
-                                  (o) => o.value === v && o.enabled !== false,
-                                ),
-                            ) && (
-                              <small className="danger-text">
-                                有历史或停用选项，请核对高级资料后再保存。
-                              </small>
-                            )}
-                        </div>
-                      );
-                    })}
+                          {active.map((option) => (
+                            <option value={option.value} key={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {legacy && (
+                          <small>
+                            原资料可保留，新增或更换请使用当前共享字典。
+                          </small>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
-                <details className="admin-advanced">
-                  <summary>高级资料（原始属性与迁移内容）</summary>
-                  <p>
-                    保留已有字段。分类筛选项以分类配置中的编码为准；只修改已核实的值。
-                  </p>
-                  <label className="form-field">
-                    属性内容（JSON 对象）
-                    <textarea
-                      className="mono"
-                      rows={10}
-                      value={form.attributes}
-                      onChange={(e) => change("attributes", e.target.value)}
-                      spellCheck={false}
-                    />
-                  </label>
-                </details>
                 {row?.status === "published" && (
                   <p className="admin-warning">
                     保存资料或修改图片后，商品会停止公开并转为草稿。

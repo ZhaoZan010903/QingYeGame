@@ -34,7 +34,22 @@ func (a *CatalogStore) JSONRows(ctx context.Context, sql string, args ...any) ([
 }
 
 func (a *CatalogStore) Categories(ctx context.Context) ([]map[string]any, error) {
-	return a.JSONRows(ctx, "SELECT to_jsonb(c) FROM categories c WHERE enabled ORDER BY sort_order,id")
+	rows, err := a.JSONRows(ctx, "SELECT to_jsonb(c) FROM categories c WHERE enabled ORDER BY sort_order,id")
+	if err != nil {
+		return nil, err
+	}
+	groups, err := a.Dictionaries(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	filters := []map[string]any{}
+	for _, g := range groups {
+		filters = append(filters, map[string]any{"key": g["key"], "label": g["label"], "type": "select", "multiple": false, "required": g["key"] == "server" || g["key"] == "gender", "enabled": true, "options": g["options"]})
+	}
+	for _, row := range rows {
+		row["filter_config"] = filters
+	}
+	return rows, nil
 }
 func (a *CatalogStore) Contacts(ctx context.Context, purpose string) ([]map[string]any, error) {
 	return a.JSONRows(ctx, "SELECT to_jsonb(c)-'qr_media_id' || jsonb_build_object('qr_url',CASE WHEN qr_media_id IS NOT NULL THEN '/api/v1/media/'||qr_media_id||'/file' ELSE qr_url END) FROM contacts c WHERE enabled AND ($1='' OR purpose ? $1 OR purpose ? 'general') ORDER BY id", purpose)
@@ -63,20 +78,40 @@ func (a *CatalogStore) RecordView(ctx context.Context, id, hash string) (bool, e
  SELECT EXISTS(SELECT 1 FROM inserted)`, id, hash).Scan(&recorded)
 	return recorded, e
 }
-func (a *CatalogStore) Featured(ctx context.Context) ([]map[string]any, error) {
+func (a *CatalogStore) Featured(ctx context.Context, presentation json.RawMessage) ([]map[string]any, error) {
 	// Only an explicit administrator slide enters the carousel; no product-copy fallback.
 	projection := strings.Replace(fmt.Sprintf(ProductJSON, 1), "ORDER BY pi.sort_order,pi.media_id LIMIT 1", "ORDER BY (pi.media_id=COALESCE(sl.value->>'imageId','')) DESC,pi.sort_order,pi.media_id LIMIT 1", 1)
-	return a.JSONRows(ctx, "SELECT "+projection+` FROM site_settings ss CROSS JOIN LATERAL jsonb_array_elements(COALESCE(ss.value->'slides','[]')) WITH ORDINALITY sl(value,n) JOIN products p ON p.id=sl.value->>'productId' JOIN categories c ON c.id=p.category_id WHERE ss.key='home_presentation' AND `+VisibleSQL+" ORDER BY sl.n LIMIT 12")
+	if len(presentation) == 0 {
+		return []map[string]any{}, nil
+	}
+	// 配置与商品采用同一份轮播快照；公开权限始终实时查询，不缓存商品状态。
+	return a.JSONRows(ctx, "SELECT "+projection+` FROM jsonb_array_elements(COALESCE($1::jsonb->'slides','[]')) WITH ORDINALITY sl(value,n) JOIN products p ON p.id=sl.value->>'productId' JOIN categories c ON c.id=p.category_id WHERE `+VisibleSQL+" ORDER BY sl.n LIMIT 30", presentation)
 }
 func (a *CatalogStore) PublishForm(ctx context.Context) (json.RawMessage, error) {
-	var raw json.RawMessage
-	err := a.DB.QueryRow(ctx, "SELECT value FROM site_settings WHERE key='publish_form'").Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		raw, err = json.Marshal(management.DefaultPublishForm())
-	}
-	return raw, err
+	return json.Marshal(management.DefaultPublishForm())
 }
 func (a *CatalogStore) HomePresentation(ctx context.Context) (json.RawMessage, error) {
+	if a.HomeCache != nil {
+		for range 3 {
+			var revision string
+			err := a.DB.QueryRow(ctx, "SELECT cache_revision FROM site_settings WHERE key='home_presentation'").Scan(&revision)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			raw, err := a.HomeCache.Load(ctx, revision, func(load context.Context) (json.RawMessage, error) {
+				var data json.RawMessage
+				e := a.DB.QueryRow(load, "SELECT value FROM site_settings WHERE key='home_presentation' AND cache_revision=$1", revision).Scan(&data)
+				return data, e
+			})
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return raw, err
+			}
+		}
+	}
+	// 缓存不可用或配置持续更新时，数据库仍可直接提供内容。
 	var raw json.RawMessage
 	e := a.DB.QueryRow(ctx, "SELECT value FROM site_settings WHERE key='home_presentation'").Scan(&raw)
 	if errors.Is(e, pgx.ErrNoRows) {

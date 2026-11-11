@@ -4,7 +4,7 @@ export type TradeType = "sale" | "rent";
 export type PriceUnit =
   "account" | "hour" | "day" | "week" | "month" | "unknown";
 export type ProductStatus =
-  "draft" | "pending" | "published" | "rejected" | "offline";
+  "draft" | "pending" | "published" | "rejected" | "offline" | "sold" | "rented";
 export type VerificationStatus = "unprovided" | "pending" | "verified";
 export interface RentalQuote {
   unit: "hour" | "day" | "week" | "month";
@@ -18,6 +18,8 @@ export interface ImageItem {
   alt: string;
 }
 export interface Product {
+  attributeLabels?: Partial<Record<"server" | "gender" | "level" | "kind", string>>;
+  draftExpiresAt?: string | null;
   rentalQuotes?: RentalQuote[];
   hasPrivateCredentials?: boolean;
   consultationCount?: number;

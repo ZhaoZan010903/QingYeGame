@@ -40,7 +40,7 @@ import { adminProductID } from "../lib/product-links";
 import { ChatPage } from "../components/ChatPage";
 import { useChat } from "../components/ChatNotifications";
 import { AdminHelp, GuideButton } from "../components/AdminGuide";
-import { PublishFormSettings } from "../components/PublishFormSettings";
+import { DictionarySettings } from "../components/DictionarySettings";
 import "../admin.css";
 const publicSite = String(import.meta.env.VITE_PUBLIC_SITE_URL ?? "").replace(
   /\/$/,
@@ -372,7 +372,7 @@ export function AdminPage() {
         ["settings", "首页装修", PanelsTopLeft],
         ["recommendations", "热门榜单", TrendingUp],
         ["contacts", "客服与二维码", Headphones],
-        ["categories", "发布表单设置", ListFilter],
+        ["categories", "区服与账号字典", ListFilter],
         ["pages", "说明与协议", FileText],
         ["users", "会员管理", Users],
       ],
@@ -431,7 +431,7 @@ export function AdminPage() {
           ) : tab === "recommendations" ? (
             <AdminRecommendations />
           ) : tab === "categories" ? (
-            <PublishFormSettings />
+            <DictionarySettings />
           ) : resources.includes(tab as Resource) ? (
             <AdminResources key={tab} resource={tab as Resource} />
           ) : (

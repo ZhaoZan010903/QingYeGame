@@ -261,6 +261,9 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 	if e != nil {
 		return 0, e
 	}
+	if e = a.mergeLegacyDictionaries(ctx, combined); e != nil {
+		return 0, e
+	}
 	imported := 0
 	for index, p := range records {
 		if p.Deleted {

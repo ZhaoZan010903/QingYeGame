@@ -22,7 +22,7 @@ func recommendationProduct(t *testing.T, a *App, id, category, source, status st
 	if approved {
 		version = 1
 	}
-	_, err := a.DB.Exec(context.Background(), `INSERT INTO products(id,product_code,category_id,title,trade_type,price_unit,description,status,source,version,approved_version,published_at) VALUES($1,'DUPLICATE-CODE',$2,$1,'sale','account',$3,$4,$5,1,$6,$7)`, id, category, strings.Repeat("完整介绍", 30), status, source, version, published)
+	_, err := a.DB.Exec(context.Background(), `INSERT INTO products(id,product_code,category_id,title,trade_type,price_unit,description,status,source,version,approved_version,published_at,attributes) VALUES($1,'DUPLICATE-CODE',$2,$1,'sale','account',$3,$4,$5,1,$6,$7,'{"server":"fixture-region","gender":"female"}')`, id, category, strings.Repeat("完整介绍", 30), status, source, version, published)
 	if err != nil {
 		t.Fatal(err)
 	}

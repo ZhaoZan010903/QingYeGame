@@ -1,8 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CarouselEditor, emptySlide } from "./CarouselEditor";
+import {
+  CarouselEditor,
+  emptySlide,
+  boundedPercent,
+  limitSlideText,
+  previewGeometry,
+  textDragRange,
+} from "./CarouselEditor";
 import { CarouselSlidePreview } from "../../../共享/CarouselSlidePreview";
-import { CategoryFields } from "./CategoryFields";
+import {
+  addDictionaryOption,
+  validateDictionary,
+  fixedProductFields,
+  type DictionaryGroup,
+} from "../lib/dictionaries";
 import { PrivateCredentials } from "./PrivateCredentials";
 import { productFrom } from "../lib/api";
 import { adminApi } from "../lib/admin-api";
@@ -71,12 +83,12 @@ describe("R15运营工作流", () => {
   });
   it("标签去重并拒绝超过上限的内容", () => {
     expect(parseCustomTags("典藏、可议价，典藏")).toEqual(["典藏", "可议价"]);
-    expect(() => parseCustomTags("长".repeat(25))).toThrow("24 字");
+    expect(() => parseCustomTags("长".repeat(6))).toThrow("5 字");
     expect(() =>
       parseCustomTags(
-        Array.from({ length: 13 }, (_, i) => String(i)).join(","),
+        Array.from({ length: 21 }, (_, i) => String(i)).join(","),
       ),
-    ).toThrow("12 个");
+    ).toThrow("20 个");
   });
   it("新增轮播保持文案空白，由管理员撰写且预览不自动保存", () => {
     const change = vi.fn();
@@ -84,8 +96,8 @@ describe("R15运营工作流", () => {
       <CarouselEditor slides={[emptySlide()]} onChange={change} />,
     );
     expect(html).toContain("大标题");
-    expect(html).toContain("实时预览");
-    expect(html).toContain("查找已上架商品");
+    expect(html).toContain("展示预览");
+    expect(html).toContain("查找关联商品");
     expect(change).not.toHaveBeenCalled();
     expect(emptySlide().title).toBe("");
   });
@@ -104,26 +116,125 @@ describe("R15运营工作流", () => {
     expect(html).toContain("layout-image-left");
     expect(html).toContain("--slide-x:80%");
   });
-  it("文本属性可配置为必填，不呈现无关的选项编辑", () => {
+  it("字典只维护固定四组，重复名称不会新建重复标识", () => {
+    expect(fixedProductFields.map((field) => field.key)).toEqual([
+      "server",
+      "gender",
+      "level",
+      "kind",
+    ]);
+    const group: DictionaryGroup = {
+      key: "server",
+      label: "所在区服",
+      version: 3,
+      options: [{ value: "east", label: "华东", enabled: true, sort_order: 0 }],
+    };
+    expect(() => addDictionaryOption(group, "华东")).toThrow();
+    expect(addDictionaryOption(group, "华南").options.at(-1)).toEqual({
+      value: "华南",
+      label: "华南",
+      enabled: true,
+      sort_order: 1,
+    });
+    expect(group.options).toHaveLength(1);
+  });
+  it("必填字典不能全部停用，显示标签不会写回原始属性", () => {
+    expect(() =>
+      validateDictionary({
+        key: "server",
+        label: "区服",
+        version: 1,
+        options: [],
+      }),
+    ).toThrow("至少");
+    const row = productFrom({
+      id: "p",
+      attributes: { server: "east", gender: "female" },
+      attribute_labels: { server: "华东新名称", gender: "女生" },
+    });
+    expect(row.server).toBe("华东新名称");
+    expect(row.attributes?.server).toBe("east");
+    expect(row.gender).toBe("female");
+    expect(row.attributeLabels?.gender).toBe("女生");
+  });
+  it("旧长标签可保留，新增短标签依旧执行 Unicode 字数限制", () => {
+    const old = ["历史很长的标签名称"];
+    expect(parseCustomTags("历史很长的标签名称，😀😀😀😀😀", old)).toEqual([
+      ...old,
+      "😀😀😀😀😀",
+    ]);
+    expect(() => parseCustomTags("😀😀😀😀😀😀", old)).toThrow("5 字");
+    const many = Array.from({ length: 21 }, (_, i) => `旧${i}`);
+    expect(parseCustomTags(many.join(","), many)).toEqual(many);
+    expect(() => parseCustomTags([...many, "新"].join(","), many)).toThrow(
+      "20 个",
+    );
+  });
+  it("桌面与手机预览保持逻辑宽度且为完整缩放高度留空间", () => {
+    expect(previewGeometry(660, 600, false)).toEqual({
+      width: 1320,
+      scale: 0.5,
+      height: 300,
+    });
+    expect(previewGeometry(312, 750, true)).toEqual({
+      width: 390,
+      scale: 0.8,
+      height: 600,
+    });
+  });
+  it("缩放后拖动仍使用相同比例，安全边距随预览缩放", () => {
+    const full = textDragRange(1320, 500, 1),
+      small = textDragRange(660, 250, 0.5);
+    expect(small).toBe(full * 0.5);
+    expect(30 / small).toBe(60 / full);
+  });
+  it("轮播文字按 Unicode 字符截断且不拆开 emoji", () => {
+    expect(limitSlideText("😀".repeat(101), 100)).toBe("😀".repeat(100));
+  });
+  it("轮播上限收窄不会静默删除，拖动位置限制在边界内", () => {
+    expect(boundedPercent(-20)).toBe(0);
+    expect(boundedPercent(120)).toBe(100);
     const html = renderToStaticMarkup(
-      <CategoryFields
-        value={JSON.stringify([
-          {
-            key: "note",
-            label: "账号说明",
-            type: "text",
-            required: true,
-            enabled: true,
-            placeholder: "填写特点",
-            options: [],
-          },
-        ])}
+      <CarouselEditor
+        slides={[emptySlide(), emptySlide()]}
+        maxSlides={1}
         onChange={() => {}}
       />,
     );
-    expect(html).toContain("填写特点");
-    expect(html).toContain("发布时必须填写");
-    expect(html).not.toContain("添加选项");
+    expect(html).toContain("现有轮播超过设置上限");
+    expect(() =>
+      readHomePresentation({
+        slides: [
+          { ...emptySlide(), productId: "p", title: "标题" },
+          { ...emptySlide(), productId: "p2", title: "标题2" },
+        ],
+        maxSlides: 1,
+      }),
+    ).toThrow();
+  });
+  it("字典保存携带版本且拒绝服务端冲突", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ code: "CONFLICT", message: "数据已更新" }),
+          { status: 409 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await expect(
+      adminApi.saveDictionary({
+        key: "server",
+        label: "区服",
+        version: 4,
+        options: [],
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(fetch.mock.calls[0][0]).toBe("/api/v1/admin/dictionaries/server");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      expected_version: 4,
+      options: [],
+    });
   });
   it("私密资料默认不读取，须管理员显式查看", () => {
     const fetch = vi.fn();

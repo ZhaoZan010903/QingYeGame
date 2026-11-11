@@ -73,15 +73,15 @@ func TestAdminContactPreservationAndCategoryContracts(t *testing.T) {
 	delete(category, "trade_type")
 	category["price_units"] = []string{"account"}
 	h.call("PUT", "/api/v1/admin/categories/single-choice", category, first, 200)
-	product := ProductInput{CategoryID: "single-choice", Title: "单选属性", TradeType: "sale", PriceUnit: "account", Description: "测试说明", Attributes: map[string]any{"quality": []any{"one", "two"}}}
+	product := ProductInput{CategoryID: "single-choice", Title: "单选属性", TradeType: "sale", PriceUnit: "account", Description: "测试说明", Attributes: map[string]any{"gender": []any{"female", "male"}}}
 	if err = a.validateProductInput(ctx, product, false); err == nil {
 		t.Fatal("single choice accepted multiple values")
 	}
-	product.Attributes["quality"] = []any{"one", "one"}
+	product.Attributes["gender"] = []any{"female", "female"}
 	if err = a.validateProductInput(ctx, product, false); err == nil {
 		t.Fatal("single choice accepted duplicate values")
 	}
-	product.Attributes["quality"] = "one"
+	product.Attributes["gender"] = "female"
 	if err = a.validateProductInput(ctx, product, false); err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +89,11 @@ func TestAdminContactPreservationAndCategoryContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	product.Attributes["quality"] = []any{"one", "two"}
-	if err = a.validateProductInput(ctx, product, false); err != nil {
-		t.Fatal(err)
+	product.Attributes["gender"] = []any{"female", "male"}
+	if err = a.validateProductInput(ctx, product, false); err == nil {
+		t.Fatal("fixed shared gender accepted multiple values")
 	}
-	product.Attributes["quality"] = []any{"one", "one"}
+	product.Attributes["gender"] = []any{"female", "female"}
 	if err = a.validateProductInput(ctx, product, false); err == nil {
 		t.Fatal("multiple choice accepted duplicate options")
 	}

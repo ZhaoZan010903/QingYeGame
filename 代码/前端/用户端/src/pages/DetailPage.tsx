@@ -175,14 +175,15 @@ function DetailContent({
             <div>
               <dt>角色特征</dt>
               <dd>
-                {genderLabel(p.gender)} · <span className="mono">{levelLabel(p.level)}</span>
+                {p.attributeLabels?.gender || genderLabel(p.gender)} ·{' '}
+                <span className="mono">{p.attributeLabels?.level || levelLabel(p.level)}</span>
               </dd>
             </div>
             <div>
               <dt>交易模式</dt>
               <dd>
                 {p.mode === 'sale' ? '出售' : '租赁'} ·{' '}
-                {p.kind === 'linked' ? '双号连体' : '独立账号'}
+                {p.attributeLabels?.kind || (p.kind === 'linked' ? '双号连体' : '独立账号')}
               </dd>
             </div>
           </dl>

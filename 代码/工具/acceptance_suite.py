@@ -212,7 +212,7 @@ class Suite:
     def product_input(self, title):
         return {"category_id": self.fixtures["category_id"], "title": title, "trade_type": "sale", "price_unit": "account",
                 "price_amount": "100.00", "description": "Isolated acceptance fixture. No customer account data.",
-                "attributes": {"server": "acceptance"}, "request_id": str(uuid.uuid4())}
+                "attributes": {"server": "acceptance", "gender": "female"}, "request_id": str(uuid.uuid4())}
 
     def own(self, product_id, actor="member"):
         return self.call(actor, "GET", f"/api/v1/me/products/{product_id}").data
@@ -242,6 +242,15 @@ class Suite:
         prefix = "acceptance-" + uuid.uuid4().hex[:10]
         self.state["run_id"] = prefix
         self.fixtures["category_id"] = prefix
+        dictionaries = self.call("admin", "GET", "/api/v1/admin/dictionaries").data
+        server = next(group for group in dictionaries if group["key"] == "server")
+        options = [dict(option) for option in server["options"]]
+        existing = next((option for option in options if option["value"] == "acceptance"), None)
+        if existing:
+            existing["enabled"] = True
+        else:
+            options.append({"value": "acceptance", "label": "Acceptance", "enabled": True, "sort_order": 999})
+        self.call("admin", "PUT", "/api/v1/admin/dictionaries/server", {"expected_version": server["version"], "options": options})
         category = {"code": prefix, "name": prefix, "trade_type": "all", "price_units": ["account", "day", "unknown"],
                     "filter_config": [{"key": "server", "label": "Test region", "multiple": False,
                                        "options": [{"value": "acceptance", "label": "Acceptance"}]}], "sort_order": 999, "enabled": True}

@@ -30,12 +30,25 @@ func (a *App) registerMember(mux routeRegistrar) {
 	mux.HandleFunc("POST /api/v1/me/products", a.memberMutation(a.createDraft))
 	mux.HandleFunc("GET /api/v1/me/products/{id}", a.memberDetail)
 	mux.HandleFunc("PATCH /api/v1/me/products/{id}", a.memberMutation(a.editDraft))
+	mux.HandleFunc("DELETE /api/v1/me/products/{id}", a.memberMutation(a.deleteDraft))
 	mux.HandleFunc("POST /api/v1/me/products/{id}/submit", a.memberMutation(a.memberTransition))
 	mux.HandleFunc("POST /api/v1/me/products/{id}/withdraw", a.memberMutation(a.memberTransition))
 	mux.HandleFunc("GET /api/v1/me/products/{id}/images", a.memberImageList)
 	mux.HandleFunc("POST /api/v1/me/products/{id}/images", a.memberMutation(a.appendMemberImages))
 	mux.HandleFunc("PATCH /api/v1/me/products/{id}/images/{media_id}", a.memberMutation(a.changeMemberImage))
 	mux.HandleFunc("DELETE /api/v1/me/products/{id}/images/{media_id}", a.memberMutation(a.changeMemberImage))
+}
+func (a *App) deleteDraft(w http.ResponseWriter, r *http.Request) {
+	u, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	var in memberdomain.TransitionInput
+	if !readJSON(w, r, &in) {
+		return
+	}
+	data, err := a.memberService().DeleteDraft(r.Context(), memberActor(u, false), r.PathValue("id"), in.ExpectedVersion)
+	memberResponse(w, data, err)
 }
 func (a *App) registerAdminImages(mux routeRegistrar) {
 	mux.HandleFunc("GET /api/v1/admin/products/{id}/images", a.memberImageList)

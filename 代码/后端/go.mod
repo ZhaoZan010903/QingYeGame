@@ -11,6 +11,7 @@ require (
 	github.com/redis/go-redis/v9 v9.12.1
 	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 	golang.org/x/image v0.45.0
+	golang.org/x/sync v0.24.0
 )
 
 require (
@@ -44,7 +45,6 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect

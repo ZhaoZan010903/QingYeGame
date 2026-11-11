@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import type { HomeSlide } from "./home-content";
 import "./carousel-slide.css";
 
@@ -7,19 +7,53 @@ export function CarouselSlidePreview({
   slide,
   imageUrl,
   action,
+  previewViewport,
 }: {
   slide: HomeSlide;
   imageUrl?: string;
   action?: ReactNode;
+  previewViewport?: "mobile";
 }) {
+  const root = useRef<HTMLDivElement>(null);
+  const copy = useRef<HTMLDivElement>(null);
+  const free = slide.layout === "overlay" && slide.placement === "free";
+  useEffect(() => {
+    if (!free || !copy.current || !root.current) return;
+    const update = () =>
+      root.current?.style.setProperty(
+        "--copy-height",
+        `${(copy.current?.offsetHeight ?? 0) + 64}px`,
+      );
+    const observer = new ResizeObserver(update);
+    observer.observe(copy.current);
+    update();
+    return () => {
+      observer.disconnect();
+      root.current?.style.removeProperty("--copy-height");
+    };
+  }, [free]);
   const style = {
     "--slide-x": `${slide.imagePositionX}%`,
     "--slide-y": `${slide.imagePositionY}%`,
     "--slide-fit": slide.imageFit,
+    "--copy-x": `${slide.textPositionX ?? 0}%`,
+    "--copy-y": `${slide.textPositionY ?? 50}%`,
+    "--copy-x-ratio": (slide.textPositionX ?? 0) / 100,
+    "--copy-y-ratio": (slide.textPositionY ?? 50) / 100,
+    "--copy-width": `${slide.textWidth ?? 55}%`,
+    "--title-size": `${slide.titleSize ?? 40}px`,
+    "--description-size": `${slide.descriptionSize ?? 16}px`,
+    "--slide-font":
+      slide.fontFamily === "serif"
+        ? '"Noto Serif SC", "Songti SC", SimSun, serif'
+        : "inherit",
+    "--title-color": slide.titleColor || "inherit",
+    "--description-color": slide.descriptionColor || "inherit",
   } as CSSProperties;
   return (
     <div
-      className={`curated-slide layout-${slide.layout} align-${slide.textAlign} vertical-${slide.verticalAlign}`}
+      ref={root}
+      className={`curated-slide layout-${slide.layout} align-${slide.textAlign} vertical-${slide.verticalAlign}${free ? " placement-free" : ""}${previewViewport === "mobile" ? " preview-mobile" : ""}`}
       style={style}
     >
       <div className="curated-image">
@@ -34,7 +68,7 @@ export function CarouselSlidePreview({
           <span>选择展示图片</span>
         )}
       </div>
-      <div className="curated-copy">
+      <div className="curated-copy" ref={copy}>
         <div className="curated-meta">
           {slide.tradeLabel && <span>{slide.tradeLabel}</span>}
           {slide.serverLabel && <span>{slide.serverLabel}</span>}
