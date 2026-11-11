@@ -8,6 +8,7 @@ import { CatalogSearch } from '../components/CatalogSearch';
 import { CatalogSelect } from '../components/CatalogSelect';
 import type { FilterGroup } from '../types';
 import { useSession } from '../context';
+import { catalogPriceUnits } from '../lib/catalog-units';
 import '../catalog.css';
 const defaultFilters: FilterGroup[] = [
   {
@@ -166,9 +167,7 @@ export function Catalog({ home = false }: { home?: boolean }) {
       }
     return {
       groups: relevant.length ? [...merged.values()] : isDemo ? defaultFilters : [],
-      priceUnits: [...new Set(relevant.flatMap((c) => c.priceUnits))].filter(
-        (unit) => unit !== 'unknown',
-      ),
+      priceUnits: catalogPriceUnits(relevant, mode),
     };
   }, [categories.data, params.get('trade_type')]);
   const request = new URLSearchParams(params);
