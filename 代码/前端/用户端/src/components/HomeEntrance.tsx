@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, ArrowUpRight } from 'lucide-react';
 import { environmentLabel } from '../lib/api';
 import { useHomeEntranceMotion } from './useHomeEntranceMotion';
-import { HeroAtmosphere } from './HeroAtmosphere';
 
 const words = ['珍藏你的热爱。', '让每一次选择，', '值得信任。'];
 
@@ -55,7 +54,7 @@ export function HomeEntrance({ children }: { children: ReactNode }) {
         ))}
       </h1>
       <section className="hero immersive-intro" ref={intro} aria-labelledby="hero-title">
-        <HeroAtmosphere />
+        <div className="intro-halo" aria-hidden="true" />
         <div className="hero-inner mx-auto text-center">
           <div className="intro-title-template" aria-hidden="true" ref={source}>
             <TitleTemplate />
