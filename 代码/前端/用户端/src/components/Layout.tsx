@@ -12,7 +12,9 @@ import { isDemo, api, environmentLabel } from '../lib/api';
 import { useSession, useUi } from '../context';
 import { Modal, StateView, Artwork } from './shared';
 import { useLoad } from '../lib-use';
-import { AmbientBackdrop } from './AmbientBackdrop';
+import { ReadingProgress } from './AmbientBackdrop';
+import { ChatNavLink } from './ChatNotifications';
+import { ThemeToggle } from './ThemeToggle';
 export function Brand() {
   return (
     <Link className="brand flex items-center" to="/" aria-label="清叶首页">
@@ -198,7 +200,8 @@ export function Layout() {
   return (
     <>
       <ScrollRestoration />
-      <AmbientBackdrop />
+      <ReadingProgress />
+      <div className="nav-top-mask" aria-hidden="true" />
       <a className="skip-link" href="#main">
         跳到主要内容
       </a>
@@ -231,6 +234,8 @@ export function Layout() {
             </button>
           )}
           <div className="nav-actions flex items-center">
+            <ChatNavLink />
+            <ThemeToggle />
             <Link className="profile-button" to="/me" aria-label="个人中心">
               <UserRound />
             </Link>

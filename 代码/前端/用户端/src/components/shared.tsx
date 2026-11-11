@@ -15,10 +15,10 @@ export const unitLabels: Record<string, string> = {
 };
 export const genderLabel = (gender: Product['gender']) =>
   gender === 'female' ? '女角色' : gender === 'male' ? '男角色' : '角色未注明';
-export function Price({ product: p }: { product: Product }) {
+export function Price({ product: p, compact = false }: { product: Product; compact?: boolean }) {
   const legacy = p.unit === 'unknown' && p.legacyPrice !== undefined;
   return (
-    <span className="price-box">
+    <span className={`price-box ${compact ? 'price-compact' : ''}`}>
       <span className="price mono">
         {legacy ? (
           p.legacyPrice
@@ -36,7 +36,9 @@ export function Price({ product: p }: { product: Product }) {
           ? p.priceNote || unitLabels.unknown
           : p.price === null
             ? '报价咨询'
-            : unitLabels[p.unit]}
+            : compact && p.unit !== 'account'
+              ? `/ ${unitLabels[p.unit].split('/')[1]}`
+              : unitLabels[p.unit]}
       </small>
     </span>
   );
@@ -123,7 +125,7 @@ export function AssetCard({ product: p }: { product: Product }) {
           <div className="asset-bottom">
             <span className="card-caption">查看详情</span>
             <div className="asset-price-side">
-              <Price product={p} />
+              <Price product={p} compact />
               <span className="asset-arrow">
                 <ArrowRight />
               </span>
@@ -178,11 +180,13 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  className = '',
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
 }) {
   const titleId = useId();
   const ref = useRef<HTMLDialogElement>(null);
@@ -244,7 +248,7 @@ export function Modal({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      className={`app-dialog ${wide ? 'wide' : ''}`}
+      className={`app-dialog ${wide ? 'wide' : ''} ${className}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           const r = e.currentTarget.getBoundingClientRect();

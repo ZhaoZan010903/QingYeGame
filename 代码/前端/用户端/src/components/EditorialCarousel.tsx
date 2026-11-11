@@ -131,6 +131,9 @@ export function EditorialCarousel({
               aria-label={`${i + 1} / ${products.length}`}
             >
               <div className="slide-visual">
+                <div className="slide-image-ambience" aria-hidden="true">
+                  <Artwork product={p} />
+                </div>
                 <Artwork product={p} />
               </div>
               <div className="slide-copy">
@@ -149,7 +152,7 @@ export function EditorialCarousel({
                   <span>{p.mode === 'sale' ? '账号出售' : '账号租赁'}</span>
                 </p>
                 <div className="slide-action-row">
-                  <Price product={p} />
+                  <Price product={p} compact />
                   <Link className="button-white" to={`/accounts/${p.id}`}>
                     探索这个账号 <ArrowRight />
                   </Link>

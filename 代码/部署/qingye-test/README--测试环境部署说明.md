@@ -1,11 +1,13 @@
 # 152服务器：前后端测试联调
 
-此目录部署 `0.7.0-test.1` 测试环境，不切换现有生产站，也不覆盖5178前端原型。主机上的其他数据库、Redis及网站继续使用原有配置。
+> R7已获用户授权并部署；新增WebTransport聊天、独立管理重构、最新双主题和12张预览图集。可信IP/HTTPS已配置，公网UDP放行状态查最新R7验收记录。
+
+此目录部署 `0.8.0-test.1` 测试环境，不切换现有生产站，也不覆盖5178前端原型。主机上的其他数据库、Redis及网站继续使用原有配置。
 
 | 组件 | 地址或路径 |
 | --- | --- |
-| React 用户站 | `http://152.136.252.204:5179`，源码`代码/前端/用户端` |
-| React 管理站 | `http://152.136.252.204:5181`，源码`代码/前端/管理端`，独立构建与登录 |
+| React 用户站 | `https://152.136.252.204:5179`，源码`代码/前端/用户端` |
+| React 管理站 | `https://152.136.252.204:5181`，源码`代码/前端/管理端`，独立构建与登录 |
 | public API | `127.0.0.1:5180`，`APP_SURFACE=public`，仅本机监听 |
 | admin API | `127.0.0.1:5182`，`APP_SURFACE=admin`，仅本机监听 |
 | 浏览器接口 | 用户站`/api/`只代理5180，管理站`/api/`只代理5182；就绪检查在API的`/healthz` |
@@ -32,12 +34,12 @@
 | --- | --- | --- |
 | `APP_SURFACE` | `public` | `admin` |
 | `QINGYE_ADDR` | `127.0.0.1:5180` | `127.0.0.1:5182` |
-| `ALLOWED_ORIGINS` | `http://152.136.252.204:5179` | `http://152.136.252.204:5181` |
-| `PUBLIC_BASE_URL` | `http://152.136.252.204:5179` | `http://152.136.252.204:5181` |
+| `ALLOWED_ORIGINS` | `https://152.136.252.204:5179` | `https://152.136.252.204:5181` |
+| `PUBLIC_BASE_URL` | `https://152.136.252.204:5179` | `https://152.136.252.204:5181` |
 | 会话Cookie | `qingye_session` | `qingye_admin_session` |
 | 数据库会话audience | `public` | `admin` |
 
-Cookie名、audience、角色、账户状态及写请求来源由服务端联合校验；上传票据也限制在创建它的入口。**同一IP的不同端口不是不同Cookie域**，不能把端口或前端角色判断当作会话隔离保证。当前按用户确认使用IP/HTTP测试，`SECURE_COOKIES=false`；后续域名HTTPS启用Secure Cookie并复核域名、Origin和网络访问策略。API5180、5182及PostgreSQL、Redis均不开放外网。
+Cookie名、audience、角色、账户状态及写请求来源由服务端联合校验；上传票据也限制在创建它的入口。**同一IP的不同端口不是不同Cookie域**，不能把端口或前端角色判断当作会话隔离保证。R7已启用可信IP/HTTPS，`SECURE_COOKIES=true`，Origin精确匹配各自HTTPS入口。旧HTTP链接308跳转到同端口HTTPS。API5180、5182及PostgreSQL、Redis均不开放外网。
 
 ## 首次配置
 
@@ -62,7 +64,7 @@ VITE_ENVIRONMENT_LABEL='测试环境 · 旧站商品快照'
 VITE_SMS_ENABLED=false
 ```
 
-管理端在`代码/前端/管理端`独立执行`pnpm install --frozen-lockfile`，构建配置使用`VITE_API_BASE_URL=/api/v1`、`VITE_PUBLIC_SITE_URL=http://152.136.252.204:5179`。所有`VITE_`变量都是浏览器可见内容，不能放服务器凭据。两个前端分别执行`pnpm test`、`pnpm build`，分别发布各自`dist`，不混用依赖或构建目录。
+管理端在`代码/前端/管理端`独立执行`pnpm install --frozen-lockfile`，构建配置使用`VITE_API_BASE_URL=/api/v1`、`VITE_PUBLIC_SITE_URL=https://152.136.252.204:5179`。所有`VITE_`变量都是浏览器可见内容，不能放服务器凭据。两个前端分别执行`pnpm test`、`pnpm build`，分别发布各自`dist`，不混用依赖或构建目录。
 
 后端执行单元和真实数据库/Redis检查、`go vet ./...`，再以`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o qingye-api ./cmd/qingye`构建。具体本地启动及测试变量见[后端说明](../../后端/README--后端开发说明.md)。先在独立验收环境完成业务、并发、安全验证，再发布业务测试站。
 
@@ -126,3 +128,14 @@ journalctl -u qingye-media-migration -n 10
 - 停止业务测试环境仅操作对应`qingye-test-*`及`qingye-media-migration`服务；停止验收只操作`qingye-acceptance@public`、`qingye-acceptance@admin`与`qingye-acceptance-redis`。不停止系统PostgreSQL、6379 Redis、5178原型或其他站点。
 
 当前为HTTP测试环境。正式业务切换仍需域名HTTPS、短信服务、经营规则确认、备份恢复演练和生产验收。
+
+## R7 HTTPS、WebTransport与证书续期
+
+- TCP5179、TCP5181：独立Nginx HTTPS站点；UDP5179、UDP5181：两个Go进程的HTTP/3。腾讯云安全组／防火墙需分别允许这两个UDP端口。
+- 证书使用Let’s Encrypt短期IP证书，Certbot5.10.0安装在`/opt/qingye-certbot`。线上关闭开发证书指纹模式，不关闭TLS校验。
+- `qingye-certbot-renew.timer`每日00/12点检查，随机延迟不超过30分钟；`renew --dry-run`演练通过。证书仅留服务器，原始lineage为`/etc/letsencrypt/live/qingye-test-ip`。
+- `deploy-chat-certificate.py`验证证书有效期、IP及公私钥配对，复制到root:qingye-test受控目录，以符号链接原子切换整对证书；重载两个Nginx、重启两个API。更新异常保留原证书路径并回退。
+- 首次安装可用`--install-only`，不得在业务运行中用此参数代替正常部署hook。首次HTTP切换HTTPS时，Nginx reload是异步动作，健康检查需等待新worker接管，不能在HUP后立刻断言失败。
+- 本轮私有回退材料位于`/root/qingye-private/consultation-release-20261111/20261111-gallery-chat-r7-backup`。保留旧R5/R6符号链接目标、原环境文件及数据库dump。聊天迁移为新增表，应用回退不删除表或覆盖新数据。
+
+可信IP证书采用短有效期机制，续期不能停用。依据：[Let’s Encrypt IP证书与Certbot说明](https://letsencrypt.org/2026/03/11/shorter-certs-certbot.html)。

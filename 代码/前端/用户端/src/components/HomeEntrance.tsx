@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, ArrowUpRight } from 'lucide-react';
 import { environmentLabel } from '../lib/api';
 import { useHomeEntranceMotion } from './useHomeEntranceMotion';
+import { HeroAtmosphere } from './HeroAtmosphere';
 
 const words = ['珍藏你的热爱。', '让每一次选择，', '值得信任。'];
 
@@ -54,7 +55,7 @@ export function HomeEntrance({ children }: { children: ReactNode }) {
         ))}
       </h1>
       <section className="hero immersive-intro" ref={intro} aria-labelledby="hero-title">
-        <div className="intro-halo" aria-hidden="true" />
+        <HeroAtmosphere />
         <div className="hero-inner mx-auto text-center">
           <div className="intro-title-template" aria-hidden="true" ref={source}>
             <TitleTemplate />
@@ -72,10 +73,9 @@ export function HomeEntrance({ children }: { children: ReactNode }) {
         >
           <span>向下探索</span>
           <span className="intro-scroll-icon" aria-hidden="true">
-            <svg viewBox="0 0 32 36" fill="none">
-              <path d="m5 7 11 9L27 7" />
-              <path d="m5 19 11 9 11-9" />
-            </svg>
+            <span className="intro-scroll-track">
+              <span className="intro-scroll-wheel" />
+            </span>
           </span>
         </button>
       </section>

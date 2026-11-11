@@ -22,9 +22,9 @@
   margin: 0;
   min-width: 0;
   padding: 0;
-  border: 1px solid #d7c49b35;
+  border: 1px solid var(--gold-line);
   border-radius: 12px;
-  background: #141416f5;
+  background: rgba(var(--surface-rgb), 0.961);
   box-shadow: 0 5px 20px #0000000c;
   box-sizing: border-box;
   transform-origin: 0 0;
@@ -33,7 +33,7 @@
   contain: layout style;
 }
 .catalog-floating-search:focus-within {
-  border-color: #cbb985;
+  border-color: var(--gold-line);
   box-shadow: 0 0 0 3px #cbb9850b;
 }
 .catalog-floating-search .catalog-floating-icon {
@@ -42,7 +42,7 @@
   top: 0;
   width: 18px;
   height: 18px;
-  color: #b7aa8f;
+  color: var(--gold-pale);
   transform-origin: 0 0;
   will-change: transform;
 }
@@ -76,7 +76,7 @@
   outline: none;
   box-shadow: none;
   background: transparent;
-  color: #f1eee7;
+  color: var(--text);
   font-family: inherit;
   font-size: 15px;
 }
@@ -89,7 +89,7 @@
   box-shadow: none;
 }
 .catalog-floating-search input::placeholder {
-  color: #aaa59a;
+  color: var(--muted);
 }
 .catalog-floating-search .catalog-floating-clear,
 .catalog-floating-search .catalog-floating-close {
@@ -99,7 +99,7 @@
   width: 26px;
   height: 28px;
   border-radius: 5px;
-  color: #b6afa2;
+  color: var(--muted);
 }
 .catalog-floating-search .catalog-floating-clear svg,
 .catalog-floating-search .catalog-floating-close svg {
@@ -116,13 +116,13 @@
   height: 100%;
   padding: 0;
   border-radius: 7px;
-  background: #ece7dc;
-  color: #25231e;
+  background: var(--cta);
+  color: var(--cta-text);
   font-size: 14px;
   font-weight: 600;
 }
 .catalog-floating-search .catalog-floating-submit:hover {
-  background: #fffaf0;
+  background: var(--cta);
 }
 .catalog-floating-search .catalog-floating-submit svg {
   width: 16px;

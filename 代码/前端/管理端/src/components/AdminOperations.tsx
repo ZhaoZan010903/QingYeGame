@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useSession } from "../context";
 import { adminApi, type AdminRecord } from "../lib/admin-api";
 import { StateView } from "./shared";
+import { Link } from "react-router-dom";
+import { RefreshCw, TrendingUp } from "lucide-react";
+import { useUnsavedChanges } from "../lib/admin-ux";
 
 const message = (error: unknown) =>
   error instanceof Error ? error.message : "操作失败，请重试。";
@@ -80,9 +83,16 @@ export function AdminUsers() {
     <section>
       <div className="admin-heading">
         <div>
-          <h2>会员管理</h2>
+          <span className="eyebrow">账户维护</span>
+          <h1>会员管理</h1>
           <p>共 {total} 个账户 · 手机号脱敏展示</p>
         </div>
+      </div>
+      <div className="location-note">
+        <strong>这里可以控制账户能否登录</strong>
+        <span>
+          停用会撤销该账户的登录会话，但不会自动下架它发布的商品。商品展示请到商品管理处理。
+        </span>
       </div>
       <div className="admin-toolbar">
         <form
@@ -182,7 +192,10 @@ export function AdminRecommendations() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  useUnsavedChanges(dirty, busy);
   async function load(refresh = false) {
+    if (dirty && !window.confirm("重新读取会替换未保存的参数，确认继续？"))
+      return;
     setBusy(true);
     setError("");
     try {
@@ -192,7 +205,10 @@ export function AdminRecommendations() {
       setResult(value);
       setConfig(value.config);
       setDirty(false);
-      if (refresh) setNotice("推荐榜单已重新计算。");
+      if (refresh)
+        setNotice(
+          "热门榜单已更新，刷新首页可查看。首页还会按区块去重，展示数量以实际商品为准。",
+        );
     } catch (e) {
       setError(message(e));
     } finally {
@@ -211,7 +227,7 @@ export function AdminRecommendations() {
       await adminApi.save("settings", "recommendation", { value: config });
       setDirty(false);
       setNotice(
-        "参数已保存。点击「重新计算榜单」立即生效，也可等待下一次定时计算。",
+        "参数已保存。点击「更新榜单」应用新规则，也可等待下一次自动计算。",
       );
     } catch (e) {
       setError(message(e));
@@ -228,7 +244,8 @@ export function AdminRecommendations() {
     <section>
       <div className="admin-heading">
         <div>
-          <h2>推荐规则与榜单</h2>
+          <span className="eyebrow">网站运营</span>
+          <h1>热门推荐</h1>
           <p>
             生效版本：{result?.rule_version ?? "—"} · 最近计算：
             {date(result?.computed_at)}
@@ -239,7 +256,8 @@ export function AdminRecommendations() {
           disabled={busy || dirty}
           onClick={() => void load(true)}
         >
-          {busy ? "正在处理…" : "重新计算榜单"}
+          <RefreshCw size={16} />
+          {busy ? "正在处理…" : "更新榜单"}
         </button>
       </div>
       {loading ? (
@@ -261,43 +279,97 @@ export function AdminRecommendations() {
           )}
           {result && (
             <>
-              <form
-                className="panel member-form admin-resource-form"
-                onSubmit={save}
-              >
-                <fieldset disabled={busy}>
-                  <div className="admin-grid">
-                    <label className="form-field">
-                      规则版本
-                      <input
-                        required
-                        minLength={1}
-                        maxLength={40}
-                        value={config.version ?? ""}
-                        onChange={(e) => change("version", e.target.value)}
-                      />
-                    </label>
-                    {fields.map(([key, label, min, max]) => (
-                      <label key={key} className="form-field">
-                        {label}
+              <div className="recommendation-summary">
+                <div className="panel">
+                  <h3>
+                    <TrendingUp size={18} /> 热门商品自动排序
+                  </h3>
+                  <p>
+                    根据最近 {config.window_days}{" "}
+                    天的有效浏览和收藏计算。系统约每 15
+                    分钟更新一次，通常无需手动调整。
+                  </p>
+                  <p className="formula">
+                    浏览 × {config.view_weight} + 收藏 ×{" "}
+                    {config.favorite_weight} + 符合条件的新品加分
+                  </p>
+                  <p>
+                    算例：100 次有效浏览、10 次有效收藏，非新品得分为{" "}
+                    {100 * Number(config.view_weight || 0) +
+                      10 * Number(config.favorite_weight || 0)}
+                    。旧站迁移商品不加新品分。
+                  </p>
+                </div>
+                <div className="panel">
+                  <h3>要修改哪个位置？</h3>
+                  <p>
+                    调整标题、展示数量和显示顺序，请进入首页装修。首页轮播使用人工精选，与自动热门榜分开管理。
+                  </p>
+                  <div className="admin-actions">
+                    <Link className="button-outline" to="/settings">
+                      修改首页展示
+                    </Link>
+                    <Link
+                      className="button-outline"
+                      to="/products?status=published"
+                    >
+                      设置轮播精选
+                    </Link>
+                  </div>
+                </div>
+              </div>
+              <details className="admin-advanced ranking-advanced">
+                <summary>
+                  调整推荐权重（高级设置）{dirty ? " · 有修改未保存" : ""}
+                </summary>
+                <p>
+                  日常运营无需修改。调整后先保存参数，再更新榜单。修改只影响自动推荐排序。
+                </p>
+                <form
+                  className="member-form admin-resource-form"
+                  onSubmit={save}
+                >
+                  <fieldset disabled={busy}>
+                    <div className="admin-grid">
+                      <label className="form-field">
+                        规则版本
                         <input
-                          type="number"
-                          min={min}
-                          max={max}
-                          step="1"
                           required
-                          value={config[key] ?? ""}
-                          onChange={(e) => change(key, Number(e.target.value))}
+                          minLength={1}
+                          maxLength={40}
+                          value={config.version ?? ""}
+                          onChange={(e) => change("version", e.target.value)}
                         />
                       </label>
-                    ))}
-                  </div>
-                  <p className="muted">
-                    保存参数后重新计算，榜单再使用新规则。人工精选在商品管理中单独设置。
-                  </p>
-                  <button className="button-white">保存推荐参数</button>
-                </fieldset>
-              </form>
+                      {fields.map(([key, label, min, max]) => (
+                        <label key={key} className="form-field">
+                          {label}
+                          <input
+                            type="number"
+                            min={min}
+                            max={max}
+                            step="1"
+                            required
+                            value={config[key] ?? ""}
+                            onChange={(e) =>
+                              change(key, Number(e.target.value))
+                            }
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <p className="muted">
+                      保存参数后更新榜单，才能立即使用新规则。
+                    </p>
+                    <div className="save-bar">
+                      <span>
+                        {dirty ? "参数有修改，尚未保存" : "当前参数已读取"}
+                      </span>
+                      <button className="button-white">保存推荐参数</button>
+                    </div>
+                  </fieldset>
+                </form>
+              </details>
               <h3 className="admin-ranking-title">当前榜单</h3>
               <div className="admin-table-wrap">
                 <table className="admin-table">

@@ -3,6 +3,8 @@ import { api, isDemo } from './lib/api';
 import type { User } from './types';
 import { Modal, StateView } from './components/shared';
 import { useLoad } from './lib-use';
+import { ContactDetails } from './components/ContactDetails';
+import { contactsForChannel } from './lib/contact-options';
 const Session = createContext<{
   user: User | null;
   loading: boolean;
@@ -12,24 +14,33 @@ const Session = createContext<{
 }>(null!);
 const Ui = createContext<{
   notify: (s: string) => void;
-  contact: (id?: string, purpose?: string) => void;
+  contact: (id?: string, purpose?: string, channel?: 'qq') => void;
 }>(null!);
 export const useSession = () => useContext(Session);
 export const useUi = () => useContext(Ui);
 function ContactDialog({
   id,
   purpose,
+  channel,
   onClose,
   notify,
 }: {
   id?: string;
   purpose?: string;
+  channel?: 'qq';
   onClose: () => void;
   notify: (s: string) => void;
 }) {
   const result = useLoad(() => api.contacts(purpose), purpose || 'all');
+  const [selectedId, setSelectedId] = useState('');
+  const contacts = contactsForChannel(result.data ?? [], channel);
+  const selected = contacts.find((c) => c.id === selectedId) ?? contacts[0];
   return (
-    <Modal title="联系清叶客服" onClose={onClose}>
+    <Modal
+      title={channel === 'qq' ? '联系 QQ 客服' : '联系清叶客服'}
+      onClose={onClose}
+      className="contact-dialog"
+    >
       <p className="dialog-intro">
         {id ? '咨询账号资料、报价及交付安排。' : '选择你需要咨询的服务，平台客服协助处理。'}
       </p>
@@ -52,30 +63,27 @@ function ContactDialog({
       )}
       {result.loading || result.error ? (
         <StateView {...result} onRetry={result.retry} />
-      ) : result.data?.length ? (
-        result.data.map((c) => (
-          <div className="contact-card" key={c.id}>
-            <strong>{c.name}</strong>
-            <p>
-              {c.channel} · {c.value}
-            </p>
-            {c.hours && <small>{c.hours}</small>}
-            {c.qrUrl && <img src={c.qrUrl} alt={`${c.name} 联系二维码`} />}
-            <button
-              className="button-outline"
-              onClick={() =>
-                (navigator.clipboard ? navigator.clipboard.writeText(c.value) : Promise.reject())
-                  .then(() => notify('联系方式已复制'))
-                  .catch(() => notify(`请手动复制：${c.value}`))
-              }
-            >
-              复制联系方式
-            </button>
-          </div>
-        ))
+      ) : selected ? (
+        <>
+          {contacts.length > 1 && (
+            <div className="contact-selectors" role="group" aria-label="选择客服">
+              {contacts.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  aria-pressed={c.id === selected.id}
+                  onClick={() => setSelectedId(c.id)}
+                >
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <ContactDetails key={selected.id} contact={selected} notify={notify} />
+        </>
       ) : (
         <div className="notice-box">
-          <h3>客服信息尚未配置</h3>
+          <h3>{channel === 'qq' ? 'QQ 客服信息尚未配置' : '客服信息尚未配置'}</h3>
           <p>
             {isDemo
               ? '当前为演示环境，未提供真实客服账号或二维码。'
@@ -91,7 +99,9 @@ export function Providers({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>();
   const [message, notify] = useState('');
-  const [support, setSupport] = useState<{ id?: string; purpose?: string } | null>(null);
+  const [support, setSupport] = useState<{ id?: string; purpose?: string; channel?: 'qq' } | null>(
+    null,
+  );
   const refresh = async () => {
     setError(undefined);
     try {
@@ -112,7 +122,9 @@ export function Providers({ children }: { children: ReactNode }) {
   }, [message]);
   return (
     <Session.Provider value={{ user, loading, error, refresh, notify }}>
-      <Ui.Provider value={{ notify, contact: (id, purpose) => setSupport({ id, purpose }) }}>
+      <Ui.Provider
+        value={{ notify, contact: (id, purpose, channel) => setSupport({ id, purpose, channel }) }}
+      >
         {children}
         {support && <ContactDialog {...support} notify={notify} onClose={() => setSupport(null)} />}
         <div className={`toast ${message ? 'visible' : ''}`} role="status">

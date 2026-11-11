@@ -11,13 +11,13 @@
   align-items: center;
   width: fit-content;
   margin-top: 0;
-  padding: 3px 8px;
-  border: 1px solid #d8c59230;
+  padding: 0;
+  border: 0;
   border-radius: 5px;
-  background: #d8c5920d;
-  color: #e4d3ac;
+  background: transparent;
+  color: var(--text);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 400;
   line-height: 1.4;
   letter-spacing: 0.02em;
   text-align: right;
@@ -26,7 +26,7 @@
 }
 
 .asset-card .asset-body .asset-id {
-  color: #aaa49a;
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -34,15 +34,16 @@
   flex-wrap: wrap;
   column-gap: 7px;
   row-gap: 4px;
-  color: #b3ada3;
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .asset-card .asset-body .pill-tags > span {
   max-width: 100%;
-  border-color: #ffffff17;
-  color: #bdb7ac;
+  border: 0;
+  background: var(--bg-subtle);
+  color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
   overflow-wrap: anywhere;

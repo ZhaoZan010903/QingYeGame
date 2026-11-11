@@ -66,6 +66,8 @@ export function useHomeEntranceMotion() {
         if (arrow.current) {
           arrow.current.style.opacity = String(clamp(1 - progress * 2));
           arrow.current.dataset.paused = String(progress >= 0.5);
+          arrow.current.style.pointerEvents = progress >= 0.5 ? 'none' : '';
+          arrow.current.tabIndex = progress >= 0.5 ? -1 : 0;
         }
         if (contentHero.current)
           contentHero.current.style.opacity = String(

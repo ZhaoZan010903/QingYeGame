@@ -1,7 +1,8 @@
 import React, { lazy, Suspense, type ReactNode, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
-  BrowserRouter,
+  createBrowserRouter,
+  RouterProvider,
   Routes,
   Route,
   Navigate,
@@ -12,6 +13,7 @@ import { Providers, useSession } from "./context";
 import { api } from "./lib/api";
 import { StateView } from "./components/shared";
 import { LoginPage } from "./pages/LoginPage";
+import { ChatProvider, ChatNavLink } from "./components/ChatNotifications";
 import "./style.css";
 const AdminPage = lazy(() =>
   import("./pages/AdminPage").then((module) => ({ default: module.AdminPage })),
@@ -34,6 +36,12 @@ function Shell() {
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   async function logout() {
+    if (
+      !window.dispatchEvent(
+        new Event("qingye-before-logout", { cancelable: true }),
+      )
+    )
+      return;
     setBusy(true);
     setError("");
     try {
@@ -55,10 +63,17 @@ function Shell() {
             <path d="m11 19 5-9 5 9h-10Zm7 3 5 5" />
           </svg>
           <strong>清叶</strong>
-          <span>管理台</span>
+          <span>管理后台</span>
         </Link>
         {user && (
           <div className="admin-session">
+            <ChatNavLink />
+            <span className="environment-badge">
+              {import.meta.env.VITE_ENVIRONMENT_LABEL || "管理环境"}
+            </span>
+            <Link className="topbar-help" to="/help">
+              操作指南
+            </Link>
             <span>{user.nickname}</span>
             <button
               className="button-outline"
@@ -70,11 +85,6 @@ function Shell() {
           </div>
         )}
       </header>
-      {import.meta.env.VITE_ENVIRONMENT_LABEL && (
-        <p className="admin-environment">
-          {import.meta.env.VITE_ENVIRONMENT_LABEL}
-        </p>
-      )}
       {error && (
         <p className="form-error" role="alert">
           {error}
@@ -119,14 +129,22 @@ class ErrorBoundary extends React.Component<
     );
   }
 }
+const router = createBrowserRouter([
+  {
+    path: "*",
+    element: (
+      <Providers>
+        <ChatProvider>
+          <Shell />
+        </ChatProvider>
+      </Providers>
+    ),
+  },
+]);
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <BrowserRouter>
-        <Providers>
-          <Shell />
-        </Providers>
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </ErrorBoundary>
   </React.StrictMode>,
 );

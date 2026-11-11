@@ -29,6 +29,8 @@ type Config struct {
 	AllowedOrigins                                                      []string
 	SecureCookies                                                       bool
 	MaxUploadBytes                                                      int64
+	ChatWTAddr, ChatWTURL, ChatWTCert, ChatWTKey                        string
+	ChatWTPinCertificate                                                bool
 }
 type App struct {
 	DB     *pgxpool.Pool
@@ -43,6 +45,9 @@ func EnvConfig() Config {
 		addr, origin = "127.0.0.1:5182", "http://127.0.0.1:5181"
 	}
 	c := Config{Surface: surface, Addr: env("QINGYE_ADDR", env("HTTP_ADDR", addr)), DatabaseURL: os.Getenv("DATABASE_URL"), RedisURL: env("REDIS_URL", "redis://127.0.0.1:6381/0"), MediaDir: env("MEDIA_DIR", "./data/media"), PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), SessionSecret: os.Getenv("SESSION_SECRET"), AllowedOrigins: strings.Split(env("ALLOWED_ORIGINS", origin), ","), SecureCookies: env("SECURE_COOKIES", os.Getenv("COOKIE_SECURE")) == "true", MaxUploadBytes: 10 << 20}
+	c.ChatWTAddr, c.ChatWTURL = os.Getenv("CHAT_WT_ADDR"), os.Getenv("CHAT_WT_URL")
+	c.ChatWTCert, c.ChatWTKey = os.Getenv("CHAT_WT_CERT"), os.Getenv("CHAT_WT_KEY")
+	c.ChatWTPinCertificate = os.Getenv("CHAT_WT_PIN_CERTIFICATE") == "true"
 	if n, e := strconv.ParseInt(env("MAX_UPLOAD_BYTES", os.Getenv("UPLOAD_MAX_BYTES")), 10, 64); e == nil && n > 0 {
 		c.MaxUploadBytes = n
 	}
@@ -128,6 +133,7 @@ func (a *App) Routes() http.Handler {
 		a.registerPublic(mux)
 	}
 	a.registerAuthMember(mux)
+	a.registerChat(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()

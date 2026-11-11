@@ -88,8 +88,19 @@ func run() error {
 	}
 }
 func serve(ctx context.Context, a *app.App) error {
+	if a.Config.Surface != "admin" {
+		go a.RunChatDispatch(ctx)
+	}
 	server := &http.Server{Addr: a.Config.Addr, Handler: a.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
-	errors := make(chan error, 1)
+	errors := make(chan error, 2)
+	if a.Config.ChatWTAddr != "" {
+		transport, err := a.NewChatTransport()
+		if err != nil {
+			return err
+		}
+		defer transport.Close()
+		go func() { errors <- transport.ListenAndServe() }()
+	}
 	go func() {
 		slog.Info("integration API listening", "address", a.Config.Addr)
 		errors <- server.ListenAndServe()

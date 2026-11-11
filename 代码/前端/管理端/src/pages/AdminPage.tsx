@@ -1,5 +1,26 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, NavLink, useParams } from "react-router-dom";
+import {
+  Link,
+  NavLink,
+  useParams,
+  useSearchParams,
+  useLocation,
+} from "react-router-dom";
+import {
+  LayoutDashboard,
+  MessageSquare,
+  Package,
+  ClipboardCheck,
+  PanelsTopLeft,
+  TrendingUp,
+  Headphones,
+  ListFilter,
+  Users,
+  FileText,
+  CircleHelp,
+  ArrowUpRight,
+  Plus,
+} from "lucide-react";
 import { useSession } from "../context";
 import { adminApi, canManage } from "../lib/admin-api";
 import { Price, StateView } from "../components/shared";
@@ -13,6 +34,10 @@ import {
   AdminUsers,
 } from "../components/AdminOperations";
 import type { ProductPage } from "../types";
+import { AdminDashboard } from "../components/AdminDashboard";
+import { ChatPage } from "../components/ChatPage";
+import { useChat } from "../components/ChatNotifications";
+import { AdminHelp, GuideButton } from "../components/AdminGuide";
 import "../admin.css";
 const publicSite = String(import.meta.env.VITE_PUBLIC_SITE_URL ?? "").replace(
   /\/$/,
@@ -33,20 +58,36 @@ export function AdminGate({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-function Products() {
+function Products({ review = false }: { review?: boolean }) {
+  const [params, setParams] = useSearchParams();
   const requestSequence = useRef(0);
   const [page, setPage] = useState<ProductPage>({
     items: [],
     total: 0,
     nextCursor: null,
   });
-  const [status, setStatus] = useState("");
+  const status = review ? "pending" : (params.get("status") ?? "");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [version, setVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>();
-  const [selected, setSelected] = useState<string | null>(null);
+  const selected =
+    params.get("edit") || (params.get("new") === "1" ? "new" : null);
+  function setSelected(id: string | null) {
+    const next = new URLSearchParams(params);
+    next.delete("new");
+    next.delete("edit");
+    if (id === "new") next.set("new", "1");
+    else if (id) next.set("edit", id);
+    setParams(next);
+  }
+  function setStatus(value: string) {
+    const next = new URLSearchParams(params);
+    if (value) next.set("status", value);
+    else next.delete("status");
+    setParams(next);
+  }
   async function load(more = false) {
     const sequence = ++requestSequence.current;
     setLoading(true);
@@ -87,186 +128,260 @@ function Products() {
   }
   return (
     <>
-      <div className="admin-heading">
-        <div>
-          <h2>商品管理</h2>
-          <p>共 {page.total} 个商品 · 编辑展示中的商品会转为草稿</p>
-        </div>
-        <button
-          className="button-white"
-          disabled={selected !== null}
-          onClick={() => setSelected("new")}
-        >
-          新建平台商品
-        </button>
-      </div>
-      <div className="admin-toolbar">
-        <form onSubmit={search}>
-          <input
-            aria-label="搜索管理商品"
-            placeholder="商品编号或标题"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <button type="submit" className="button-outline">
-            搜索
-          </button>
-        </form>
-        <label>
-          状态
-          <select
-            aria-label="商品状态"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
-            <option value="">全部状态</option>
-            {Object.entries(statusNames).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {selected !== null && (
+      {selected !== null ? (
         <AdminProductEditor
           key={selected}
           id={selected === "new" ? undefined : selected}
           onClose={() => setSelected(null)}
           onSaved={() => setVersion((v) => v + 1)}
         />
-      )}
-      {error ? (
-        <StateView error={error} onRetry={() => void load()} />
       ) : (
         <>
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>商品</th>
-                  <th>报价</th>
-                  <th>来源 / 状态</th>
-                  <th>管理</th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.items.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <strong>{p.title}</strong>
-                      <span>{p.code ?? p.id}</span>
-                    </td>
-                    <td>
-                      <Price product={p} />
-                    </td>
-                    <td>
-                      <span>
-                        {p.source === "member"
-                          ? "会员投稿"
-                          : p.source === "legacy"
-                            ? "旧站迁移"
-                            : "平台录入"}
-                      </span>
-                      <strong>{statusNames[p.status]}</strong>
-                    </td>
-                    <td>
-                      <button
-                        className="button-outline"
-                        disabled={selected !== null || loading}
-                        onClick={() => setSelected(p.id)}
-                      >
-                        查看 / 编辑
-                      </button>
-                      {p.status === "published" && publicSite && (
-                        <a
-                          target="_blank"
-                          rel="noreferrer"
-                          href={`${publicSite}/accounts/${p.id}`}
-                        >
-                          查看公开页 ↗
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="admin-heading">
+            <div>
+              <span className="eyebrow">
+                {review ? "会员投稿" : "商品维护"}
+              </span>
+              <h1>{review ? "待审核商品" : "商品管理"}</h1>
+              <p>
+                {review
+                  ? "检查资料和图片，再决定通过上架或退回修改。"
+                  : "查找商品，修改资料、管理图片或调整展示状态。"}
+              </p>
+            </div>
+            <div className="heading-actions">
+              <GuideButton kind={review ? "review" : "product"} />
+              {!review && (
+                <button
+                  className="button-white"
+                  disabled={selected !== null}
+                  onClick={() => setSelected("new")}
+                >
+                  <Plus size={17} />
+                  上架新商品
+                </button>
+              )}
+            </div>
           </div>
-          {loading && (
-            <p role="status" className="muted">
-              正在读取商品…
-            </p>
+          {!review && (
+            <div className="status-tabs" aria-label="按状态筛选">
+              <button
+                className={!status ? "active" : ""}
+                onClick={() => setStatus("")}
+              >
+                全部商品
+              </button>
+              {Object.entries(statusNames).map(([key, label]) => (
+                <button
+                  className={key === status ? "active" : ""}
+                  key={key}
+                  onClick={() => setStatus(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           )}
-          {!loading && !page.items.length && (
-            <p className="admin-empty">没有符合条件的商品。</p>
-          )}
-          {page.nextCursor && (
-            <button
-              className="button-outline"
-              disabled={loading}
-              onClick={() => void load(true)}
-            >
-              加载更多
-            </button>
-          )}
+          <section className="panel products-panel">
+            <div className="admin-toolbar">
+              <form onSubmit={search}>
+                <input
+                  aria-label="搜索管理商品"
+                  placeholder="商品编号或标题"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                />
+                <button type="submit" className="button-outline">
+                  搜索
+                </button>
+              </form>
+              <span className="muted">
+                {loading ? "正在读取…" : `共 ${page.total} 个商品`}
+              </span>
+            </div>
+            {error ? (
+              <StateView error={error} onRetry={() => void load()} />
+            ) : (
+              <>
+                <div className="admin-table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>商品</th>
+                        <th>报价</th>
+                        <th>来源 / 状态</th>
+                        <th>管理</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {page.items.map((p) => (
+                        <tr key={p.id}>
+                          <td>
+                            <strong>{p.title}</strong>
+                            <span>{p.code ?? p.id}</span>
+                          </td>
+                          <td>
+                            <Price product={p} />
+                          </td>
+                          <td>
+                            <span>
+                              {p.source === "member"
+                                ? "会员投稿"
+                                : p.source === "legacy"
+                                  ? "旧站迁移"
+                                  : "平台录入"}
+                            </span>
+                            <strong
+                              className={`status-pill status-${p.status}`}
+                            >
+                              {statusNames[p.status]}
+                            </strong>
+                          </td>
+                          <td>
+                            <button
+                              className="button-outline"
+                              disabled={selected !== null || loading}
+                              onClick={() => setSelected(p.id)}
+                            >
+                              {review ? "查看并审核" : "编辑商品"}
+                            </button>
+                            {p.status === "published" && publicSite && (
+                              <a
+                                target="_blank"
+                                rel="noreferrer"
+                                href={`${publicSite}/accounts/${p.id}`}
+                              >
+                                查看公开页 ↗
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {loading && (
+                  <p role="status" className="muted">
+                    正在读取商品…
+                  </p>
+                )}
+                {!loading && !page.items.length && (
+                  <p className="admin-empty">
+                    {review
+                      ? "待审核商品已处理完毕。新投稿会出现在这里。"
+                      : "没有符合条件的商品，试试其他关键词或状态。"}
+                  </p>
+                )}
+                {page.nextCursor && (
+                  <button
+                    className="button-outline"
+                    disabled={loading}
+                    onClick={() => void load(true)}
+                  >
+                    加载更多
+                  </button>
+                )}
+              </>
+            )}
+          </section>
         </>
       )}
     </>
   );
 }
 export function AdminPage() {
+  const { list: chats } = useChat();
+  const location = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [location.pathname, location.search]);
   const { "*": path = "" } = useParams();
   const resources: Resource[] = ["contacts", "pages", "categories", "settings"];
-  const tab = resources.includes(path as Resource)
-    ? (path as Resource)
-    : path === "users" || path === "recommendations"
-      ? path
-      : "products";
+  const tab = path.replace(/\/$/, "");
+  const groups = [
+    {
+      label: "日常工作",
+      items: [
+        ["", "工作台", LayoutDashboard],
+        ["products", "商品管理", Package],
+        ["reviews", "待审核", ClipboardCheck],
+        ["chat", "在线咨询", MessageSquare],
+      ],
+    },
+    {
+      label: "网站运营",
+      items: [
+        ["settings", "首页装修", PanelsTopLeft],
+        ["recommendations", "热门推荐", TrendingUp],
+        ["contacts", "客服与二维码", Headphones],
+        ["categories", "分类与筛选", ListFilter],
+        ["pages", "说明与协议", FileText],
+        ["users", "会员管理", Users],
+      ],
+    },
+    { label: "使用帮助", items: [["help", "操作演示", CircleHelp]] },
+  ] as const;
   return (
     <AdminGate>
-      <section className="admin-shell page-width mx-auto">
-        <header className="admin-heading">
-          <div>
-            <h1>清叶管理台</h1>
-            <p>商品审核、内容维护与展示配置</p>
-          </div>
+      <div className="admin-layout">
+        <aside className="admin-sidebar">
+          <nav aria-label="管理导航">
+            {groups.map((group) => (
+              <div className="nav-group" key={group.label}>
+                <p>{group.label}</p>
+                {group.items.map(([href, name, Icon]) => (
+                  <NavLink key={href} end to={`/${href}`}>
+                    <Icon size={18} />
+                    <span>{name}</span>
+                    {href === "chat" && chats.unread > 0 && (
+                      <b className="chat-unread-nav">
+                        {chats.unread > 99 ? "99+" : chats.unread}
+                      </b>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+          </nav>
           {publicSite && (
             <a
-              className="button-outline"
+              className="sidebar-site"
+              href={publicSite}
               target="_blank"
               rel="noreferrer"
-              href={publicSite}
             >
-              查看用户站 ↗
+              <span>
+                查看用户网站<small>保存后，到前台检查效果</small>
+              </span>
+              <ArrowUpRight size={18} />
             </a>
           )}
-        </header>
-        <nav className="admin-nav" aria-label="管理导航">
-          {[
-            ["", "商品管理"],
-            ["contacts", "客服配置"],
-            ["pages", "说明页面"],
-            ["categories", "分类筛选"],
-            ["settings", "首页配置"],
-            ["users", "会员管理"],
-            ["recommendations", "推荐规则"],
-          ].map(([href, name]) => (
-            <NavLink key={href} end to={`/${href}`}>
-              {name}
-            </NavLink>
-          ))}
-        </nav>
-        {tab === "products" ? (
-          <Products />
-        ) : tab === "users" ? (
-          <AdminUsers />
-        ) : tab === "recommendations" ? (
-          <AdminRecommendations />
-        ) : (
-          <AdminResources key={tab} resource={tab} />
-        )}
-      </section>
+        </aside>
+        <section className="admin-shell">
+          {tab === "" ? (
+            <AdminDashboard />
+          ) : tab === "chat" ? (
+            <ChatPage />
+          ) : tab === "help" ? (
+            <AdminHelp />
+          ) : tab === "products" || tab === "reviews" ? (
+            <Products key={tab} review={tab === "reviews"} />
+          ) : tab === "users" ? (
+            <AdminUsers />
+          ) : tab === "recommendations" ? (
+            <AdminRecommendations />
+          ) : resources.includes(tab as Resource) ? (
+            <AdminResources key={tab} resource={tab as Resource} />
+          ) : (
+            <div className="state-view">
+              <h1>没有找到这个管理页面</h1>
+              <Link className="button-white" to="/">
+                返回工作台
+              </Link>
+            </div>
+          )}
+        </section>
+      </div>
     </AdminGate>
   );
 }

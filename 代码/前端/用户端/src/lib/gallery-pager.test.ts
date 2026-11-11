@@ -10,39 +10,36 @@ const makeImages = (start: number, count: number, prefix = '') =>
   }));
 const seed = { items: [], total: 202, version: 1 };
 describe('详情全图串行分页', () => {
-  it.each([202, 567, 1001])(
-    '持续触发近底加载可按顺序到达全部 %i 张，没有总量截断',
-    async (total) => {
-      let active = 0,
-        peak = 0;
-      const fetch = vi.fn(async (cursor?: string | null) => {
-        active++;
-        peak = Math.max(active, peak);
-        await Promise.resolve();
-        const start = Number(cursor) || 0,
-          count = Math.min(20, total - start);
-        active--;
-        return {
-          items: makeImages(start, count),
-          total,
-          version: 1,
-          nextCursor: start + count < total ? String(start + count) : null,
-        };
-      });
-      const pager = new GalleryPager(fetch, { ...seed, total });
-      // IntersectionObserver may signal repeatedly in the same frame. These calls must coalesce.
-      do {
-        await Promise.all([pager.load(), pager.load(), pager.load()]);
-      } while (pager.getSnapshot().nextCursor);
-      expect(pager.getSnapshot().items.map((image) => image.id)).toEqual(
-        Array.from({ length: total }, (_, i) => String(i)),
-      );
-      expect(fetch).toHaveBeenCalledTimes(Math.ceil(total / 20));
-      expect(peak).toBe(1);
-      await pager.load();
-      expect(fetch).toHaveBeenCalledTimes(Math.ceil(total / 20));
-    },
-  );
+  it.each([202, 567, 1001])('继续加载图集可按顺序到达全部 %i 张，没有总量截断', async (total) => {
+    let active = 0,
+      peak = 0;
+    const fetch = vi.fn(async (cursor?: string | null) => {
+      active++;
+      peak = Math.max(active, peak);
+      await Promise.resolve();
+      const start = Number(cursor) || 0,
+        count = Math.min(20, total - start);
+      active--;
+      return {
+        items: makeImages(start, count),
+        total,
+        version: 1,
+        nextCursor: start + count < total ? String(start + count) : null,
+      };
+    });
+    const pager = new GalleryPager(fetch, { ...seed, total });
+    // Lightbox controls may request a page together; these calls must coalesce.
+    do {
+      await Promise.all([pager.load(), pager.load(), pager.load()]);
+    } while (pager.getSnapshot().nextCursor);
+    expect(pager.getSnapshot().items.map((image) => image.id)).toEqual(
+      Array.from({ length: total }, (_, i) => String(i)),
+    );
+    expect(fetch).toHaveBeenCalledTimes(Math.ceil(total / 20));
+    expect(peak).toBe(1);
+    await pager.load();
+    expect(fetch).toHaveBeenCalledTimes(Math.ceil(total / 20));
+  });
   it('网络失败保留已加载页和游标，重试当前页后继续完成', async () => {
     const fetch = vi
       .fn()

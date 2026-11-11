@@ -5,12 +5,17 @@ import { Providers, useSession } from './context';
 import { Layout } from './components/Layout';
 import { StateView } from './components/shared';
 import { HomePage } from './pages/HomePage';
+import { ChatProvider } from './components/ChatNotifications';
+const ChatPage = lazy(() => import('./components/ChatPage').then((m) => ({ default: m.ChatPage })));
 import './style.css';
 import './refinements.css';
 import './enhancements.css';
 import './app.css';
 import './redesign.css';
 import './home-entrance.css';
+import './theme.css';
+import './design-system.css';
+import './hero-atmosphere.css';
 // Keep the homepage available immediately; fetch other screens when their route is visited.
 const CatalogPage = lazy(() =>
   import('./pages/CatalogPage').then((m) => ({ default: m.CatalogPage })),
@@ -66,53 +71,63 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <ErrorBoundary>
       <BrowserRouter>
         <Providers>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route index element={<HomePage />} />
-              <Route path="accounts" element={<CatalogPage />} />
-              <Route path="accounts/:id" element={<DetailPage />} />
-              {['login', 'register', 'forgot-password'].map((path) => (
-                <Route key={path} path={path} element={<AuthPage />} />
-              ))}
-              <Route
-                path="publish"
-                element={
-                  <Protected>
-                    <PublishPage />
-                  </Protected>
-                }
-              />
-              <Route
-                path="me/listings/:id/edit"
-                element={
-                  <Protected>
-                    <PublishPage />
-                  </Protected>
-                }
-              />
-              <Route
-                path="me/*"
-                element={
-                  <Protected>
-                    <MemberPage />
-                  </Protected>
-                }
-              />
-              <Route path="help/:slug" element={<HelpPage />} />
-              <Route
-                path="*"
-                element={
-                  <div className="state-view">
-                    <h1>没有找到这个页面</h1>
-                    <p>链接可能已经变更。</p>
-                    <Link className="button-white" to="/">
-                      返回首页
-                    </Link>
-                  </div>
-                }
-              />
-            </Route>
-          </Routes>
+          <ChatProvider>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route index element={<HomePage />} />
+                <Route path="accounts" element={<CatalogPage />} />
+                <Route path="accounts/:id" element={<DetailPage />} />
+                <Route
+                  path="messages"
+                  element={
+                    <Protected>
+                      <ChatPage />
+                    </Protected>
+                  }
+                />
+                {['login', 'register', 'forgot-password'].map((path) => (
+                  <Route key={path} path={path} element={<AuthPage />} />
+                ))}
+                <Route
+                  path="publish"
+                  element={
+                    <Protected>
+                      <PublishPage />
+                    </Protected>
+                  }
+                />
+                <Route
+                  path="me/listings/:id/edit"
+                  element={
+                    <Protected>
+                      <PublishPage />
+                    </Protected>
+                  }
+                />
+                <Route
+                  path="me/*"
+                  element={
+                    <Protected>
+                      <MemberPage />
+                    </Protected>
+                  }
+                />
+                <Route path="help/:slug" element={<HelpPage />} />
+                <Route
+                  path="*"
+                  element={
+                    <div className="state-view">
+                      <h1>没有找到这个页面</h1>
+                      <p>链接可能已经变更。</p>
+                      <Link className="button-white" to="/">
+                        返回首页
+                      </Link>
+                    </div>
+                  }
+                />
+              </Route>
+            </Routes>
+          </ChatProvider>
         </Providers>
       </BrowserRouter>
     </ErrorBoundary>

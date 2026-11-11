@@ -1,0 +1,229 @@
+.app-dialog.consultation-dialog,
+.app-dialog.contact-dialog {
+  width: min(520px, calc(100% - 32px));
+  padding: 28px;
+}
+.app-dialog.consultation-dialog .dialog-header h2,
+.app-dialog.contact-dialog .dialog-header h2 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+.consultation-context {
+  padding: 0 0 24px;
+}
+.consultation-context > span {
+  color: var(--gold-pale);
+  font-size: 12px;
+}
+.app-dialog .consultation-context p {
+  font-size: 15px;
+  color: var(--text);
+  margin-top: 8px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.consultation-options {
+  display: grid;
+  gap: 12px;
+}
+.consultation-option {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 20px 18px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 14px;
+  text-align: left;
+  transition:
+    background-color 0.3s,
+    border-color 0.3s,
+    transform 0.25s;
+}
+.consultation-option:hover {
+  background: var(--hover);
+  border-color: var(--gold-line);
+  transform: translateY(-2px);
+}
+.consultation-option > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.consultation-option strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+}
+.consultation-option small {
+  display: block;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+  margin-top: 7px;
+}
+.consultation-option > svg {
+  width: 18px;
+  color: var(--muted);
+}
+.consultation-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--gold-soft);
+  color: var(--gold);
+  flex-shrink: 0;
+}
+.consultation-icon svg {
+  width: 22px;
+  height: 22px;
+}
+.app-dialog .consultation-footnote {
+  font-size: 12px;
+  margin: 20px 0 0;
+}
+.contact-dialog .contact-product {
+  background: var(--hover);
+  padding: 12px 14px;
+  margin: 16px 0;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.contact-product b {
+  overflow-wrap: anywhere;
+}
+.contact-dialog .contact-product button {
+  min-height: 34px;
+  padding: 7px 11px;
+  font-size: 12px;
+}
+.contact-selectors {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 2px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.contact-selectors button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 38px;
+}
+.contact-selectors button[aria-pressed='true'] {
+  color: var(--gold);
+  border-color: var(--gold-line);
+  background: var(--gold-soft);
+}
+.contact-details {
+  text-align: center;
+  padding-top: 22px;
+}
+.contact-details h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+.app-dialog .contact-details header p {
+  font-size: 13px;
+  line-height: 1.65;
+  margin-top: 8px;
+}
+.contact-qr-frame {
+  width: min(100%, 276px);
+  margin: 22px auto 14px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid rgba(24, 24, 27, 0.08);
+  border-radius: 14px;
+}
+.contact-qr-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+}
+.contact-qr-empty {
+  min-height: 210px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #52525b;
+  font-size: 14px;
+}
+.contact-qr-empty > svg {
+  width: 40px;
+  height: 40px;
+}
+.app-dialog .contact-scan-hint {
+  font-size: 13px;
+  line-height: 1.75;
+  max-width: 310px;
+  margin: 0 auto 20px;
+}
+.contact-account {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0 18px;
+}
+.contact-account > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.contact-account strong {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--text);
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+.contact-copy {
+  width: 100%;
+  min-height: 44px;
+  font-size: 14px;
+}
+@media (max-width: 480px) {
+  .app-dialog.consultation-dialog,
+  .app-dialog.contact-dialog {
+    padding: 22px 18px;
+    max-height: calc(100dvh - 32px);
+  }
+  .consultation-option {
+    padding: 18px 14px;
+    gap: 12px;
+  }
+  .consultation-option strong {
+    font-size: 16px;
+  }
+  .consultation-icon {
+    width: 36px;
+    height: 36px;
+  }
+  .contact-qr-frame {
+    width: min(100%, 260px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .consultation-option {
+    transition: none;
+  }
+  .consultation-option:hover {
+    transform: none;
+  }
+}

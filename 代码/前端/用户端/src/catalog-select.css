@@ -16,10 +16,10 @@
   width: 100%;
   min-height: 42px;
   padding: 10px 12px;
-  border: 1px solid #d9c59424;
+  border: 1px solid var(--gold-line);
   border-radius: 8px;
-  background: #19191c;
-  color: #d6d0c5;
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
   font-size: 13px;
   line-height: 1.5;
@@ -31,25 +31,25 @@
 }
 
 .catalog-select .catalog-select-trigger:hover {
-  border-color: #d9c59455;
-  background: #20201f;
+  border-color: var(--gold-line);
+  background: var(--hover);
 }
 
 .catalog-select .catalog-select-trigger:focus-visible {
-  outline: 2px solid #cdb885;
+  outline: 2px solid var(--gold-line);
   outline-offset: 3px;
 }
 
 .catalog-select .catalog-select-trigger[aria-expanded='true'] {
-  border-color: #cdb88588;
-  background: #20201f;
+  border-color: var(--gold-line);
+  background: var(--hover);
 }
 
 .catalog-select .catalog-select-trigger > svg {
   flex-shrink: 0;
   width: 15px;
   height: 15px;
-  color: #b8ab8e;
+  color: var(--gold-pale);
   transition: transform 160ms ease;
 }
 
@@ -63,7 +63,7 @@
 }
 
 .catalog-select .catalog-select-prefix {
-  color: #a39c90;
+  color: var(--muted);
 }
 
 .catalog-select .catalog-select-menu {
@@ -78,10 +78,10 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: #74664e #18181a;
-  border: 1px solid #dac99f42;
+  scrollbar-color: var(--gold) var(--surface);
+  border: 1px solid var(--gold-line);
   border-radius: 10px;
-  background: #18181b;
+  background: var(--surface);
   box-shadow:
     0 14px 36px #0009,
     0 2px 8px #0005;
@@ -103,7 +103,7 @@
   padding: 10px 11px;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: #ccc6bb;
+  color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
   cursor: pointer;
@@ -114,21 +114,21 @@
 }
 
 .catalog-select .catalog-select-option.is-active {
-  border-color: #d6bf8b27;
-  background: #d6bf8b0e;
-  color: #f0e4c8;
+  border-color: var(--gold-line);
+  background: var(--gold-soft);
+  color: var(--text);
 }
 
 .catalog-select .catalog-select-option[aria-selected='true'] {
-  color: #ead4a1;
-  background: #d6bf8b18;
+  color: var(--text);
+  background: var(--gold-soft);
 }
 
 .catalog-select .catalog-select-option > svg {
   flex-shrink: 0;
   width: 15px;
   height: 15px;
-  color: #d7bd81;
+  color: var(--text);
 }
 
 .catalog-select .catalog-select-option-copy {
@@ -139,19 +139,19 @@
 }
 
 .catalog-select .catalog-select-option-copy small {
-  color: #a29a8b;
+  color: var(--gold-pale);
   font-size: 11px;
   line-height: 1.5;
 }
 
 .catalog-select .catalog-select-option[aria-disabled='true'] {
-  color: #8b877f;
+  color: var(--muted);
   background: transparent;
   cursor: not-allowed;
 }
 
 .catalog-select .catalog-select-option[aria-disabled='true'] small {
-  color: #a19a8c;
+  color: var(--gold-pale);
 }
 
 .catalog-select.catalog-sort {

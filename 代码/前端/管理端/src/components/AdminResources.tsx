@@ -1,12 +1,21 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adminApi, type AdminRecord } from "../lib/admin-api";
 import { api, uploadConfig } from "../lib/api";
 import {
   resolveHomePresentation,
   readHomePresentation,
-  type HomePresentation,
 } from "../lib/home-content";
 import { StateView } from "./shared";
+import { HomeDesigner } from "./HomeDesigner";
+import { CategoryFields } from "./CategoryFields";
+import { GuideButton } from "./AdminGuide";
+import {
+  locations,
+  makeCode,
+  publicSite,
+  unitLabels,
+  useUnsavedChanges,
+} from "../lib/admin-ux";
 
 export type Resource = "contacts" | "pages" | "categories" | "settings";
 const names = {
@@ -50,172 +59,6 @@ function Field({
     </label>
   );
 }
-function HomeFields({
-  value,
-  onChange,
-}: {
-  value: HomePresentation;
-  onChange: (next: HomePresentation) => void;
-}) {
-  return (
-    <>
-      <h3>首页甄选</h3>
-      <div className="admin-grid">
-        <Field
-          label="甄选标题"
-          value={value.editorial.title}
-          onChange={(title) =>
-            onChange({ ...value, editorial: { ...value.editorial, title } })
-          }
-        />
-        <Field
-          label="甄选说明"
-          value={value.editorial.description}
-          onChange={(description) =>
-            onChange({
-              ...value,
-              editorial: { ...value.editorial, description },
-            })
-          }
-        />
-        <label className="form-field">
-          轮播间隔（秒）
-          <input
-            type="number"
-            min="4"
-            max="30"
-            step="0.5"
-            value={value.editorial.intervalMs / 1000}
-            onChange={(e) =>
-              onChange({
-                ...value,
-                editorial: {
-                  ...value.editorial,
-                  intervalMs: Number(e.target.value) * 1000,
-                },
-              })
-            }
-          />
-        </label>
-      </div>
-      <h3>商品分区</h3>
-      {value.sections.map((section, index) => (
-        <div className="admin-grid admin-subsection" key={section.source}>
-          <Field
-            label={section.source === "hot" ? "热门分区标题" : "最新分区标题"}
-            value={section.title}
-            onChange={(title) =>
-              onChange({
-                ...value,
-                sections: value.sections.map((item, i) =>
-                  i === index ? { ...item, title } : item,
-                ),
-              })
-            }
-          />
-          <Field
-            label="分区说明"
-            value={section.description}
-            onChange={(description) =>
-              onChange({
-                ...value,
-                sections: value.sections.map((item, i) =>
-                  i === index ? { ...item, description } : item,
-                ),
-              })
-            }
-          />
-          <label className="form-field">
-            展示数量
-            <input
-              type="number"
-              min="1"
-              max="24"
-              value={section.limit}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  sections: value.sections.map((item, i) =>
-                    i === index
-                      ? { ...item, limit: Number(e.target.value) }
-                      : item,
-                  ),
-                })
-              }
-            />
-          </label>
-        </div>
-      ))}
-      <h3>快捷入口</h3>
-      {value.shortcuts.map((shortcut, index) => (
-        <div className="admin-grid admin-subsection" key={index}>
-          <Field
-            label="入口标题"
-            value={shortcut.title}
-            onChange={(title) =>
-              onChange({
-                ...value,
-                shortcuts: value.shortcuts.map((item, i) =>
-                  i === index ? { ...item, title } : item,
-                ),
-              })
-            }
-          />
-          <Field
-            label="入口说明"
-            value={shortcut.description}
-            onChange={(description) =>
-              onChange({
-                ...value,
-                shortcuts: value.shortcuts.map((item, i) =>
-                  i === index ? { ...item, description } : item,
-                ),
-              })
-            }
-          />
-          <Field
-            label="站内地址（账号集市或发布页）"
-            value={shortcut.href}
-            onChange={(href) =>
-              onChange({
-                ...value,
-                shortcuts: value.shortcuts.map((item, i) =>
-                  i === index ? { ...item, href } : item,
-                ),
-              })
-            }
-          />
-        </div>
-      ))}
-      <h3>发布邀请</h3>
-      <Field
-        label="标题"
-        value={value.publishing.title}
-        onChange={(title) =>
-          onChange({ ...value, publishing: { ...value.publishing, title } })
-        }
-      />
-      <Field
-        label="说明"
-        value={value.publishing.description}
-        onChange={(description) =>
-          onChange({
-            ...value,
-            publishing: { ...value.publishing, description },
-          })
-        }
-      />
-      <Field
-        label="按钮文字"
-        value={value.publishing.action}
-        onChange={(action) =>
-          onChange({ ...value, publishing: { ...value.publishing, action } })
-        }
-      />
-    </>
-  );
-}
-
 export function AdminResources({ resource }: { resource: Resource }) {
   const [items, setItems] = useState<AdminRecord[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -229,6 +72,8 @@ export function AdminResources({ resource }: { resource: Resource }) {
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const sequence = useRef(0);
+  useUnsavedChanges(dirty, busy);
   const idOf = (item: AdminRecord) =>
     String(
       resource === "pages"
@@ -238,19 +83,23 @@ export function AdminResources({ resource }: { resource: Resource }) {
           : item.id,
     );
   async function load() {
+    const current = ++sequence.current;
     setLoading(true);
     setError("");
     try {
       const rows = await adminApi.list(resource);
+      if (current !== sequence.current) return;
       setItems(
         resource === "settings"
           ? rows.filter((row) => row.key === "home_presentation")
           : rows,
       );
+      if (resource === "settings")
+        edit(rows.find((row) => row.key === "home_presentation"));
     } catch (e) {
-      setError(text(e));
+      if (current === sequence.current) setError(text(e));
     } finally {
-      setLoading(false);
+      if (current === sequence.current) setLoading(false);
     }
   }
   useEffect(() => {
@@ -258,8 +107,12 @@ export function AdminResources({ resource }: { resource: Resource }) {
     setNotice("");
     setDirty(false);
     void load();
+    return () => {
+      sequence.current++;
+    };
   }, [resource]);
   function edit(item?: AdminRecord) {
+    if (busy) return;
     if (dirty && !window.confirm("还有未保存的修改，确认切换？")) return;
     setSelected(item ? idOf(item) : null);
     setError("");
@@ -278,6 +131,7 @@ export function AdminResources({ resource }: { resource: Resource }) {
           purpose: ["general", "sale", "rent", "listing", "support"],
           channel: "wechat",
           key: "home_presentation",
+          code: makeCode("category"),
         };
     setForm(next);
     setJson(
@@ -305,6 +159,16 @@ export function AdminResources({ resource }: { resource: Resource }) {
   }
   async function save(event: FormEvent) {
     event.preventDefault();
+    if (
+      resource === "categories" &&
+      selected &&
+      form.enabled === false &&
+      items.find((item) => idOf(item) === selected)?.enabled !== false &&
+      !window.confirm(
+        "停用这个分类后，其中的公开商品也会隐藏。确认停用并保存？",
+      )
+    )
+      return;
     setError("");
     setNotice("");
     setBusy(true);
@@ -363,13 +227,27 @@ export function AdminResources({ resource }: { resource: Resource }) {
       const result = await adminApi.save(resource, key, input);
       setSelected(key ?? String(result.id));
       setDirty(false);
-      setNotice("已保存。公开页面刷新后读取最新内容。");
-      const rows = await adminApi.list(resource);
-      setItems(
+      setNotice(
         resource === "settings"
-          ? rows.filter((row) => row.key === "home_presentation")
-          : rows,
+          ? "首页已保存，刷新用户首页即可查看。"
+          : resource === "pages"
+            ? form.published
+              ? "已保存并公开，用户可以访问此页面。"
+              : "已保存为未公开页面，用户暂时看不到。"
+            : form.enabled
+              ? "已保存并启用，用户页面刷新后生效。"
+              : "已保存为停用状态，用户页面不再展示。",
       );
+      try {
+        const rows = await adminApi.list(resource);
+        setItems(
+          resource === "settings"
+            ? rows.filter((row) => row.key === "home_presentation")
+            : rows,
+        );
+      } catch {
+        setNotice("内容已保存，但列表刷新失败。重新进入此页面可读取最新结果。");
+      }
     } catch (e) {
       setError(
         e instanceof SyntaxError
@@ -401,45 +279,66 @@ export function AdminResources({ resource }: { resource: Resource }) {
     <section className="admin-resource">
       <div className="admin-heading">
         <div>
-          <h2>{names[resource]}</h2>
-          <p>修改后由服务端保存，公开页面统一读取。</p>
+          <span className="eyebrow">网站运营</span>
+          <h1>{locations[resource].title}</h1>
+          <p>{locations[resource].hint}</p>
         </div>
-        <button className="button-white" onClick={() => edit()}>
-          {resource === "settings" ? "配置首页" : `新增${names[resource]}`}
-        </button>
+        <div className="heading-actions">
+          {(resource === "settings" || resource === "contacts") && (
+            <GuideButton kind={resource === "settings" ? "home" : "contact"} />
+          )}
+          {resource !== "settings" && (
+            <button
+              className="button-white"
+              disabled={busy || loading}
+              onClick={() => edit()}
+            >
+              新增{names[resource]}
+            </button>
+          )}
+        </div>
       </div>
       {loading ? (
         <StateView loading />
       ) : (
-        <div className="admin-resource-layout">
-          <div
-            className="admin-resource-list"
-            aria-label={`${names[resource]}列表`}
-          >
-            {items.map((item) => (
-              <button
-                key={idOf(item)}
-                className={selected === idOf(item) ? "active" : ""}
-                onClick={() => edit(item)}
-              >
-                <strong>{item.name ?? item.title ?? item.key}</strong>
-                <span>
-                  {resource === "settings"
-                    ? "配置项"
-                    : item.enabled === false || item.published === false
+        <div
+          className={`admin-resource-layout ${resource === "settings" ? "full-width-resource" : ""}`}
+        >
+          {resource !== "settings" && (
+            <div
+              className="admin-resource-list"
+              aria-label={`${names[resource]}列表`}
+            >
+              {items.map((item) => (
+                <button
+                  key={idOf(item)}
+                  className={selected === idOf(item) ? "active" : ""}
+                  disabled={busy}
+                  onClick={() => edit(item)}
+                >
+                  <strong>{item.name ?? item.title ?? item.key}</strong>
+                  <span>
+                    {item.enabled === false || item.published === false
                       ? "未启用"
                       : "已启用"}
-                </span>
-              </button>
-            ))}
-            {!items.length && <p className="muted">暂未配置。</p>}
-          </div>
+                  </span>
+                </button>
+              ))}
+              {!items.length && <p className="muted">暂未配置。</p>}
+            </div>
+          )}
           {editing ? (
             <form
               className="panel member-form admin-resource-form"
               onSubmit={save}
             >
               <fieldset disabled={busy}>
+                {resource !== "settings" && (
+                  <div className="location-note">
+                    <strong>修改位置</strong>
+                    <span>{locations[resource].where}</span>
+                  </div>
+                )}
                 {resource === "contacts" && (
                   <>
                     <Field
@@ -536,12 +435,41 @@ export function AdminResources({ resource }: { resource: Resource }) {
                 )}
                 {resource === "pages" && (
                   <>
-                    <Field
-                      label="页面标识（例如 terms、privacy、about）"
-                      value={selected ?? form.slug ?? ""}
-                      onChange={(v) => change("slug", v)}
-                      required
-                    />
+                    {!selected ? (
+                      <label className="form-field">
+                        选择页面用途
+                        <select
+                          required
+                          value={form.slug ?? ""}
+                          onChange={(e) => change("slug", e.target.value)}
+                        >
+                          <option value="">请选择</option>
+                          {[
+                            ["about", "关于清叶"],
+                            ["process", "咨询流程"],
+                            ["publish", "上架说明"],
+                            ["terms", "服务协议"],
+                            ["privacy", "隐私政策"],
+                            ["verification", "资料核验说明"],
+                            ["recommendation", "推荐规则说明"],
+                            ["listing", "发布须知"],
+                          ].map(([key, label]) => (
+                            <option
+                              key={key}
+                              value={key}
+                              disabled={items.some((item) => item.slug === key)}
+                            >
+                              {label}
+                            </option>
+                          ))}
+                        </select>
+                        <small>已存在的页面请从左侧选择，避免重复创建。</small>
+                      </label>
+                    ) : (
+                      <p className="field-hint">
+                        当前页面：{form.title} · 页面地址保持不变
+                      </p>
+                    )}
                     <Field
                       label="页面标题"
                       value={form.title ?? ""}
@@ -566,19 +494,19 @@ export function AdminResources({ resource }: { resource: Resource }) {
                     />
                     {!selected && (
                       <>
-                        <Field
-                          label="分类编码（英文或数字）"
-                          value={form.code ?? ""}
-                          onChange={(v) => change("code", v)}
-                          required
-                        />
                         <label className="form-field">
                           交易类型
                           <select
                             value={form.trade_type}
-                            onChange={(e) =>
-                              change("trade_type", e.target.value)
-                            }
+                            onChange={(e) => {
+                              change("trade_type", e.target.value);
+                              change(
+                                "price_units",
+                                e.target.value === "sale"
+                                  ? ["account"]
+                                  : ["day"],
+                              );
+                            }}
                           >
                             <option value="sale">出售</option>
                             <option value="rent">租赁</option>
@@ -586,50 +514,91 @@ export function AdminResources({ resource }: { resource: Resource }) {
                         </label>
                       </>
                     )}
-                    <Field
-                      label="可选报价单位（account/hour/day/week/month，英文逗号分隔）"
-                      value={(form.price_units ?? []).join(",")}
-                      onChange={(v) =>
-                        change(
-                          "price_units",
-                          v
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean),
-                        )
-                      }
-                    />
+                    <div className="subform-card">
+                      <h3>允许使用的报价单位</h3>
+                      <div className="checkbox-options">
+                        {Object.entries(unitLabels)
+                          .filter(([key]) =>
+                            key === "unknown"
+                              ? (form.price_units ?? []).includes(key)
+                              : form.trade_type === "sale"
+                                ? key === "account"
+                                : form.trade_type === "rent"
+                                  ? key !== "account"
+                                  : true,
+                          )
+                          .map(([key, label]) => (
+                            <label key={key} className="agreement-check">
+                              <input
+                                type="checkbox"
+                                checked={(form.price_units ?? []).includes(key)}
+                                onChange={(e) =>
+                                  change(
+                                    "price_units",
+                                    e.target.checked
+                                      ? [...(form.price_units ?? []), key]
+                                      : (form.price_units ?? []).filter(
+                                          (u: string) => u !== key,
+                                        ),
+                                  )
+                                }
+                              />
+                              {label}
+                            </label>
+                          ))}
+                      </div>
+                      <p className="field-hint">
+                        不勾选表示不额外限制；出售与租赁仍受各自类型约束。
+                      </p>
+                    </div>
                     <label className="form-field">
                       显示顺序
                       <input
                         type="number"
+                        step="1"
                         value={form.sort_order ?? 0}
                         onChange={(e) => change("sort_order", e.target.value)}
                       />
+                      <small>数字越小，分类排得越靠前。</small>
                     </label>
-                    <Field
-                      label="筛选分组（JSON）"
+                    <CategoryFields
                       value={json}
                       onChange={(v) => {
                         setJson(v);
                         setDirty(true);
+                        setNotice("");
                       }}
-                      multiline
                     />
-                    <p className="muted">
-                      保留已有分组和选项的编码。停用已有选项时使用 enabled:
-                      false，避免破坏已发布商品。
-                    </p>
+                    <details className="admin-advanced">
+                      <summary>高级配置（供技术维护）</summary>
+                      <p>
+                        一般操作请使用上方表单。保留已有编码，避免影响商品关联。
+                      </p>
+                      <Field
+                        label="筛选分组（JSON）"
+                        value={json}
+                        onChange={(v) => {
+                          setJson(v);
+                          setDirty(true);
+                        }}
+                        multiline
+                      />
+                      <p className="muted">
+                        保留已有分组和选项的编码。停用已有选项时使用 enabled:
+                        false，避免破坏已发布商品。
+                      </p>
+                    </details>
                   </>
                 )}
                 {resource === "settings" &&
                   ((selected ?? form.key) === "home_presentation" &&
                   !repairHome ? (
-                    <HomeFields
+                    <HomeDesigner
                       value={home}
                       onChange={(v) => {
                         setHome(v);
                         setDirty(true);
+                        setNotice("");
                       }}
                     />
                   ) : (
@@ -657,7 +626,11 @@ export function AdminResources({ resource }: { resource: Resource }) {
                         )
                       }
                     />
-                    {resource === "pages" ? "公开展示" : "启用"}
+                    {resource === "pages"
+                      ? "公开展示：用户可以访问此页面"
+                      : resource === "contacts"
+                        ? "启用这位客服：在选中的咨询入口显示"
+                        : "启用这个分类：允许商品在前台展示"}
                   </label>
                 )}
                 {error && (
@@ -670,13 +643,55 @@ export function AdminResources({ resource }: { resource: Resource }) {
                     {notice}
                   </p>
                 )}
-                <button className="button-white" type="submit">
-                  {busy ? "正在保存…" : "保存配置"}
-                </button>
+                <div className="save-bar">
+                  <span>
+                    {busy
+                      ? "正在处理，请稍候…"
+                      : dirty
+                        ? "有修改未保存"
+                        : "修改后，请点击保存"}
+                  </span>
+                  <button className="button-white" type="submit">
+                    {busy
+                      ? "正在保存…"
+                      : resource === "settings"
+                        ? "保存首页内容"
+                        : "保存修改"}
+                  </button>
+                  {notice && publicSite && (
+                    <a
+                      className="button-outline"
+                      href={
+                        resource === "pages" && selected
+                          ? `${publicSite}/help/${selected}`
+                          : publicSite
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      查看用户站 ↗
+                    </a>
+                  )}
+                </div>
               </fieldset>
             </form>
           ) : (
-            <div className="panel admin-empty">选择一项查看和编辑。</div>
+            <div className="panel admin-empty">
+              <h3>
+                {items.length
+                  ? "从左侧选择要修改的内容"
+                  : `还没有${names[resource]}`}
+              </h3>
+              <p>
+                {items.length
+                  ? "点击名称即可打开。保存前可以继续调整。"
+                  : `点击右上角“新增${names[resource]}”开始配置。`}
+              </p>
+              <div className="location-note">
+                <strong>会显示在哪里？</strong>
+                <span>{locations[resource].where}</span>
+              </div>
+            </div>
           )}
         </div>
       )}

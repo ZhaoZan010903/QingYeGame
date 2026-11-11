@@ -22,12 +22,12 @@
     background 0.2s;
 }
 .main-links a:hover {
-  color: #f5f0e7;
-  background: #ffffff05;
+  color: var(--text);
+  background: rgba(var(--contrast-rgb), 0.02);
 }
 .main-links a.active {
-  color: #f2e5c7;
-  background: #d2be8f0c;
+  color: var(--text);
+  background: var(--gold-soft);
 }
 .catalog-nav .main-links {
   margin-right: auto;
@@ -92,24 +92,12 @@
   white-space: nowrap;
 }
 .intro-subtitle {
-  color: #a29a8a;
+  color: var(--gold-pale);
   font-size: 15px;
   letter-spacing: 0.18em;
   line-height: 1.8;
   margin-top: 32px;
   animation: intro-enter 1.1s 0.2s both;
-}
-.intro-halo {
-  position: absolute;
-  width: min(1050px, 110vw);
-  aspect-ratio: 1;
-  left: 50%;
-  top: 48%;
-  transform: translate(-50%, -50%);
-  border: 1px solid #cbb47a0b;
-  border-radius: 50%;
-  background: radial-gradient(ellipse, #ceb27c0a, #c5a76903 42%, transparent 69%);
-  pointer-events: none;
 }
 .intro-scroll {
   position: absolute;
@@ -120,7 +108,7 @@
   flex-direction: column;
   align-items: center;
   gap: 16px;
-  color: #c0b69f;
+  color: var(--gold-pale);
   font-size: 12px;
   letter-spacing: 0.16em;
   opacity: calc(1 - var(--intro-progress) * 2);
@@ -142,7 +130,7 @@
   animation: arrow-drift 2.6s ease-in-out infinite;
 }
 .intro-scroll:hover .intro-scroll-icon {
-  color: #f1dfb4;
+  color: var(--text);
 }
 .intro-scroll:focus-visible {
   opacity: 1;
@@ -163,7 +151,7 @@
   gap: 8px;
   padding: 0 24px;
   margin: 0 auto;
-  color: #999080;
+  color: var(--gold-pale);
   font-size: 11px;
   line-height: 1.8;
 }
@@ -187,7 +175,7 @@
 .carousel-bottom .carousel-credit {
   font: 11px var(--font-cn);
   letter-spacing: 0.03em;
-  color: #a29b8c;
+  color: var(--gold-pale);
 }
 .quick-access > a {
   padding: 26px 24px;
@@ -225,10 +213,10 @@
   display: block;
 }
 .home-content-hero .hero-title-main {
-  color: #f3eddf;
+  color: var(--text);
 }
 .home-content-hero .hero-title-trust {
-  color: #d7c49a;
+  color: var(--text);
   background: linear-gradient(110deg, #b6a075, #f7e9c7 44%, #beaa7c 68%, #e5cf9d);
   background-clip: text;
   -webkit-background-clip: text;
@@ -245,7 +233,7 @@
 }
 .home-section-description {
   margin-top: 10px;
-  color: #99969a;
+  color: var(--muted);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -341,11 +329,11 @@
   align-items: center;
   gap: 7px;
   padding: 7px 10px;
-  border: 1px solid #e0c58b60;
+  border: 1px solid var(--gold-line);
   border-radius: 6px;
-  background: #16130ee8;
+  background: rgba(var(--surface-rgb), 0.91);
   backdrop-filter: blur(12px);
-  color: #f1dfb4;
+  color: var(--text);
   font-family: var(--font-cn);
   font-size: 12px;
   font-weight: 600;
@@ -361,14 +349,14 @@
   background: currentColor;
 }
 .asset-image .trade-badge.short-rent {
-  color: #c8e2da;
+  color: var(--text);
   border-color: #a6cdb450;
-  background: #101c19e8;
+  background: rgba(var(--surface-rgb), 0.91);
 }
 .asset-image .trade-badge.long-rent {
-  color: #ded6f1;
+  color: var(--text);
   border-color: #c1b1db50;
-  background: #1a1522e8;
+  background: rgba(var(--surface-rgb), 0.91);
 }
 .asset-card .asset-title {
   font-size: 17px;
@@ -376,12 +364,12 @@
   font-weight: 600;
 }
 .asset-card .asset-id {
-  color: #86838b;
+  color: var(--muted);
   font-size: 10px;
 }
 .asset-card .card-caption {
   font-size: 12px;
-  color: #b8b4ab;
+  color: var(--muted);
 }
 @keyframes arrow-drift {
   0%,

@@ -75,16 +75,30 @@ func userWire(u *User) map[string]any {
 	return map[string]any{"id": u.ID, "nickname": u.Nickname, "phone_masked": phone, "role": u.Role, "enabled": u.Enabled}
 }
 func (a *App) currentUser(r *http.Request) (*User, error) {
-	cookie, err := r.Cookie(a.cookieName())
-	if err != nil || len(cookie.Value) != 64 {
+	hash := a.requestSessionHash(r)
+	if hash == "" {
 		return nil, pgx.ErrNoRows
 	}
 	var u User
-	err = a.DB.QueryRow(r.Context(), `SELECT u.id,u.phone,u.nickname,u.role,u.enabled FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.audience=$2 AND s.expires_at>now() AND u.enabled AND u.role=$3`, tokenHash(cookie.Value), a.surface(), a.sessionRole()).Scan(&u.ID, &u.Phone, &u.Nickname, &u.Role, &u.Enabled)
+	err := a.DB.QueryRow(r.Context(), `SELECT u.id,u.phone,u.nickname,u.role,u.enabled FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.audience=$2 AND s.expires_at>now() AND u.enabled AND u.role=$3`, hash, a.surface(), a.sessionRole()).Scan(&u.ID, &u.Phone, &u.Nickname, &u.Role, &u.Enabled)
 	if err != nil {
 		return nil, err
 	}
 	return &u, nil
+}
+
+// Only the server-side WebTransport ticket exchange can set this private context value.
+type chatSessionKey struct{}
+
+func (a *App) requestSessionHash(r *http.Request) string {
+	if hash, ok := r.Context().Value(chatSessionKey{}).(string); ok {
+		return hash
+	}
+	cookie, err := r.Cookie(a.cookieName())
+	if err != nil || len(cookie.Value) != 64 {
+		return ""
+	}
+	return tokenHash(cookie.Value)
 }
 func (a *App) requireUser(w http.ResponseWriter, r *http.Request) (*User, bool) {
 	u, err := a.currentUser(r)

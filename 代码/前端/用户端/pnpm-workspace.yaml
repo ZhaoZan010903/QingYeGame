@@ -1,0 +1,7 @@
+# Keep the browser compatibility database outside the package release-age quarantine.
+overrides:
+  electron-to-chromium: 1.5.478
+
+# Reviewed install.js: prepares and checks the locked platform-specific build binary.
+allowBuilds:
+  esbuild@0.28.2: true

@@ -21,14 +21,14 @@
   grid-row: 1;
   width: 100%;
   height: 100%;
-  background: #09090b;
+  background: var(--bg);
 }
 .live-editorial .slide-visual::after {
   display: none;
 }
 .live-editorial .slide-visual img {
   object-fit: contain;
-  background: #09090b;
+  background: var(--bg);
 }
 .live-editorial .slide-copy {
   position: relative;
@@ -38,7 +38,7 @@
   width: 100%;
   min-width: 0;
   padding: 32px 34px;
-  background: #121215;
+  background: var(--surface);
 }
 .live-editorial .slide-copy h3 {
   font-size: clamp(20px, 1.9vw, 27px);
@@ -54,7 +54,7 @@
 .live-editorial .slide-description {
   margin-top: 13px;
   font-size: 13px;
-  color: #b9b5ac;
+  color: var(--muted);
   line-height: 1.7;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -63,7 +63,7 @@
   overflow-wrap: anywhere;
 }
 .live-editorial .slide-meta {
-  color: #b8b3a8;
+  color: var(--muted);
   flex-wrap: wrap;
   line-height: 1.6;
 }
@@ -74,7 +74,7 @@
   flex-wrap: wrap;
 }
 .live-editorial .slide-action-row .price-unit {
-  color: #cfc09a;
+  color: var(--gold-pale);
   font-size: 11px;
   line-height: 1.5;
 }

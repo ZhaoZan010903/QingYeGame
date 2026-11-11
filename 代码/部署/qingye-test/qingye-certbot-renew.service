@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew QingYe test IP TLS certificate
+After=network-online.target caddy.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/qingye-certbot/bin/certbot renew --cert-name qingye-test-ip --quiet --deploy-hook "/usr/bin/python3 /usr/local/lib/qingye/deploy-chat-certificate.py"
+PrivateTmp=true
+UMask=0077
