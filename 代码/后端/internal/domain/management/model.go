@@ -277,8 +277,9 @@ func ValidateCategoryIdentity(id string, in CategoryInput) error {
 }
 
 type ProductQuery struct {
-	Status, Source, Query string
-	Limit, Offset         int
+	Status, Source, Query, TradeType, Sort string
+	Trash                                  bool
+	Limit, Offset                          int
 }
 
 type RemovedOption struct {

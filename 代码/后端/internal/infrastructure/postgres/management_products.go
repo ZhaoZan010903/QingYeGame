@@ -209,9 +209,12 @@ func (s *ManagementStore) FeatureProduct(ctx context.Context, actor management.A
 
 func (s *ManagementStore) Products(ctx context.Context, in management.ProductQuery) (map[string]any, error) {
 	where := "p.deleted_at IS NULL"
+	if in.Trash {
+		where = "p.deleted_at IS NOT NULL AND p.deleted_by_admin"
+	}
 	args := []any{}
 	// 列名固定，用户输入只作为绑定参数。
-	for _, item := range []struct{ column, value string }{{"status", in.Status}, {"source", in.Source}} {
+	for _, item := range []struct{ column, value string }{{"status", in.Status}, {"source", in.Source}, {"trade_type", in.TradeType}} {
 		if item.value != "" && item.value != "all" {
 			args = append(args, item.value)
 			where += " AND p." + item.column + "=$" + strconv.Itoa(len(args))
@@ -222,11 +225,18 @@ func (s *ManagementStore) Products(ctx context.Context, in management.ProductQue
 		n := strconv.Itoa(len(args))
 		where += " AND (p.title ILIKE '%'||$" + n + "||'%' OR p.product_code ILIKE '%'||$" + n + "||'%')"
 	}
-	items, total, err := (&CatalogStore{DB: s.DB}).ProductRows(ctx, where, args, "p.updated_at DESC,p.id", in.Limit, in.Offset)
+	order := "p.updated_at DESC,p.id"
+	if in.Sort == "published" {
+		order = "p.published_at DESC NULLS LAST,p.id"
+	}
+	if in.Sort == "created" {
+		order = "p.created_at DESC,p.id"
+	}
+	items, total, err := (&CatalogStore{DB: s.DB}).productRows(ctx, where, args, order, in.Limit, in.Offset, true, true)
 	if err != nil {
 		return nil, managementStoreError(err)
 	}
-	return map[string]any{"data": items, "total": total, "next_cursor": catalog.NextPage(in.Offset, in.Limit, total)}, nil
+	return map[string]any{"data": items, "total": total, "next_cursor": catalog.NextPage(in.Offset, in.Limit, total), "page": in.Offset/in.Limit + 1, "page_size": in.Limit}, nil
 }
 func (s *ManagementStore) Product(ctx context.Context, id string) (map[string]any, error) {
 	p, err := (&CatalogStore{DB: s.DB}).ProductView(ctx, id, true)

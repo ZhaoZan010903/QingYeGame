@@ -12,6 +12,7 @@ type Repository interface {
 	Product(context.Context, string) (map[string]any, error)
 	SaveProduct(ctx context.Context, actor management.Actor, id string, in catalog.ProductInput) (map[string]any, error)
 	TransitionProduct(ctx context.Context, actor management.Actor, id, operation string, in management.TransitionInput) (map[string]any, error)
+	TrashProduct(ctx context.Context, actor management.Actor, id string, restore bool, in management.TransitionInput) (map[string]any, error)
 	FeatureProduct(ctx context.Context, actor management.Actor, id string, rank *int) (map[string]any, error)
 	SaveCategory(ctx context.Context, actor management.Actor, id string, create bool, in management.CategoryInput) (map[string]any, error)
 	SaveContact(ctx context.Context, actor management.Actor, id string, in management.ContactInput) (map[string]any, error)
@@ -187,13 +188,20 @@ func (s *Service) Products(ctx context.Context, actor management.Actor, in manag
 	if err := management.ValidateActor(actor); err != nil {
 		return nil, err
 	}
-	if in.Limit < 1 || in.Limit > 50 || in.Offset < 0 || in.Offset > 1000000 {
-		return nil, fault.New(fault.Invalid, "INVALID_CURSOR", "分页参数无效")
-	}
-	if in.Status != "" && in.Status != "all" && in.Status != "draft" && in.Status != "pending" && in.Status != "published" && in.Status != "rejected" && in.Status != "offline" && in.Status != "sold" && in.Status != "rented" {
-		return nil, fault.New(fault.Invalid, "INVALID_STATUS", "商品状态无效")
+	if err := management.ValidateProductQuery(in); err != nil {
+		return nil, err
 	}
 	return s.store.Products(ctx, in)
+}
+
+func (s *Service) TrashProduct(ctx context.Context, actor management.Actor, id string, restore bool, in management.TransitionInput) (map[string]any, error) {
+	if err := management.ValidateActor(actor); err != nil {
+		return nil, err
+	}
+	if err := management.ValidateTrashInput(in, restore); err != nil {
+		return nil, err
+	}
+	return s.store.TrashProduct(ctx, actor, id, restore, in)
 }
 func (s *Service) Product(ctx context.Context, actor management.Actor, id string) (map[string]any, error) {
 	if err := management.ValidateActor(actor); err != nil {

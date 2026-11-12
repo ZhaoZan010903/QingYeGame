@@ -23,6 +23,8 @@ func (a *App) registerAdmin(m routeRegistrar) {
 	m.HandleFunc("GET /api/v1/admin/products/{id}", a.adminOnly(a.adminProduct))
 	m.HandleFunc("POST /api/v1/admin/products", a.adminOnly(a.adminSaveProduct))
 	m.HandleFunc("PATCH /api/v1/admin/products/{id}", a.adminOnly(a.adminSaveProduct))
+	m.HandleFunc("DELETE /api/v1/admin/products/{id}", a.adminOnly(a.adminTrashProduct))
+	m.HandleFunc("POST /api/v1/admin/products/{id}/restore", a.adminOnly(a.adminTrashProduct))
 	for _, action := range []string{"review", "status", "publish"} {
 		m.HandleFunc("POST /api/v1/admin/products/{id}/"+action, a.adminOnly(a.adminTransition))
 	}
@@ -48,12 +50,29 @@ func (a *App) adminProducts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	limit, offset, err := decodePage(q)
+	limit, offset, err := management.DecodeProductPage(q.Get("limit"), q.Get("page"), q.Get("cursor"))
 	if err != nil {
 		fail(w, 422, "INVALID_CURSOR", err.Error())
 		return
 	}
-	data, err := a.managementService().Products(r.Context(), managementActor(u), management.ProductQuery{Status: q.Get("status"), Source: q.Get("source"), Query: q.Get("q"), Limit: limit, Offset: offset})
+	if q.Get("trash") != "" && q.Get("trash") != "1" {
+		fail(w, 422, "INVALID_QUERY", "回收站筛选无效")
+		return
+	}
+	data, err := a.managementService().Products(r.Context(), managementActor(u), management.ProductQuery{Status: q.Get("status"), Source: q.Get("source"), Query: q.Get("q"), TradeType: q.Get("trade_type"), Sort: q.Get("sort"), Trash: q.Get("trash") == "1", Limit: limit, Offset: offset})
+	memberResponse(w, data, err)
+}
+
+func (a *App) adminTrashProduct(w http.ResponseWriter, r *http.Request) {
+	u, ok := a.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in management.TransitionInput
+	if !readJSON(w, r, &in) {
+		return
+	}
+	data, err := a.managementService().TrashProduct(r.Context(), managementActor(u), r.PathValue("id"), r.Method == http.MethodPost, in)
 	memberResponse(w, data, err)
 }
 func (a *App) adminProduct(w http.ResponseWriter, r *http.Request) {

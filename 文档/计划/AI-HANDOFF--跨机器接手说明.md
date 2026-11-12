@@ -1,5 +1,13 @@
 # AI-HANDOFF -- 跨机器接手说明
 
+## R17商品管理接手入口
+
+API与管理静态已更新为`20261112-admin-products-r17`，用户静态仍R16.2。商品列表改为20/50条分页，补充封面、报价、来源/状态、图片/咨询、三项时间和明确操作。`AdminProducts.tsx`与`products.css`承载列表；`product-list.ts`负责分页查询和北京时间格式，详情返回保留列表筛选。
+
+后端0009已备份后迁移。`management_trash.go`实现事务内删除/恢复，`deleted_by_admin`区分管理员回收与会员清理墓碑；回收站不清图，恢复为草稿。管理接口新增page/trade_type/sort/trash，兼容原cursor。完整字段、测试与回退在[R17记录](../业务验收与审查记录/ADMIN-PRODUCTS-R17--商品分页与回收站.md)。本轮管理63项、Go全量239项、限定包竞态173项通过；浏览器写验收在独立库，线上仅作只读业务检查。
+
+回执`/root/qingye-private/integration/20261112-admin-products-r17-receipt.json`记录构建散列、迁移前备份、前后数据摘要与Git提交。不要将下面历史版本说明理解为当前API版本。
+
 ## R16.2用户端背景补丁
 
 首页金线、光幕与鼠标光晕已复用到全部用户端路由，由公共布局挂载一次。当前用户静态版本`20261112-storefront-backdrop-r16.2`；API仍R16、管理端仍R16.1。121项用户端测试及构建通过，本地Chrome检查和HTTPS产物核对范围见[发布记录](RELEASE--测试环境发布记录.md)。本轮独立回执为`/root/qingye-private/integration/20261112-storefront-backdrop-r16.2-receipt.json`，其中`git_commit`用于核对本次GitHub提交；下文R16业务规则继续适用。

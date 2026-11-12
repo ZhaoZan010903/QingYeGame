@@ -60,6 +60,14 @@ export const adminApi = {
   async product(id: string): Promise<AdminRecord> {
     return unwrap(await request(path(id)));
   },
+  async trashProduct(id: string, version: number, reason: string) {
+    return request(path(id), "DELETE", { expected_version: version, reason });
+  },
+  async restoreProduct(id: string, version: number) {
+    return request(`${path(id)}/restore`, "POST", {
+      expected_version: version,
+    });
+  },
   async privateCredentials(
     id: string,
   ): Promise<{ qq_account: string; qq_password: string }> {

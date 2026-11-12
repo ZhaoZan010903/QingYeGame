@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { adminApi, adminImageApi } from "../lib/admin-api";
 import { productFrom } from "../lib/api";
@@ -7,8 +7,14 @@ import { Price, StateView } from "./shared";
 import { statusNames } from "./AdminProductEditor";
 import type { Product, ImageItem } from "../types";
 import { PrivateCredentials } from "./PrivateCredentials";
+import { productListReturn } from "../lib/product-links";
 
 export function AdminProductView({ id }: { id: string }) {
+  const location = useLocation();
+  const returnTo = productListReturn(location.state?.returnTo);
+  const editorParams = new URLSearchParams(returnTo?.split("?")[1] || "");
+  editorParams.set("edit", id);
+  editorParams.delete("new");
   const [product, setProduct] = useState<Product>();
   const [images, setImages] = useState<ImageItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -82,15 +88,19 @@ export function AdminProductView({ id }: { id: string }) {
     <div className="admin-product-view">
       <div className="admin-page-heading">
         <div>
-          <Link to="/chat">
-            <ArrowLeft size={16} /> 返回在线咨询
+          <Link to={returnTo || "/chat"}>
+            <ArrowLeft size={16} /> {returnTo ? "返回商品列表" : "返回在线咨询"}
           </Link>
-          <h1>咨询商品资料</h1>
-          <p>这里显示商品当前资料；聊天卡片保留发起咨询时的价格与标题。</p>
+          <h1>{returnTo ? "商品资料" : "咨询商品资料"}</h1>
+          <p>
+            {returnTo
+              ? "查看当前资料与完整图片，需要修改时点击右侧编辑。"
+              : "这里显示商品当前资料；聊天卡片保留发起咨询时的价格与标题。"}
+          </p>
         </div>
         <Link
           className="button-white"
-          to={`/products?edit=${encodeURIComponent(id)}`}
+          to={`${returnTo?.startsWith("/reviews") ? "/reviews" : "/products"}?${editorParams}`}
         >
           编辑此商品
         </Link>

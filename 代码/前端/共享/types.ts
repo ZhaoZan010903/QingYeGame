@@ -49,6 +49,9 @@ export interface Product {
   verification: VerificationStatus;
   rare: boolean;
   publishedAt: string;
+  createdAt?: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
   reviewNote?: string;
   favorite?: boolean;
   editorial?: {
