@@ -15,7 +15,7 @@ import (
 // Repository 的写方法是完整事务，禁止将锁、去重和状态更新拆成独立提交。
 type Repository interface {
 	Start(context.Context, domain.Actor, domain.StartInput, string) (string, error)
-	List(context.Context, domain.Actor, int) (map[string]any, error)
+	List(context.Context, domain.Actor, domain.ConversationPage) (map[string]any, error)
 	Detail(context.Context, domain.Actor, string) (map[string]any, error)
 	Messages(context.Context, domain.Actor, string, domain.MessagePage) (map[string]any, error)
 	Send(context.Context, domain.Actor, string, domain.SendInput) (map[string]any, error)
@@ -118,14 +118,22 @@ func (s *Service) Start(ctx context.Context, actor domain.Actor, in domain.Start
 	s.notifyConversation(ctx, id)
 	return map[string]any{"data": map[string]any{"id": id}}, nil
 }
-func (s *Service) List(ctx context.Context, actor domain.Actor, offset int) (map[string]any, error) {
+func (s *Service) List(ctx context.Context, actor domain.Actor, offset int, cursors ...string) (map[string]any, error) {
 	if err := s.authorize(actor); err != nil {
 		return nil, err
 	}
 	if offset < 0 || offset > 100000 {
 		return nil, fault.New(fault.Invalid, "INVALID_CURSOR", "会话分页位置无效")
 	}
-	out, err := s.repo.List(ctx, actor, offset)
+	page := domain.ConversationPage{Offset: offset}
+	if len(cursors) > 0 && cursors[0] != "" {
+		var err error
+		page.Cursor, err = domain.DecodeConversationCursor(cursors[0])
+		if err != nil || offset != 0 {
+			return nil, fault.New(fault.Invalid, "INVALID_CURSOR", "会话分页位置无效")
+		}
+	}
+	out, err := s.repo.List(ctx, actor, page)
 	return out, databaseError(err)
 }
 func (s *Service) Detail(ctx context.Context, actor domain.Actor, id string) (map[string]any, error) {

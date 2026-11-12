@@ -6,6 +6,7 @@ import {
 } from '../../../共享/chat-transport';
 export const chatTransport = new ChatTransport();
 import type { ChatList, Conversation, MessagePage, ChatPresence } from '../../../共享/chat-types';
+import { chatListPayload, type ChatListPosition } from '../../../共享/chat-types';
 export const chatAdmin = false;
 export const chatRoute = '/messages';
 const prefix = '/chat';
@@ -15,9 +16,13 @@ export const chatApi = {
     const r = await request(`${prefix}/transport-ticket`, 'POST', { transport });
     return r.data as TransportTicket;
   },
-  async list(offset = 0): Promise<ChatList> {
-    if (chatTransport.isConnected()) return chatTransport.command('list', '', { offset });
-    return (await request(`${prefix}/conversations?offset=${offset}`)) as unknown as ChatList;
+  async list(position: Exclude<ChatListPosition, null> = 0): Promise<ChatList> {
+    const payload = chatListPayload(position);
+    if (chatTransport.isConnected()) return chatTransport.command('list', '', payload);
+    const query = new URLSearchParams(
+      Object.entries(payload).map(([key, value]) => [key, String(value)]),
+    );
+    return (await request(`${prefix}/conversations?${query}`)) as unknown as ChatList;
   },
   async detail(id: string): Promise<Conversation> {
     if (chatTransport.isConnected())

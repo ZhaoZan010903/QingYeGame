@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatApi, chatTransport } from "./chat-api";
-import { mergeMessages, type ChatMessage } from "../../../共享/chat-types";
+import {
+  mergeMessages,
+  nextChatPosition,
+  type ChatMessage,
+} from "../../../共享/chat-types";
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -15,6 +19,43 @@ const message = (id: string, body = id): ChatMessage => ({
   client_id: "",
 });
 describe("聊天消息和接口边界", () => {
+  it("会话续页在实时连接中传游标，仍兼容旧偏移参数", async () => {
+    vi.spyOn(chatTransport, "isConnected").mockReturnValue(true);
+    const command = vi
+      .spyOn(chatTransport, "command")
+      .mockResolvedValue({ data: [] });
+    await chatApi.list("opaque-cursor");
+    expect(command).toHaveBeenLastCalledWith("list", "", {
+      cursor: "opaque-cursor",
+    });
+    await chatApi.list(50);
+    expect(command).toHaveBeenLastCalledWith("list", "", { offset: 50 });
+  });
+  it("HTTP 查询编码游标，终页不回退旧偏移值", async () => {
+    vi.spyOn(chatTransport, "isConnected").mockReturnValue(false);
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [],
+            total: 0,
+            unread: 0,
+            next_offset: null,
+            next_cursor: null,
+          }),
+        ),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await chatApi.list("cursor&offset=99");
+    expect(String(fetch.mock.calls[0][0])).toContain(
+      "cursor=cursor%26offset%3D99",
+    );
+    const page = { data: [], total: 100, unread: 0, next_offset: 50 };
+    expect(nextChatPosition(page)).toBe(50);
+    expect(nextChatPosition({ ...page, next_cursor: "next" })).toBe("next");
+    expect(nextChatPosition({ ...page, next_cursor: null })).toBeNull();
+  });
   it("连接就绪后，消息正文通过 WebTransport 读取", async () => {
     vi.spyOn(chatTransport, "isConnected").mockReturnValue(true);
     const command = vi

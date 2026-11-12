@@ -414,11 +414,12 @@ func (a *App) executeChatCommand(ctx context.Context, actor domain.Actor, c chat
 	switch c.Op {
 	case "list":
 		var in struct {
-			Offset int `json:"offset"`
+			Offset int    `json:"offset"`
+			Cursor string `json:"cursor"`
 		}
 		err = decodeChatPayload(c.Payload, &in)
 		if err == nil {
-			out, err = svc.List(ctx, actor, in.Offset)
+			out, err = svc.List(ctx, actor, in.Offset, in.Cursor)
 		}
 	case "detail":
 		out, err = svc.Detail(ctx, actor, c.Conversation)

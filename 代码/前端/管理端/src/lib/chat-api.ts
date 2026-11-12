@@ -11,6 +11,10 @@ import type {
   MessagePage,
   ChatPresence,
 } from "../../../共享/chat-types";
+import {
+  chatListPayload,
+  type ChatListPosition,
+} from "../../../共享/chat-types";
 export const chatAdmin = true;
 export const chatRoute = "/chat";
 const prefix = "/admin/chat";
@@ -24,11 +28,15 @@ export const chatApi = {
     });
     return r.data as TransportTicket;
   },
-  async list(offset = 0): Promise<ChatList> {
+  async list(position: Exclude<ChatListPosition, null> = 0): Promise<ChatList> {
+    const payload = chatListPayload(position);
     if (chatTransport.isConnected())
-      return chatTransport.command("list", "", { offset });
+      return chatTransport.command("list", "", payload);
+    const query = new URLSearchParams(
+      Object.entries(payload).map(([key, value]) => [key, String(value)]),
+    );
     return (await request(
-      `${prefix}/conversations?offset=${offset}`,
+      `${prefix}/conversations?${query}`,
     )) as unknown as ChatList;
   },
   async detail(id: string): Promise<Conversation> {

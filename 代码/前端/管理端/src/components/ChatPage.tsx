@@ -23,6 +23,8 @@ import { DesktopNoticeButton, useChat } from "./ChatNotifications";
 import { ChatConnectionNotice } from "./ChatConnectionNotice";
 import {
   mergeMessages,
+  nextChatPosition,
+  type ChatListPosition,
   type ChatMessage,
   type ChatProduct,
   type Conversation,
@@ -102,7 +104,11 @@ export function ChatPage() {
     [messages, setMessages] = useState<ChatMessage[]>([]);
   const [before, setBefore] = useState<string | null>(null),
     [older, setOlder] = useState<Conversation[]>([]),
-    [nextOffset, setNextOffset] = useState<number | null>(null);
+    [nextOffset, setNextOffset] = useState<ChatListPosition>(null);
+  const expandedList = useRef(false),
+    listBusy = useRef(false),
+    listGeneration = useRef(0);
+  const previousHead = useRef<Conversation[]>([]);
   const [text, setText] = useState(""),
     [error, setError] = useState(""),
     [starting, setStarting] = useState(false),
@@ -141,8 +147,29 @@ export function ChatPage() {
     bottom = useRef(true);
   currentID.current = selected;
   useEffect(() => {
-    setNextOffset(list.next_offset);
-  }, [list.next_offset]);
+    expandedList.current = false;
+    previousHead.current = [];
+    listBusy.current = false;
+    listGeneration.current += 1;
+    setOlder([]);
+    setLoadingList(false);
+    return () => {
+      listGeneration.current += 1;
+    };
+  }, [user?.id]);
+  useEffect(() => {
+    // Live first-page refreshes must not rewind an already expanded list.
+    if (!expandedList.current) setNextOffset(nextChatPosition(list));
+    else {
+      const previous = previousHead.current;
+      setOlder((old) => [
+        ...new Map(
+          [...old, ...previous].map((item) => [item.id, item]),
+        ).values(),
+      ]);
+    }
+    previousHead.current = list.data;
+  }, [list, user?.id]);
   useEffect(() => {
     if (!productId || chatAdmin || !connected) return;
     let active = true;
@@ -297,20 +324,28 @@ export function ChatPage() {
     }
   }
   async function loadList() {
-    if (nextOffset === null || loadingList) return;
+    if (nextOffset === null || listBusy.current) return;
+    listBusy.current = true;
+    const generation = listGeneration.current;
+    const head = list.data;
     setLoadingList(true);
     try {
       const page = await chatApi.list(nextOffset);
+      if (generation !== listGeneration.current) return;
+      expandedList.current = true;
       setOlder((old) => [
         ...new Map(
-          [...old, ...page.data].map((item) => [item.id, item]),
+          [...old, ...head, ...page.data].map((item) => [item.id, item]),
         ).values(),
       ]);
-      setNextOffset(page.next_offset);
+      setNextOffset(nextChatPosition(page));
     } catch (e) {
-      setError(errorText(e));
+      if (generation === listGeneration.current) setError(errorText(e));
     } finally {
-      setLoadingList(false);
+      if (generation === listGeneration.current) {
+        listBusy.current = false;
+        setLoadingList(false);
+      }
     }
   }
   async function send(event: FormEvent) {

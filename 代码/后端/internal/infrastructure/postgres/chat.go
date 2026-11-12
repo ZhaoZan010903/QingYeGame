@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"qingye/backend/internal/domain/chat"
 	"qingye/backend/internal/domain/fault"
 	"strconv"
+	"time"
 )
 
 type ChatStore struct{ DB *pgxpool.Pool }
@@ -32,11 +32,19 @@ func chatReadColumn(actor chat.Actor) string {
 
 const chatProjection = `jsonb_build_object('id',c.id,'status',c.status,'product',c.product_snapshot,'created_at',c.created_at,'updated_at',c.updated_at,
  'member_name',m.nickname,'admin_name',coalesce(ad.nickname,''),
- 'product_count',(SELECT count(DISTINCT x.product_snapshot->>'id') FROM chat_messages x WHERE x.conversation_id=c.id AND x.kind='product'),
- 'last_message_mine',coalesce((SELECT x.sender_id=$1 FROM chat_messages x WHERE x.conversation_id=c.id ORDER BY x.id DESC LIMIT 1),false),
- 'last_message',coalesce((SELECT CASE WHEN x.kind='product' THEN '咨询这个商品' ELSE left(x.body,80) END FROM chat_messages x WHERE x.conversation_id=c.id ORDER BY x.id DESC LIMIT 1),''),
- 'last_message_id',coalesce((SELECT max(x.id)::text FROM chat_messages x WHERE x.conversation_id=c.id),'0'),
- 'unread',(SELECT count(*) FROM chat_messages x WHERE x.conversation_id=c.id AND x.sender_id<>$1 AND x.id>c.%s))`
+ 'product_count',context_count.n,
+ 'last_message_mine',coalesce(last.sender_id=$1,false),
+ 'last_message',coalesce(CASE WHEN last.kind='product' THEN '咨询这个商品' ELSE left(last.body,80) END,''),
+ 'last_message_id',coalesce(last.id::text,'0'),
+ 'unread',unread.n)`
+
+// Last-message fields share one lookup; product history stays inside its partial index.
+const chatSummaryJoins = ` JOIN users m ON m.id=c.member_id LEFT JOIN users ad ON ad.id=c.admin_id
+ LEFT JOIN LATERAL (SELECT id,sender_id,kind,body FROM chat_messages x WHERE x.conversation_id=c.id ORDER BY id DESC LIMIT 1) last ON true
+ CROSS JOIN LATERAL (SELECT count(*) AS n FROM (
+   SELECT DISTINCT x.product_snapshot->>'id' AS product_id FROM chat_messages x
+   WHERE x.conversation_id=c.id AND x.kind='product' AND x.product_snapshot->>'id' IS NOT NULL
+ ) contexts) context_count`
 
 func (s *ChatStore) Start(ctx context.Context, actor chat.Actor, in chat.StartInput, generatedID string) (string, error) {
 	tx, e := s.DB.Begin(ctx)
@@ -101,27 +109,52 @@ func (s *ChatStore) Start(ctx context.Context, actor chat.Actor, in chat.StartIn
 	return id, nil
 }
 
-func (s *ChatStore) List(ctx context.Context, actor chat.Actor, offset int) (map[string]any, error) {
+func (s *ChatStore) List(ctx context.Context, actor chat.Actor, page chat.ConversationPage) (map[string]any, error) {
 	const limit = 50
 	where := "c." + chatOwnerColumn(actor) + "=$1 AND c.merged_into IS NULL"
-	var total, unread int
-	e := s.DB.QueryRow(ctx, "SELECT count(*) FROM chat_conversations c WHERE "+where, actor.ID).Scan(&total)
-	if e == nil {
-		e = s.DB.QueryRow(ctx, "SELECT count(*) FROM chat_messages x JOIN chat_conversations c ON c.id=x.conversation_id WHERE "+where+" AND x.sender_id<>$1 AND x.id>c."+chatReadColumn(actor), actor.ID).Scan(&unread)
+	args := []any{actor.ID, page.Offset}
+	boundary := ""
+	position := page.Offset
+	if page.Cursor != nil {
+		boundary = " AND (c.updated_at,c.id)<($3,$4)"
+		args = append(args, page.Cursor.UpdatedAt, page.Cursor.ID)
+		position = page.Cursor.Position
 	}
+	// Page before projecting summaries. Total, badges and rows share one MVCC snapshot,
+	// and each conversation's unread range is counted once (also reused by the page).
+	sql := `WITH owned AS MATERIALIZED (
+ SELECT c.id,c.` + chatReadColumn(actor) + ` AS read_id FROM chat_conversations c WHERE ` + where + `
+), unread_counts AS MATERIALIZED (
+ SELECT c.id,u.n FROM owned c CROSS JOIN LATERAL (
+ SELECT count(*) AS n FROM chat_messages x WHERE x.conversation_id=c.id AND x.id>c.read_id AND x.sender_id<>$1) u
+), page AS MATERIALIZED (
+ SELECT c.* FROM chat_conversations c WHERE ` + where + boundary + ` ORDER BY c.updated_at DESC,c.id DESC LIMIT 51 OFFSET $2
+), visible AS MATERIALIZED (SELECT * FROM page ORDER BY updated_at DESC,id DESC LIMIT 50)
+ SELECT jsonb_build_object('total',(SELECT count(*) FROM owned),
+ 'unread',coalesce((SELECT sum(n) FROM unread_counts),0),
+ '_has_more',(SELECT count(*)>50 FROM page),
+ 'data',coalesce((SELECT jsonb_agg(result.data ORDER BY result.at DESC,result.id DESC) FROM (
+ SELECT ` + chatProjection + ` AS data,c.updated_at AS at,c.id FROM visible c
+ JOIN unread_counts unread ON unread.id=c.id ` + chatSummaryJoins + `
+ ) result),'[]'::jsonb))`
+	rows, e := s.chatJSONRows(ctx, sql, args...)
 	if e != nil {
 		return nil, e
 	}
-	sql := "SELECT " + fmt.Sprintf(chatProjection, chatReadColumn(actor)) + " FROM chat_conversations c JOIN users m ON m.id=c.member_id LEFT JOIN users ad ON ad.id=c.admin_id WHERE " + where + " ORDER BY c.updated_at DESC,c.id LIMIT $2 OFFSET $3"
-	rows, e := s.chatJSONRows(ctx, sql, actor.ID, limit, offset)
-	if e != nil {
-		return nil, e
+	out := rows[0]
+	data := out["data"].([]any)
+	out["next_offset"], out["next_cursor"] = nil, nil
+	if out["_has_more"] == true && len(data) == limit {
+		last := data[len(data)-1].(map[string]any)
+		at, err := time.Parse(time.RFC3339Nano, last["updated_at"].(string))
+		if err != nil {
+			return nil, err
+		}
+		out["next_offset"] = position + len(data)
+		out["next_cursor"] = chat.EncodeConversationCursor(chat.ConversationCursor{UpdatedAt: at, ID: last["id"].(string), Position: position + len(data)})
 	}
-	var next any
-	if offset+len(rows) < total {
-		next = offset + len(rows)
-	}
-	return map[string]any{"data": rows, "total": total, "unread": unread, "next_offset": next}, nil
+	delete(out, "_has_more")
+	return out, nil
 }
 
 func (s *ChatStore) Detail(ctx context.Context, actor chat.Actor, id string) (map[string]any, error) {
@@ -129,7 +162,8 @@ func (s *ChatStore) Detail(ctx context.Context, actor chat.Actor, id string) (ma
 	if err != nil {
 		return nil, err
 	}
-	sql := "SELECT " + fmt.Sprintf(chatProjection, chatReadColumn(actor)) + " FROM chat_conversations c JOIN users m ON m.id=c.member_id LEFT JOIN users ad ON ad.id=c.admin_id WHERE c." + chatOwnerColumn(actor) + "=$1 AND c.id=$2"
+	sql := "SELECT " + chatProjection + " FROM chat_conversations c " + chatSummaryJoins +
+		" CROSS JOIN LATERAL (SELECT count(*) AS n FROM chat_messages x WHERE x.conversation_id=c.id AND x.sender_id<>$1 AND x.id>c." + chatReadColumn(actor) + ") unread WHERE c." + chatOwnerColumn(actor) + "=$1 AND c.id=$2"
 	rows, e := s.chatJSONRows(ctx, sql, actor.ID, id)
 	if e != nil {
 		return nil, e

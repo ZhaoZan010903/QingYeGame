@@ -82,7 +82,7 @@ func (a *App) chatList(w http.ResponseWriter, r *http.Request) {
 		}
 		offset = n
 	}
-	out, err := a.chatService().List(r.Context(), actor, offset)
+	out, err := a.chatService().List(r.Context(), actor, offset, r.URL.Query().Get("cursor"))
 	chatResult(w, out, err)
 }
 func (a *App) chatDetail(w http.ResponseWriter, r *http.Request) {
