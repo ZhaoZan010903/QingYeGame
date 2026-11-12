@@ -35,6 +35,10 @@ func (w *limitedImageWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 func (a *App) mediaService() *service.Service {
+	// OSS 待读图迁移完成后再显式装配，当前继续本地读取；不要取消此注释直接切换。
+	// 预备实现：internal/infrastructure/mediafilesoss（仅 oss_read 标签编译）。
+	// 未来在 bootstrap 复用已验证清单和只读客户端，再注入 service.New 的 Files；
+	// 必须保持 Service.Open 的商品/聊天/头像权限检查先于任何远端读，缩略图仍走本地。
 	return service.New(&postgres.MediaStore{DB: a.DB}, &mediafiles.Store{Root: a.Config.MediaDir}, cache.Limiter{Client: a.Redis}, a.surface(), a.uploadMax(), imageProcessors, newID, randomToken, tokenHash)
 }
 func (a *App) mediaActor(u *User) domain.Actor {
