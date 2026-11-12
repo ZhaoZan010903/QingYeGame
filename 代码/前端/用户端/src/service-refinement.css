@@ -2,16 +2,6 @@
   position: relative;
   isolation: isolate;
 }
-.detail-page::before {
-  content: '';
-  position: fixed;
-  z-index: -1;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 58% 520px at 16% 12%, rgba(173, 155, 101, 0.13), transparent 80%),
-    radial-gradient(ellipse 36% 480px at 95% 35%, rgba(129, 157, 160, 0.06), transparent 85%);
-}
 .detail-page .detail-title {
   display: block !important;
   -webkit-line-clamp: unset !important;

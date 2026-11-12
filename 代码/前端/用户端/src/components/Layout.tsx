@@ -12,7 +12,7 @@ import { isDemo, api, environmentLabel } from '../lib/api';
 import { useSession, useUi } from '../context';
 import { Modal, StateView, Artwork } from './shared';
 import { useLoad } from '../lib-use';
-import { HomeBackdrop, ReadingProgress } from './AmbientBackdrop';
+import { StorefrontBackdrop, ReadingProgress } from './AmbientBackdrop';
 import { ChatNavLink } from './ChatNotifications';
 import { ThemeToggle } from './ThemeToggle';
 export function Brand() {
@@ -201,7 +201,7 @@ export function Layout() {
     <>
       <ScrollRestoration />
       <ReadingProgress />
-      {isHome && <HomeBackdrop />}
+      <StorefrontBackdrop />
       <div className="nav-top-mask" aria-hidden="true" />
       <a className="skip-link" href="#main">
         跳到主要内容

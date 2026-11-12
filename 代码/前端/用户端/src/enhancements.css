@@ -9,6 +9,7 @@ body {
   isolation: isolate;
 }
 .nav-wrap,
+.demo-ribbon,
 main,
 .site-footer {
   position: relative;

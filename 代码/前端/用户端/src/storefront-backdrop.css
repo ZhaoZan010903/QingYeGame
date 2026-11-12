@@ -1,4 +1,4 @@
-/* Homepage background restored from 537128a; no other page styles are reverted. */
+/* Shared storefront atmosphere: one fixed viewport layer, never tiled down long pages. */
 .ambient-stage {
   position: fixed;
   inset: 0;
@@ -70,7 +70,7 @@
 .ribbon-base,
 .ribbon-trace,
 .ribbon-secondary {
-  stroke: url(#home-ribbon-gold);
+  stroke: url(#storefront-ribbon-gold);
 }
 .ribbon-base {
   opacity: 0.88;
@@ -151,52 +151,52 @@
 .hero.immersive-intro {
   background: none;
 }
-.home-backdrop .cursor-aura {
+.storefront-backdrop .cursor-aura {
   opacity: 0.35;
 }
-:root:not(.dark) .home-backdrop .ambient-wash {
+:root:not(.dark) .storefront-backdrop .ambient-wash {
   opacity: 0.55;
   animation-name: none;
 }
-:root:not(.dark) .home-backdrop .light-ribbons {
+:root:not(.dark) .storefront-backdrop .light-ribbons {
   opacity: 0.55;
 }
-:root:not(.dark) .home-backdrop .cursor-aura {
+:root:not(.dark) .storefront-backdrop .cursor-aura {
   opacity: 0.2;
 }
-:root:not(.dark) .home-backdrop stop[offset='.68'] {
+:root:not(.dark) .storefront-backdrop stop[offset='.68'] {
   stop-color: #9a7b2c;
 }
-.home-backdrop[data-paused='true'] *,
-.home-backdrop[data-paused='true']::before,
-.home-backdrop[data-paused='true']::after {
+.storefront-backdrop[data-paused='true'] *,
+.storefront-backdrop[data-paused='true']::before,
+.storefront-backdrop[data-paused='true']::after {
   animation-play-state: paused;
 }
 @media (max-width: 639px) {
-  .home-backdrop .light-ribbons {
+  .storefront-backdrop .light-ribbons {
     min-height: 720px;
     opacity: 0.65;
   }
-  .home-backdrop::before,
-  .home-backdrop::after {
+  .storefront-backdrop::before,
+  .storefront-backdrop::after {
     animation: none;
     opacity: 0.6;
   }
 }
 @media (hover: none), (pointer: coarse), (prefers-reduced-motion: reduce) {
-  .home-backdrop .ambient-wash,
-  .home-backdrop::before,
-  .home-backdrop::after,
-  .home-backdrop .ribbon-trace {
+  .storefront-backdrop .ambient-wash,
+  .storefront-backdrop::before,
+  .storefront-backdrop::after,
+  .storefront-backdrop .ribbon-trace {
     animation: none;
   }
-  .home-backdrop .ribbon-trace {
+  .storefront-backdrop .ribbon-trace {
     filter: none;
   }
-  .home-backdrop .light-ribbons {
+  .storefront-backdrop .light-ribbons {
     will-change: auto;
   }
-  .home-backdrop .cursor-aura {
+  .storefront-backdrop .cursor-aura {
     display: none;
   }
 }

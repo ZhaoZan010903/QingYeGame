@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
-/** Restored from the pre-redesign composition; mounted on the homepage only. */
-export function HomeBackdrop() {
+/** One viewport backdrop shared by all storefront routes; navigation keeps it mounted. */
+export function StorefrontBackdrop() {
   const stage = useRef<HTMLDivElement>(null);
   const aura = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -36,12 +36,12 @@ export function HomeBackdrop() {
     };
   }, []);
   return (
-    <div className="ambient-stage home-backdrop" ref={stage} aria-hidden="true">
+    <div className="ambient-stage storefront-backdrop" ref={stage} aria-hidden="true">
       <div className="ambient-wash" />
       <div className="cursor-aura" ref={aura} />
       <svg className="light-ribbons" viewBox="0 0 1440 1000" preserveAspectRatio="xMidYMin slice">
         <defs>
-          <linearGradient id="home-ribbon-gold">
+          <linearGradient id="storefront-ribbon-gold">
             <stop stopColor="#D4AF37" stopOpacity="0" />
             <stop offset=".45" stopColor="#BDA978" stopOpacity=".55" />
             <stop offset=".68" stopColor="#FFF2CE" stopOpacity=".85" />
