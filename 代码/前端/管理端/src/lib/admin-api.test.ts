@@ -1,10 +1,116 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { adminApi, canManage } from "./admin-api";
+import { adminApi, adminImageApi, canManage } from "./admin-api";
+import { productFrom } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 const response = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status });
 describe("管理员权限与写入错误", () => {
+  it("管理端保留上架中止标记", () => {
+    expect(
+      productFrom({
+        id: "a",
+        status: "publishing",
+        publication_interrupted: true,
+      }).publicationInterrupted,
+    ).toBe(true);
+    expect(
+      productFrom({ id: "old", status: "draft" }).publicationInterrupted,
+    ).toBe(false);
+  });
+  it("删除已上传封面后重读服务端图集，失败时不伪造删除成功", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(response({ data: {} }))
+      .mockResolvedValueOnce(
+        response({
+          data: {
+            id: "p",
+            title: "商品",
+            image_total: 1,
+            version: 8,
+            images: [{ id: "second" }],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({ code: "VERSION_CONFLICT", message: "请刷新图集" }, 409),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const result = await adminImageApi.removeImage("p", "first", 7);
+    expect(result.images.map((image) => image.id)).toEqual(["second"]);
+    expect(result).toMatchObject({ imageTotal: 1, version: 8 });
+    expect(fetch.mock.calls[0][1].method).toBe("DELETE");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      expected_version: 7,
+    });
+    await expect(
+      adminImageApi.removeImage("p", "second", 7),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(result.images[0].id).toBe("second");
+  });
+  it("上传停权与登录开关分别调用，处置携带读取版本和清理选择", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(response({ data: { blocked: true, version: 3 } }));
+    vi.stubGlobal("fetch", fetch);
+    await adminApi.saveUploadRestriction("member/a", {
+      blocked: true,
+      expected_version: 2,
+      reason: "已核实恶意上传",
+      purge_staging: false,
+    });
+    expect(fetch.mock.calls[0][0]).toBe(
+      "/api/v1/admin/users/member%2Fa/upload-restriction",
+    );
+    expect(fetch.mock.calls[0][1].method).toBe("PUT");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      blocked: true,
+      expected_version: 2,
+      reason: "已核实恶意上传",
+      purge_staging: false,
+    });
+  });
+  it("上传处置版本冲突保持服务端错误，不能当保存成功", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ code: "VERSION_CONFLICT", message: "请刷新状态" }, 409),
+        ),
+    );
+    await expect(
+      adminApi.saveUploadRestriction("member", {
+        blocked: false,
+        expected_version: 1,
+        reason: "人工复核恢复",
+        purge_staging: false,
+      }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+  it("图片准备状态与重试使用管理员接口", async () => {
+    const fetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        response({ data: { total: 4, ready: 2, failed: 1, attempts: 3 } }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await expect(adminApi.mediaSync("product")).resolves.toMatchObject({
+      total: 4,
+      ready: 2,
+    });
+    await adminApi.retryMediaSync("product", 12);
+    expect(fetch.mock.calls.map((call) => call[0])).toEqual([
+      "/api/v1/admin/products/product/media-sync",
+      "/api/v1/admin/products/product/media-sync/retry",
+    ]);
+    expect(fetch.mock.calls[1][1].method).toBe("POST");
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+      expected_version: 12,
+    });
+  });
   it("停用会员失败时保留服务端拒绝结果", async () => {
     vi.stubGlobal(
       "fetch",

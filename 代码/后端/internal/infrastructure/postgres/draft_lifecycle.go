@@ -16,6 +16,10 @@ const DraftHasActiveUploadsSQL = `EXISTS(SELECT 1 FROM media_files m WHERE m.own
  (m.status IN ('pending','uploaded') AND m.upload_expires_at>now()) OR
  (m.status='ready' AND m.ready_at>now()-interval '15 minutes' AND NOT EXISTS(SELECT 1 FROM product_images pi WHERE pi.media_id=m.id))))`
 
+// Review rejection can grant images a later deadline than the original draft.
+const DraftHasRetainedMediaSQL = `EXISTS(SELECT 1 FROM product_images pi JOIN media_objects o ON o.media_id=pi.media_id
+ WHERE pi.product_id=p.id AND o.deleted_at IS NULL AND NOT o.force_delete AND o.retain_until>now())`
+
 func lockMemberQuota(ctx context.Context, tx pgx.Tx, owner string) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "member-quota:"+owner)
 	return err
@@ -84,6 +88,13 @@ func DeleteNewDraft(ctx context.Context, tx pgx.Tx, id string) error {
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(array_agg(media_id ORDER BY media_id),'{}') FROM product_images WHERE product_id=$1`, id).Scan(&mediaIDs); err != nil {
 		return err
 	}
+	// Detaching must not grant a new grace period to an explicitly expired draft.
+	if _, err := tx.Exec(ctx, `SELECT media_id FROM media_objects WHERE product_id=$1 AND deleted_at IS NULL ORDER BY media_id,variant FOR UPDATE`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE media_objects SET force_delete=true,retain_until=now(),retry_at=now() WHERE product_id=$1 AND deleted_at IS NULL`, id); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM product_images WHERE product_id=$1`, id); err != nil {
 		return err
 	}
@@ -101,7 +112,7 @@ func DeleteNewDraft(ctx context.Context, tx pgx.Tx, id string) error {
 
 func QueueManagedMediaGC(ctx context.Context, tx pgx.Tx, id string) error {
 	var key string
-	err := tx.QueryRow(ctx, `SELECT storage_key FROM media_files m WHERE id=$1 AND managed_upload AND source_url='' AND deleted_at IS NULL FOR UPDATE OF m`, id).Scan(&key)
+	err := tx.QueryRow(ctx, `SELECT storage_key FROM media_files m WHERE id=$1 AND managed_upload AND source_url='' AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM media_objects o WHERE o.media_id=m.id) FOR UPDATE OF m`, id).Scan(&key)
 	if err == pgx.ErrNoRows {
 		return nil
 	}
@@ -137,6 +148,7 @@ func DraftCanExpire(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
 	err := tx.QueryRow(ctx, `SELECT p.deleted_at IS NULL AND p.status='draft' AND p.source='member' AND p.published_at IS NULL AND p.legacy_id IS NULL AND p.draft_expires_at<=now()
  AND NOT EXISTS(SELECT 1 FROM product_reviews r WHERE r.product_id=p.id AND r.decision='published')
  AND NOT `+DraftHasActiveUploadsSQL+`
+ AND NOT `+DraftHasRetainedMediaSQL+`
  FROM products p WHERE p.id=$1`, id).Scan(&eligible)
 	return eligible, err
 }

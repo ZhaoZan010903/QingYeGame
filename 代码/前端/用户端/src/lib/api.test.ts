@@ -7,6 +7,40 @@ afterEach(() => {
 const response = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 describe('配置校验', () => {
+  it('保留上架中止标记，同时不把未返回标记的历史商品误判为中止', async () => {
+    const { productFrom } = await import('./api');
+    expect(
+      productFrom({ id: 'a', status: 'publishing', publication_interrupted: true })
+        .publicationInterrupted,
+    ).toBe(true);
+    expect(productFrom({ id: 'old', status: 'draft' }).publicationInterrupted).toBe(false);
+  });
+  it('删除已上传封面后采用服务器返回的新顺序和版本，删除失败不返回虚假结果', async () => {
+    vi.stubEnv('VITE_DATA_MODE', 'api');
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          data: {
+            id: 'p',
+            title: '商品',
+            version: 8,
+            image_total: 1,
+            images: [{ id: 'second', url: '/second' }],
+          },
+        }),
+      )
+      .mockResolvedValueOnce(response({ code: 'VERSION_CONFLICT', message: '请刷新图集' }, 409));
+    vi.stubGlobal('fetch', fetch);
+    const { api } = await import('./api');
+    const result = await api.removeImage('p', 'first', 7);
+    expect(result.images.map((image) => image.id)).toEqual(['second']);
+    expect(result).toMatchObject({ imageTotal: 1, version: 8 });
+    expect(fetch.mock.calls[0][1].method).toBe('DELETE');
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ expected_version: 7 });
+    await expect(api.removeImage('p', 'second', 7)).rejects.toMatchObject({ status: 409 });
+    expect(result.images[0].id).toBe('second');
+  });
   it('接口环境默认不显示演示提示，只有显式环境标签才展示', async () => {
     vi.stubEnv('VITE_DATA_MODE', 'api');
     vi.stubEnv('VITE_ENVIRONMENT_LABEL', '测试环境 · 旧站商品快照');
@@ -238,6 +272,7 @@ describe('真实接口与演示边界', () => {
   });
   it('文件传输已完成但完成通知失败时，重试只发完成通知', async () => {
     vi.stubEnv('VITE_DATA_MODE', 'api');
+    vi.stubGlobal('window', { location: { origin: 'https://qingye.test' } });
     let sends = 0;
     class UploadRequest {
       upload = {};
@@ -255,21 +290,34 @@ describe('真实接口与演示边界', () => {
     const fetch = vi
       .fn()
       .mockResolvedValueOnce(
-        response({ data: { media_id: 'media-1', upload_url: 'https://storage.example/upload' } }),
+        response({
+          data: {
+            media_id: 'media-1',
+            upload_url: '/api/v1/uploads/media-1/content',
+            offset: 0,
+            chunk_size: 1024,
+          },
+        }),
       )
       .mockResolvedValueOnce(response({ message: '稍后重试' }, 503))
       .mockResolvedValueOnce(
-        response({ data: { id: 'media-1', state: 'ready', url: 'https://storage.example/image' } }),
+        response({ data: { offset: 5, chunk_size: 1024, status: 'uploaded' } }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          data: { id: 'media-1', status: 'ready', url: 'https://storage.example/image' },
+        }),
       );
     vi.stubGlobal('fetch', fetch);
     const { api } = await import('./api');
     const file = new File(['image'], 'image.png', { type: 'image/png' });
-    await expect(api.upload(file)).rejects.toMatchObject({ status: 503 });
-    await expect(api.upload(file)).resolves.toMatchObject({ id: 'media-1' });
+    await expect(api.uploadProduct(file)).rejects.toMatchObject({ status: 503 });
+    await expect(api.uploadProduct(file)).resolves.toMatchObject({ id: 'media-1' });
     expect(sends).toBe(1);
     expect(fetch.mock.calls.map((c) => c[0])).toEqual([
       '/api/v1/uploads',
       '/api/v1/uploads/media-1/complete',
+      '/api/v1/uploads/media-1/status',
       '/api/v1/uploads/media-1/complete',
     ]);
   });

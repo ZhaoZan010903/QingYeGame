@@ -26,7 +26,7 @@ func ValidateProductQuery(in ProductQuery) error {
 	if in.Limit < 1 || in.Limit > 50 || in.Offset < 0 || in.Offset > 1000000 {
 		return fault.New(fault.Invalid, "INVALID_PAGE", "分页参数无效")
 	}
-	if !slices.Contains([]string{"", "all", "draft", "pending", "published", "rejected", "offline", "sold", "rented"}, in.Status) {
+	if !slices.Contains([]string{"", "all", "draft", "pending", "publishing", "published", "rejected", "rejected_final", "offline", "sold", "rented"}, in.Status) {
 		return fault.New(fault.Invalid, "INVALID_STATUS", "商品状态无效")
 	}
 	if !slices.Contains([]string{"", "all", "member", "platform", "legacy"}, in.Source) || !slices.Contains([]string{"", "sale", "rent"}, in.TradeType) || !slices.Contains([]string{"", "updated", "published", "created"}, in.Sort) || utf8.RuneCountInString(in.Query) > 200 {

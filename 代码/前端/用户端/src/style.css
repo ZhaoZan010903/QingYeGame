@@ -2825,3 +2825,10 @@ dialog::backdrop {
     transform: none;
   }
 }
+
+/* Upload queues are paged so large galleries do not decode hundreds of previews at once. */
+.upload-queue-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 12px; }
+.upload-queue-toolbar span { flex: 1 1 220px; font-size: 12px; opacity: .8; }
+.upload-queue-toolbar button { border: 1px solid currentColor; border-radius: 8px; padding: 8px 14px; background: transparent; color: inherit; cursor: pointer; }
+.upload-queue-toolbar button:disabled { opacity: .5; cursor: not-allowed; }
+.upload-preview img { content-visibility: auto; }

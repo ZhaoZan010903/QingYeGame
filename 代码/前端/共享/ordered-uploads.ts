@@ -21,7 +21,10 @@ export async function runOrderedUploads<T, R>(
       while (next < items.length) {
         const index = next++;
         try {
-          results[index].resolve({ ok: true, value: await upload(items[index]) });
+          results[index].resolve({
+            ok: true,
+            value: await upload(items[index]),
+          });
         } catch (error) {
           results[index].resolve({ ok: false, error });
         }
@@ -50,18 +53,40 @@ export class UploadSelectionOrder {
   register(keys: string[]) {
     this.keys.push(...keys.filter((key) => !this.keys.includes(key)));
   }
+  reorderPending(keys: string[]) {
+    const movable = new Set(keys);
+    const ordered = keys.filter((key) => this.keys.includes(key));
+    let index = 0;
+    this.keys = this.keys.map((key) =>
+      movable.has(key) ? ordered[index++] : key,
+    );
+  }
   attached(key: string) {
     return this.images.get(key);
   }
   markAttached(key: string, imageId: string) {
     this.images.set(key, imageId);
   }
+  unmarkAttached(key: string) {
+    this.images.delete(key);
+  }
   before(key: string): string | null {
-    for (const next of this.keys.slice(this.keys.indexOf(key) + 1)) {
+    const index = this.keys.indexOf(key);
+    if (index < 0) return null;
+    for (const next of this.keys.slice(index + 1)) {
       const id = this.images.get(next);
       if (id) return id;
     }
     return null;
+  }
+  reorderImages(ids: string[]) {
+    const keysByImage = new Map(
+      [...this.images].map(([key, image]) => [image, key]),
+    );
+    const orderedKeys = ids.flatMap((id) =>
+      keysByImage.has(id) ? [keysByImage.get(id)!] : [],
+    );
+    this.reorderPending(orderedKeys);
   }
   forget(key: string) {
     this.keys = this.keys.filter((item) => item !== key);
@@ -69,5 +94,23 @@ export class UploadSelectionOrder {
   }
   removeImage(imageId: string) {
     for (const [key, id] of this.images) if (id === imageId) this.forget(key);
+  }
+}
+
+/** Invalidate late responses even if navigation changes A -> B -> A. */
+export class UploadScope {
+  private version = 0;
+  constructor(private id?: string) {}
+  select(id?: string, adoptCreated = false) {
+    if (id === this.id) return;
+    if (!(adoptCreated && this.id === undefined)) this.version++;
+    this.id = id;
+  }
+  capture() {
+    const version = this.version;
+    return () => {
+      if (version !== this.version)
+        throw new DOMException("当前商品已变更", "AbortError");
+    };
   }
 }

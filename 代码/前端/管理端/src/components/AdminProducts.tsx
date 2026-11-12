@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { publicationInterrupted } from "../../../共享/upload-progress";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Plus,
@@ -36,7 +37,8 @@ const actionNames: Record<Action, string> = {
 const actionNotes: Record<Action, string> = {
   publish:
     "系统会检查资料、图片和审核状态。上架成功后，用户可以在集市中看到该商品。",
-  offline: "下架后不再公开展示。资料、图片和咨询历史保留，后续可以重新上架。",
+  offline:
+    "下架后不再公开展示。新商品图片在OSS保留5天，迁回暂存成功后再保留5天；到期清理，请及时处理。",
   trash:
     "商品会从正常列表和用户网站中移除。资料、图片与历史记录保留，可以在回收站恢复。",
   restore:
@@ -118,7 +120,11 @@ export function ProductListRow({
           <strong
             className={`status-pill status-${trash ? "deleted" : p.status}`}
           >
-            {trash ? "已删除" : statusNames[p.status]}
+            {trash
+              ? "已删除"
+              : publicationInterrupted(p.status, p.publicationInterrupted)
+                ? "上架已中止"
+                : statusNames[p.status]}
           </strong>
           <small>{sources[p.source || ""] || "来源未记录"}</small>
         </div>
@@ -153,7 +159,21 @@ export function ProductListRow({
       </td>
       <td data-label="操作">
         <div className="product-row-actions">
-          {trash ? (
+          {p.status === "rejected_final" ? (
+            <>
+              {!trash && (
+                <Link to={adminProductPath(p.id)} state={{ returnTo }}>
+                  查看审核记录
+                </Link>
+              )}
+              <span className="subtle">最终驳回，不可编辑或恢复</span>
+              {!trash && (
+                <button disabled={disabled} onClick={() => act("trash")}>
+                  移入回收站
+                </button>
+              )}
+            </>
+          ) : trash ? (
             <button
               className="button-outline"
               disabled={disabled}
@@ -177,7 +197,7 @@ export function ProductListRow({
                 </button>
               </div>
               <div>
-                {!review && p.status === "published" && (
+                {!review && ["published", "publishing"].includes(p.status) && (
                   <button disabled={disabled} onClick={() => act("offline")}>
                     下架
                   </button>
@@ -326,7 +346,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
             : {}),
         });
       setNotice(
-        `${p.code || p.id}：${kind === "trash" ? "已移入回收站" : kind === "restore" ? "已恢复为草稿" : kind === "offline" ? "已下架" : "已上架"}`,
+        `${p.code || p.id}：${kind === "trash" ? "已移入回收站" : kind === "restore" ? "已恢复为草稿" : kind === "offline" ? "已下架" : "已提交上架"}`,
       );
       setAction(null);
       setRevision((v) => v + 1);

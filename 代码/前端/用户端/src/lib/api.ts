@@ -1,3 +1,8 @@
+import {
+  createProductUploader,
+  PRODUCT_UPLOAD_BATCH_MAX,
+  PRODUCT_UPLOAD_CONCURRENCY_MAX,
+} from '../../../共享/product-upload';
 import type {
   Category,
   Contact,
@@ -44,8 +49,11 @@ const positive = (value: unknown, fallback: number) =>
   Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
 export const uploadConfig = {
   maxBytes: positive(import.meta.env.VITE_UPLOAD_MAX_BYTES, 10 * 1024 * 1024),
-  batchSize: positive(import.meta.env.VITE_UPLOAD_BATCH_SIZE, 20),
-  concurrency: positive(import.meta.env.VITE_UPLOAD_CONCURRENCY, 3),
+  batchSize: PRODUCT_UPLOAD_BATCH_MAX,
+  concurrency: Math.min(
+    PRODUCT_UPLOAD_CONCURRENCY_MAX,
+    Math.floor(positive(import.meta.env.VITE_UPLOAD_CONCURRENCY, 3)),
+  ),
 };
 type RecordData = Record<string, any>;
 type Envelope = {
@@ -173,6 +181,7 @@ export function productFrom(value: RecordData): Product {
     images,
     imageTotal: value.image_total ?? value.image_count ?? value.images?.total ?? images.length,
     status: value.status === 'approved' ? 'published' : (value.status ?? 'published'),
+    publicationInterrupted: value.publication_interrupted === true,
     version: Number(value.version ?? 1),
     verification: value.verification_status ?? value.verification ?? 'unprovided',
     rare: !!value.rare,
@@ -387,6 +396,15 @@ async function hydrateProduct(product: Product): Promise<Product> {
   return { ...product, images: await Promise.all(product.images.slice(0, 20).map(hydrateImage)) };
 }
 const uploaded = new Map<string, ImageItem>();
+const productUploader = createProductUploader(request, (record) => {
+  const image = imageFrom({
+    ...record,
+    url:
+      record.url ?? record.preview_url ?? `${base}/media/${encodeURIComponent(record.id)}/preview`,
+  });
+  uploaded.set(image.id, image);
+  return image;
+});
 async function xhrUpload(
   url: string,
   method: string,
@@ -525,7 +543,12 @@ async function uploadRemote(
     'MEDIA_NOT_READY',
   );
 }
+
 export const api = {
+  async cancelUpload(file: File): Promise<void> {
+    if (isDemo) return;
+    await productUploader.cancel(file);
+  },
   async categories(): Promise<Category[]> {
     if (isDemo) return clone((await loadDemoCatalog()).fixtureCategories);
     const e = await request('/categories');
@@ -646,6 +669,7 @@ export const api = {
     return unwrap(await request('/auth/sms', 'POST', { phone, purpose }));
   },
   async login(payload: RecordData): Promise<User> {
+    productUploader.reset();
     if (isDemo) return demoUnsupported();
     return userFrom(unwrap(await request('/auth/login', 'POST', payload)));
   },
@@ -658,6 +682,7 @@ export const api = {
     await request('/auth/password-reset', 'POST', payload);
   },
   async logout(): Promise<void> {
+    productUploader.reset();
     if (isDemo) {
       const state = readState();
       state.user = null;
@@ -818,6 +843,31 @@ export const api = {
         expected_version: version,
       }),
     );
+  },
+  async uploadProduct(
+    file: File,
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
+  ): Promise<ImageItem> {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type))
+      throw new ApiError('请选择 JPG、PNG 或 WebP 图片。', 422, 'INVALID_IMAGE_TYPE');
+    if (file.size > uploadConfig.maxBytes)
+      throw new ApiError(
+        `单张图片不能超过 ${Math.round(uploadConfig.maxBytes / 1024 / 1024)} MB。`,
+        413,
+        'IMAGE_TOO_LARGE',
+      );
+    if (signal?.aborted) throw new DOMException('已取消', 'AbortError');
+    onProgress?.(0);
+    if (isDemo) {
+      requireDemo();
+      const image: ImageItem = { id: `local-${createRequestId()}`, alt: file.name };
+      await storeBlob(image.id, file, signal);
+      uploaded.set(image.id, image);
+      onProgress?.(100);
+      return hydrateImage(image);
+    }
+    return productUploader.upload(file, onProgress, signal);
   },
   async upload(
     file: File,

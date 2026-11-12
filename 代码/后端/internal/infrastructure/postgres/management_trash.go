@@ -33,6 +33,9 @@ func (s *ManagementStore) TrashProduct(ctx context.Context, actor management.Act
 	}
 	action := "product.trash"
 	if restore {
+		if status == "rejected_final" {
+			return nil, fault.New(fault.Conflict, "PRODUCT_FINALLY_REJECTED", "最终驳回商品不能恢复为草稿")
+		}
 		// Restore to draft, never directly to a public state or a state that skips member review.
 		_, err = tx.Exec(ctx, `UPDATE products SET deleted_at=NULL,deleted_by_admin=false,status='draft',approved_version=NULL,version=version+1,updated_at=now(),review_note='',draft_expires_at=CASE WHEN source='member' AND published_at IS NULL AND legacy_id IS NULL THEN now()+interval '72 hours' ELSE NULL END WHERE id=$1`, id)
 		action = "product.restore"

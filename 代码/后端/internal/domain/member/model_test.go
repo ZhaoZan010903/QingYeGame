@@ -10,7 +10,7 @@ func TestMemberTransitionRules(t *testing.T) {
 		status string
 		submit bool
 		want   string
-	}{{"draft", true, "pending"}, {"rejected", true, "pending"}, {"offline", true, "pending"}, {"pending", false, "draft"}, {"published", false, "offline"}, {"published", true, ""}, {"pending", true, ""}, {"draft", false, ""}}
+	}{{"draft", true, "pending"}, {"rejected", true, "pending"}, {"offline", true, "pending"}, {"pending", false, "draft"}, {"published", false, "offline"}, {"publishing", false, "offline"}, {"published", true, ""}, {"pending", true, ""}, {"draft", false, ""}}
 	for _, tc := range cases {
 		t.Run(tc.status+map[bool]string{true: "/submit", false: "/withdraw"}[tc.submit], func(t *testing.T) {
 			next, err := NextStatus(tc.status, tc.submit)

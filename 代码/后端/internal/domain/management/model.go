@@ -202,6 +202,9 @@ func Transition(status, source, operation string, in TransitionInput) (target, a
 			if in.Decision == "approve" {
 				target = "published"
 			}
+			if in.Decision == "reject_final" && strings.TrimSpace(in.Reason) != "" {
+				target = "rejected_final"
+			}
 			if in.Decision == "reject" && strings.TrimSpace(in.Reason) != "" {
 				target = "rejected"
 			}
@@ -216,7 +219,7 @@ func Transition(status, source, operation string, in TransitionInput) (target, a
 		if action == "submit" && (status == "draft" || status == "rejected" || status == "offline") {
 			target = "pending"
 		}
-		if (action == "offline" || action == "sold" || action == "rented") && status == "published" && strings.TrimSpace(in.Reason) != "" {
+		if (action == "offline" || action == "sold" || action == "rented") && (status == "published" || status == "publishing") && strings.TrimSpace(in.Reason) != "" {
 			target = action
 		}
 	}

@@ -18,6 +18,7 @@ type CreateInput struct {
 	Size           int64  `json:"byte_size"`
 	Purpose        string `json:"purpose,omitempty"`
 	ConversationID string `json:"conversation_id,omitempty"`
+	Resumable      bool   `json:"resumable,omitempty"`
 }
 type Upload struct {
 	ID, Owner, Key, MIME, State, TokenHash string
@@ -25,8 +26,19 @@ type Upload struct {
 	Valid                                  bool
 	Public                                 bool
 	Purpose                                string
+	Resumable                              bool
+	Offset, SecurityVersion                int64
+	Managed                                bool
+	ProcessingToken                        string
+	ResumeValid                            bool
+	ProcessingValid                        bool
+}
+type ManagedObject struct {
+	Variant, Key, MIME, SHA256 string
+	Size                       int64
 }
 type Processed struct {
+	Managed   []ManagedObject
 	Key, MIME string
 	Size      int64
 }
@@ -35,9 +47,10 @@ type Staged interface {
 	Discard()
 }
 type File struct {
-	Reader   io.ReadSeekCloser
-	MIME     string
-	Modified time.Time
+	RedirectURL string
+	Reader      io.ReadSeekCloser
+	MIME        string
+	Modified    time.Time
 }
 
 // Mutation 只暴露当前媒介的状态写入，事务连接不离开持久化层。

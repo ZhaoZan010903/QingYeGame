@@ -14,7 +14,7 @@ Environment=GOGC=75
 ExecStart=/opt/qingye-test/acceptance-current/qingye-api serve
 Restart=on-failure
 RestartSec=3
-TimeoutStopSec=20
+TimeoutStopSec=45
 MemoryMax=256M
 NoNewPrivileges=true
 ProtectSystem=strict

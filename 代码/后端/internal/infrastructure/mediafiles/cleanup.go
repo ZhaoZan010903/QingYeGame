@@ -25,6 +25,9 @@ func (s *Store) RemoveManaged(id, key string) error {
 		return errors.New("invalid managed media id")
 	}
 	allowed := map[string]bool{"uploads/" + id + ".raw": true, "images/" + id + ".jpg": true, "images/" + id + ".png": true}
+	if regexp.MustCompile(`^images/` + regexp.QuoteMeta(id) + `-[a-f0-9]{16}\.(png|jpg)$`).MatchString(key) {
+		allowed[key] = true
+	}
 	if !allowed[key] {
 		return errors.New("unmanaged storage key cannot be removed")
 	}

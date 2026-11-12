@@ -16,6 +16,7 @@ import {
 } from '../lib/publish-dictionaries';
 import type { FilterGroup, RentalQuote } from '../types';
 import { missingPublishField, publishAttributes, rentalPriceForWrite } from '../lib/publish-fields';
+import { formFromProduct, galleryFormDecision } from '../lib/product-form-snapshot';
 
 const initial: ProductWrite = {
   title: '',
@@ -61,6 +62,9 @@ export function PublishPage() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [pendingImages, setPendingImages] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const [conflict, setConflict] = useState(false);
   const [error, setError] = useState('');
   const [loadError, setLoadError] = useState('');
   const [reload, setReload] = useState(0);
@@ -69,7 +73,42 @@ export function PublishPage() {
   const updateProduct = useCallback((next: Product) => {
     latest.current = next;
     setProduct(next);
+    const snapshot = formFromProduct(next);
+    setForm(snapshot);
+    setPrice(next.price == null ? '' : String(next.price));
+    setTags(snapshot.tags.join('、'));
+    setTagsEdited(false);
+    setRentalPrices(
+      Object.fromEntries(
+        (next.rentalQuotes?.length
+          ? next.rentalQuotes
+          : next.mode === 'rent' &&
+              next.price != null &&
+              ['hour', 'day', 'week', 'month'].includes(next.unit)
+            ? [{ unit: next.unit, amount: String(next.price) }]
+            : []
+        ).map((q) => [q.unit, q.amount]),
+      ),
+    );
+    setQQAccount('');
+    setQQPassword('');
+    dirtyRef.current = false;
+    setDirty(false);
   }, []);
+  const updateGallery = useCallback(
+    (next: Product) => {
+      const decision = galleryFormDecision(latest.current, next, dirtyRef.current);
+      if (decision === 'conflict') {
+        setConflict(true);
+        const message = '商品已在其他操作中更新。未保存内容仍保留，请重新加载最新版本后再编辑。';
+        setError(message);
+        throw new Error(message);
+      }
+      if (decision === 'replace') updateProduct(next);
+      else setProduct(next);
+    },
+    [updateProduct],
+  );
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -129,7 +168,10 @@ export function PublishPage() {
         setPrice(source.price == null ? '' : String(source.price));
         setTags(source.tags.join('、'));
         setTagsEdited(false);
+        dirtyRef.current = false;
         setDirty(false);
+        setConflict(false);
+        setError('');
       })
       .catch((e) => {
         if (active) setLoadError(errorText(e));
@@ -235,6 +277,7 @@ export function PublishPage() {
     };
   }
   async function persist(): Promise<Product> {
+    if (conflict) throw new Error('请先重新加载最新版本，再保存商品。');
     if (saving.current) return saving.current;
     const data = input();
     if (!data.categoryId) throw new Error('尚未配置可发布分类，请联系客服。');
@@ -249,13 +292,6 @@ export function PublishPage() {
         : data.tags;
       setTags(savedTags.join('、'));
       setTagsEdited(false);
-      setForm((previous) => ({
-        ...previous,
-        unit: next.unit,
-        price: next.price,
-        tags: savedTags,
-        attributes: { ...previous.attributes, custom_tags: savedTags },
-      }));
       setQQAccount('');
       setQQPassword('');
       setDirty(false);
@@ -265,7 +301,7 @@ export function PublishPage() {
     }
   }
   async function save(submit = false) {
-    if (uploadBusy || busy) return;
+    if (uploadBusy || busy || conflict) return;
     setError('');
     try {
       if (submit) {
@@ -342,7 +378,10 @@ export function PublishPage() {
   const rentUnits = (['hour', 'day', 'week', 'month'] as const).filter(
     (unit) => !category?.priceUnits.length || category.priceUnits.includes(unit),
   );
-  const locked = isDemo && (product?.status === 'published' || product?.status === 'pending');
+  const locked =
+    product?.status === 'publishing' ||
+    product?.status === 'rejected_final' ||
+    (isDemo && (product?.status === 'published' || product?.status === 'pending'));
   return (
     <section className="publish-page page-width mx-auto" aria-label="发布账号">
       <Link to="/me/listings" className="publish-back">
@@ -376,11 +415,23 @@ export function PublishPage() {
       ) : locked ? (
         <section className="member-empty">
           <span className="empty-symbol">◇</span>
-          <h3>{product.status === 'pending' ? '这份资料正在审核中' : '这份账号已公开展示'}</h3>
+          <h3>
+            {product.status === 'publishing'
+              ? '商品正在上架'
+              : product.status === 'rejected_final'
+                ? '这份资料未通过审核'
+                : product.status === 'pending'
+                  ? '这份资料正在审核中'
+                  : '这份账号已公开展示'}
+          </h3>
           <p>
-            {product.status === 'pending'
-              ? '请先在我的发布撤回审核，再继续修改。'
-              : '已展示商品的复审方式尚未配置，请联系平台客服协助修改。'}
+            {product.status === 'publishing'
+              ? '上架完成后即可公开展示；如需修改，请先在我的发布中下架。'
+              : product.status === 'rejected_final'
+                ? '请查看审核意见，或联系客服了解原因。'
+                : product.status === 'pending'
+                  ? '请先在我的发布撤回审核，再继续修改。'
+                  : '已展示商品的复审方式尚未配置，请联系平台客服协助修改。'}
           </p>
           <Link to="/me/listings" className="button-white">
             返回我的发布
@@ -415,7 +466,10 @@ export function PublishPage() {
             </span>
           </div>
           <form onSubmit={submitForm} noValidate>
-            <fieldset disabled={busy || uploadBusy} style={{ border: 0, padding: 0, minWidth: 0 }}>
+            <fieldset
+              disabled={busy || uploadBusy || conflict}
+              style={{ border: 0, padding: 0, minWidth: 0 }}
+            >
               <section className="publish-panel">
                 <h2>01 · 账号资料</h2>
                 {product?.code && <p className="mono">{product.code}</p>}
@@ -648,25 +702,42 @@ export function PublishPage() {
             </fieldset>
             <section className="publish-panel">
               <h2>02 · 展示图片</h2>
-              <p>添加图片时会先保存当前草稿。图片可以持续追加、调整顺序与移除。</p>
+              <p>首次点击开始上传，会先保存草稿。图片可以持续追加、调整顺序与移除。</p>
+              {product && dirty && (
+                <p className="publish-hint">资料有未保存修改，请先保存草稿，再调整图片。</p>
+              )}
               <ImageUploader
                 product={product}
                 ensureDraft={persist}
-                onChange={updateProduct}
+                onChange={updateGallery}
                 onBusyChange={setUploadBusy}
                 onPendingChange={setPendingImages}
-                disabled={busy}
+                disabled={busy || conflict || (!!product && dirty)}
               />
             </section>
             {(!product || product.draftExpiresAt) && (
               <p className="profile-note" style={{ margin: '20px 0' }}>
-                草稿保留3天，提交审核后不再自动到期。
+                新上传图片最多暂存5天，草稿、审核中和退回修改均需及时处理。
               </p>
             )}
             {error && (
               <p className="form-error" role="alert">
                 {error}
               </p>
+            )}
+            {conflict && (
+              <button
+                type="button"
+                className="button-outline"
+                disabled={busy || uploadBusy}
+                onClick={() => {
+                  if (!window.confirm('重新加载会替换未保存的编辑和待上传队列，继续？')) return;
+                  if (!id && latest.current) navigate(`/me/listings/${latest.current.id}/edit`);
+                  else setReload((value) => value + 1);
+                }}
+              >
+                重新加载最新版本
+              </button>
             )}
             <div className="publish-actions">
               <p>
@@ -696,7 +767,7 @@ export function PublishPage() {
                   type="button"
                   className="button-outline"
                   onClick={() => setPreview(true)}
-                  disabled={busy || uploadBusy}
+                  disabled={busy || uploadBusy || conflict}
                 >
                   上架预览
                 </button>
@@ -704,11 +775,16 @@ export function PublishPage() {
                   type="button"
                   className="button-outline"
                   onClick={() => void save()}
-                  disabled={busy || uploadBusy}
+                  disabled={busy || uploadBusy || conflict}
                 >
                   {busy ? '正在保存…' : '保存草稿'}
                 </button>
-                <button type="submit" className="button-white" disabled={busy || uploadBusy}>
+                <button
+                  type="submit"
+                  className="button-white"
+                  disabled={busy || uploadBusy || pendingImages || conflict}
+                  title={pendingImages ? '请先完成图片上传，或移除未完成的图片' : undefined}
+                >
                   {busy ? '正在处理…' : '提交审核'} <span aria-hidden="true">↗</span>
                 </button>
               </div>

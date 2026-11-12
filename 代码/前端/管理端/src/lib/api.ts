@@ -1,3 +1,8 @@
+import {
+  createProductUploader,
+  PRODUCT_UPLOAD_BATCH_MAX,
+  PRODUCT_UPLOAD_CONCURRENCY_MAX,
+} from "../../../共享/product-upload";
 import type { ImageItem, ImagePage, Product, User } from "../types";
 import { ApiError } from "./query";
 import { readLevel } from "../../../共享/level";
@@ -36,8 +41,11 @@ const positive = (value: unknown, fallback: number) =>
     : fallback;
 export const uploadConfig = {
   maxBytes: positive(import.meta.env.VITE_UPLOAD_MAX_BYTES, 10 * 1024 * 1024),
-  batchSize: positive(import.meta.env.VITE_UPLOAD_BATCH_SIZE, 20),
-  concurrency: positive(import.meta.env.VITE_UPLOAD_CONCURRENCY, 3),
+  batchSize: PRODUCT_UPLOAD_BATCH_MAX,
+  concurrency: Math.min(
+    PRODUCT_UPLOAD_CONCURRENCY_MAX,
+    Math.floor(positive(import.meta.env.VITE_UPLOAD_CONCURRENCY, 3)),
+  ),
 };
 type RecordData = Record<string, any>;
 type Envelope = {
@@ -181,6 +189,7 @@ export function productFrom(value: RecordData): Product {
       images.length,
     status:
       value.status === "approved" ? "published" : (value.status ?? "published"),
+    publicationInterrupted: value.publication_interrupted === true,
     version: Number(value.version ?? 1),
     verification:
       value.verification_status ?? value.verification ?? "unprovided",
@@ -203,6 +212,17 @@ export function imagePageFrom(e: Envelope): ImagePage {
   };
 }
 const uploaded = new Map<string, ImageItem>();
+const productUploader = createProductUploader(request, (record) => {
+  const image = imageFrom({
+    ...record,
+    url:
+      record.url ??
+      record.preview_url ??
+      `${base}/media/${encodeURIComponent(record.id)}/preview`,
+  });
+  uploaded.set(image.id, image);
+  return image;
+});
 async function xhrUpload(
   url: string,
   method: string,
@@ -281,7 +301,12 @@ async function uploadRemote(
       await request(
         "/uploads",
         "POST",
-        { filename: file.name, mime_type: file.type, byte_size: file.size },
+        {
+          filename: file.name,
+          mime_type: file.type,
+          byte_size: file.size,
+          purpose: "contact",
+        },
         signal,
       ),
     );
@@ -370,6 +395,9 @@ async function uploadRemote(
 }
 
 export const api = {
+  async cancelUpload(file: File): Promise<void> {
+    await productUploader.cancel(file);
+  },
   async me(): Promise<User | null> {
     try {
       const user = userFrom(unwrap(await request("/me")));
@@ -382,6 +410,7 @@ export const api = {
     }
   },
   async login(phone: string, password: string): Promise<User> {
+    productUploader.reset();
     const user = userFrom(
       unwrap(
         await request("/auth/login", "POST", {
@@ -398,7 +427,25 @@ export const api = {
     return user;
   },
   async logout() {
+    productUploader.reset();
     await request("/auth/logout", "POST");
+  },
+  async uploadProduct(
+    file: File,
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal,
+  ): Promise<ImageItem> {
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
+      throw new ApiError(
+        "请选择 JPG、PNG 或 WebP 图片。",
+        422,
+        "INVALID_IMAGE_TYPE",
+      );
+    if (file.size > uploadConfig.maxBytes)
+      throw new ApiError("图片超过单文件大小限制。", 413, "IMAGE_TOO_LARGE");
+    if (signal?.aborted) throw new DOMException("已取消", "AbortError");
+    onProgress?.(0);
+    return productUploader.upload(file, onProgress, signal);
   },
   async upload(
     file: File,

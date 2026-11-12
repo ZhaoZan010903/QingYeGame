@@ -64,10 +64,13 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 		}
 	} else {
 		var version int
-		var originalTrade string
-		e = tx.QueryRow(ctx, "SELECT version,trade_type,attributes,source='legacy' OR published_at IS NOT NULL FROM products WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", id).Scan(&version, &originalTrade, &in.PreviousAttributes, &in.LegacyAttributes)
+		var originalTrade, originalStatus string
+		e = tx.QueryRow(ctx, "SELECT version,trade_type,status,attributes,source='legacy' OR published_at IS NOT NULL FROM products WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", id).Scan(&version, &originalTrade, &originalStatus, &in.PreviousAttributes, &in.LegacyAttributes)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return nil, fault.New(fault.NotFound, "NOT_FOUND", "商品不存在")
+		}
+		if e == nil && originalStatus == "rejected_final" {
+			return nil, fault.New(fault.Conflict, "PRODUCT_FINALLY_REJECTED", "此商品已被最终驳回，不能通过编辑恢复")
 		}
 		if e == nil && version != in.ExpectedVersion {
 			return nil, fault.New(fault.Conflict, "VERSION_CONFLICT", "商品已更新，请重新加载")
@@ -119,6 +122,9 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 	if version != in.ExpectedVersion {
 		return nil, fault.New(fault.Conflict, "VERSION_CONFLICT", "商品版本已变化")
 	}
+	if _, e = tx.Exec(ctx, `SELECT media_id FROM media_objects WHERE product_id=$1 ORDER BY media_id,variant FOR UPDATE`, id); e != nil {
+		return nil, managementStoreError(e)
+	}
 	target, action, e := management.Transition(status, source, operation, in)
 	if e != nil {
 		return nil, e
@@ -146,7 +152,7 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 		var enabled bool
 		e = tx.QueryRow(ctx, "SELECT c.enabled FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=$1", id).Scan(&enabled)
 		if e == nil {
-			e = tx.QueryRow(ctx, "SELECT count(*) FILTER(WHERE m.status='ready'),count(*) FROM product_images pi JOIN media_files m ON m.id=pi.media_id WHERE pi.product_id=$1", id).Scan(&ready, &total)
+			e = tx.QueryRow(ctx, "SELECT count(*) FILTER(WHERE m.status='ready' AND m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM media_objects o WHERE o.media_id=m.id AND (o.force_delete OR o.deleted_at IS NOT NULL))),count(*) FROM product_images pi JOIN media_files m ON m.id=pi.media_id WHERE pi.product_id=$1", id).Scan(&ready, &total)
 		}
 		if e != nil {
 			return nil, managementStoreError(e)

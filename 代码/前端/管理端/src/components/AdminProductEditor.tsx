@@ -1,4 +1,11 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { MediaSyncPanel } from "./MediaSyncPanel";
+import { publicationInterrupted } from "../../../共享/upload-progress";
+import {
+  canAcceptFreshProduct,
+  mergeMediaSyncDisplay,
+  editorRecordFromProduct,
+} from "../lib/media-sync-state";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adminApi, adminImageApi, type AdminRecord } from "../lib/admin-api";
 import { ApiError, productFrom } from "../lib/api";
 import { ImageUploader } from "./ImageUploader";
@@ -30,6 +37,8 @@ import {
 export const statusNames: Record<string, string> = {
   draft: "草稿",
   pending: "待审核",
+  publishing: "上架中",
+  rejected_final: "最终驳回",
   published: "已上架",
   rejected: "已退回",
   offline: "已下架",
@@ -75,6 +84,15 @@ export function AdminProductEditor({
   onSaved: () => void;
 }) {
   const [row, setRow] = useState<AdminRecord | null>(null);
+  const rowRef = useRef(row);
+  rowRef.current = row;
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const [form, setForm] = useState<FormValues>(formFrom({}));
   const [categories, setCategories] = useState<AdminRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +102,8 @@ export function AdminProductEditor({
   const [imageBusy, setImageBusy] = useState(false);
   const [imagePending, setImagePending] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState("");
   const [step, setStep] = useState(0);
@@ -117,7 +137,13 @@ export function AdminProductEditor({
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [step]);
   const product = row ? productFrom(row) : null;
+  const statusLabel = row
+    ? publicationInterrupted(row.status, row.publication_interrupted)
+      ? "上架已中止"
+      : statusNames[row.status]
+    : "尚未保存";
   const locked = busy || imageBusy;
+  const writeLocked = locked || conflict;
   useUnsavedChanges(dirty || imagePending, locked);
   const category = categories.find((c) => c.id === form.category_id);
   const allowedUnits: string[] = category?.price_units?.length
@@ -147,8 +173,10 @@ export function AdminProductEditor({
     /* Preserve malformed legacy data for server validation instead of replacing it. */
   }
   function accept(value: AdminRecord) {
+    rowRef.current = value;
     setRow(value);
     setForm(formFrom(value));
+    dirtyRef.current = false;
     setDirty(false);
     setConflict(false);
     setPrivateAccount("");
@@ -162,6 +190,72 @@ export function AdminProductEditor({
         ),
       ),
     );
+  }
+  async function receiveMediaState(next: AdminRecord) {
+    const current = rowRef.current;
+    if (!current) return;
+    const merged = mergeMediaSyncDisplay(
+      {
+        ...current,
+        status: String(current.status),
+        version: Number(current.version),
+      },
+      {
+        status: String(next.status),
+        version: Number(next.version),
+        interrupted: next.interrupted,
+      },
+      dirtyRef.current,
+    );
+    if (!merged.requiresReload) {
+      setRow(merged.record);
+      if (next.interrupted !== current.publication_interrupted) onSaved();
+      return;
+    }
+    if (dirtyRef.current) {
+      setRow(merged.record);
+      setConflict(true);
+      setError(merged.message);
+      return;
+    }
+    const expected = {
+      id: String(current.id),
+      version: Number(current.version),
+    };
+    setBusy(true);
+    try {
+      const fresh = await adminApi.product(expected.id);
+      if (!aliveRef.current) return;
+      const now = rowRef.current;
+      if (
+        !canAcceptFreshProduct(
+          expected,
+          now ? { id: String(now.id), version: Number(now.version) } : null,
+          dirtyRef.current,
+        )
+      ) {
+        if (now?.id === expected.id && dirtyRef.current) {
+          setConflict(true);
+          setError("商品状态已更新，未保存编辑仍保留，请重新加载最新版本。");
+        }
+        return;
+      }
+      accept(fresh);
+      setNotice(
+        fresh.status === "published"
+          ? "图片准备完成，商品已上架。"
+          : "商品状态已更新。",
+      );
+      onSaved();
+    } catch (error) {
+      if (aliveRef.current && rowRef.current?.id === expected.id) {
+        setConflict(true);
+        setError("商品状态已更新，但未能读取完整资料，请重新加载最新版本。");
+      }
+    } finally {
+      if (aliveRef.current && rowRef.current?.id === expected.id)
+        setBusy(false);
+    }
   }
   async function reload() {
     setLoading(true);
@@ -207,6 +301,10 @@ export function AdminProductEditor({
   }
   async function save(event?: FormEvent): Promise<Product> {
     event?.preventDefault();
+    if (conflict || row?.status === "publishing")
+      throw new Error("请先完成上架或重新加载最新版本，再编辑商品。");
+    if (row?.status === "rejected_final")
+      throw new Error("该商品已最终驳回，不能编辑或恢复上架。");
     if (
       row?.status === "published" &&
       !window.confirm(
@@ -275,6 +373,7 @@ export function AdminProductEditor({
     kind:
       | "approve"
       | "reject"
+      | "reject_final"
       | "submit"
       | "offline"
       | "publish"
@@ -282,6 +381,10 @@ export function AdminProductEditor({
       | "rented",
   ) {
     if (!row) return;
+    if (conflict) {
+      setError("请先重新加载最新版本，再继续操作。");
+      return;
+    }
     setError("");
     setNotice("");
     if (dirty || imagePending) {
@@ -289,16 +392,19 @@ export function AdminProductEditor({
       return;
     }
     if (
-      ["reject", "offline", "sold", "rented"].includes(kind) &&
+      ["reject", "reject_final", "offline", "sold", "rented"].includes(kind) &&
       !reason.trim()
     ) {
       setError("请填写退回或下架原因。");
       return;
     }
     const confirmations = {
-      approve: "审核通过后，这个版本会立即公开展示。确认资料与图片已经核对？",
-      publish: "上架后，用户可以看到商品和图片。确认公开展示？",
+      approve:
+        "审核通过后将准备图片，准备完成后公开展示。确认资料与图片已经核对？",
+      publish: "确认资料和图片无误？图片同步并校验完成后，商品将公开展示。",
       reject: "确认退回给投稿人修改？填写的原因会作为审核说明。",
+      reject_final:
+        "最终驳回后会清理该商品暂存图片，不能继续原稿。确认最终驳回？",
       offline: "下架后，用户将无法查看这个商品。确认下架？",
       submit: "确认资料和图片已准备好，提交审核？",
       sold: "确认标记为已售出？商品将停止公开展示。",
@@ -307,12 +413,11 @@ export function AdminProductEditor({
     if (!window.confirm(confirmations[kind])) return;
     setBusy(true);
     try {
-      const endpoint =
-        kind === "approve" || kind === "reject"
-          ? "review"
-          : kind === "publish"
-            ? "publish"
-            : "status";
+      const endpoint = ["approve", "reject", "reject_final"].includes(kind)
+        ? "review"
+        : kind === "publish"
+          ? "publish"
+          : "status";
       const body = {
         expected_version: row.version,
         ...(endpoint === "review"
@@ -325,14 +430,16 @@ export function AdminProductEditor({
       setReason("");
       setNotice(
         kind === "approve" || kind === "publish"
-          ? "已上架，用户可以查看这个商品。"
-          : kind === "reject"
-            ? "已退回修改，审核原因已保存。"
-            : kind === "offline"
-              ? "商品已下架，前台不再展示。"
-              : kind === "sold" || kind === "rented"
-                ? `商品已标记为${statusNames[kind]}。`
-                : "已提交，等待审核。",
+          ? "已提交上架，图片准备完成后公开展示。"
+          : kind === "reject_final"
+            ? "已最终驳回，暂存图片将按规则清理。"
+            : kind === "reject"
+              ? "已退回修改，审核原因已保存。"
+              : kind === "offline"
+                ? "商品已下架，前台不再展示。"
+                : kind === "sold" || kind === "rented"
+                  ? `商品已标记为${statusNames[kind]}。`
+                  : "已提交，等待审核。",
       );
       onSaved();
     } catch (e) {
@@ -353,18 +460,20 @@ export function AdminProductEditor({
           <h1>{id ? "编辑与管理商品" : "上架一个新商品"}</h1>
           <p>
             {row
-              ? `${row.product_code ?? row.id} · ${statusNames[row.status]} · 版本 ${row.version}`
+              ? `${row.product_code ?? row.id} · ${statusLabel} · 版本 ${row.version}`
               : "先保存草稿，再追加图片。"}
           </p>
         </div>
         <div className="heading-actions">
-          <button
-            type="button"
-            className="button-outline"
-            onClick={() => setShowPreview(!showPreview)}
-          >
-            {showPreview ? "收起预览" : "上架预览"}
-          </button>
+          {row?.status !== "rejected_final" && (
+            <button
+              type="button"
+              className="button-outline"
+              onClick={() => setShowPreview(!showPreview)}
+            >
+              {showPreview ? "收起预览" : "上架预览"}
+            </button>
+          )}
           <GuideButton kind="product" />
           <button
             type="button"
@@ -396,6 +505,11 @@ export function AdminProductEditor({
         />
       ) : (
         <>
+          {row?.status === "rejected_final" && (
+            <p className="admin-notice">
+              该商品已最终驳回，不能编辑或恢复上架。
+            </p>
+          )}
           {product?.unit === "unknown" && (
             <div className="admin-notice">
               <strong>原站迁移资料</strong>
@@ -481,7 +595,12 @@ export function AdminProductEditor({
               onSubmit={(e) => void save(e).catch(() => {})}
               className="member-form"
             >
-              <fieldset disabled={locked}>
+              <fieldset
+                disabled={
+                  writeLocked ||
+                  ["publishing", "rejected_final"].includes(row?.status)
+                }
+              >
                 <label className="form-field">
                   {formFields.title.label}
                   <input
@@ -903,19 +1022,27 @@ export function AdminProductEditor({
                 dirty || !product ? save() : Promise.resolve(product)
               }
               onChange={(next) => {
-                setRow((old) => ({
-                  ...old,
-                  id: next.id,
-                  status: next.status,
-                  version: next.version,
-                  image_total: next.imageTotal,
-                  images: next.images,
-                }));
+                if (dirtyRef.current) {
+                  if (next.version !== row?.version) {
+                    setConflict(true);
+                    setError(
+                      "商品资料已更新，未保存编辑仍保留，请重新加载最新版本后继续。",
+                    );
+                    throw new Error("请重新加载最新版本后继续。");
+                  }
+                  return;
+                }
+                accept(editorRecordFromProduct(row, next));
                 onSaved();
               }}
               onBusyChange={setImageBusy}
               onPendingChange={setImagePending}
-              disabled={busy || (!!product && dirty)}
+              disabled={
+                busy ||
+                conflict ||
+                (!!product && dirty) ||
+                ["publishing", "rejected_final"].includes(row?.status)
+              }
             />
             <div className="save-bar">
               <button
@@ -937,7 +1064,9 @@ export function AdminProductEditor({
           <div hidden={step !== 2} className="editor-step-body panel">
             <div className="location-note">
               <strong>第 3 步 · 检查后再公开</strong>
-              <span>确认标题、报价和图片无误，再选择上架或提交审核。</span>
+              <span>
+                确认标题、报价和图片无误。管理员新建商品可直接确认上架；会员投稿需审核通过。
+              </span>
             </div>
             <div className="product-review-card">
               <div className="review-cover">
@@ -953,9 +1082,7 @@ export function AdminProductEditor({
                 )}
               </div>
               <div>
-                <span className="pill">
-                  {row ? statusNames[row.status] : "尚未保存"}
-                </span>
+                <span className="pill">{statusLabel}</span>
                 <h2>{form.title || "尚未填写商品标题"}</h2>
                 <p>
                   {category?.name || "尚未选择分类"} ·{" "}
@@ -1019,8 +1146,16 @@ export function AdminProductEditor({
                     查看公开商品页 ↗
                   </a>
                 )}
+                {row.status === "publishing" && (
+                  <MediaSyncPanel
+                    productId={row.id}
+                    onStateChange={(next) => void receiveMediaState(next)}
+                  />
+                )}
                 {row.review_note && <p>最近审核说明：{row.review_note}</p>}
-                {(row.status === "pending" || row.status === "published") && (
+                {["pending", "published", "publishing"].includes(
+                  row.status,
+                ) && (
                   <label className="form-field">
                     操作原因
                     <input
@@ -1028,7 +1163,7 @@ export function AdminProductEditor({
                       onChange={(e) => setReason(e.target.value)}
                       placeholder="退回或下架时必填"
                       maxLength={500}
-                      disabled={locked}
+                      disabled={writeLocked}
                     />
                   </label>
                 )}
@@ -1037,17 +1172,24 @@ export function AdminProductEditor({
                     <>
                       <button
                         className="button-white"
-                        disabled={locked}
+                        disabled={writeLocked || dirty || imagePending}
                         onClick={() => void action("approve")}
                       >
                         审核通过并上架
                       </button>
                       <button
                         className="button-outline"
-                        disabled={locked}
+                        disabled={writeLocked}
                         onClick={() => void action("reject")}
                       >
                         退回修改
+                      </button>
+                      <button
+                        className="button-outline"
+                        disabled={writeLocked}
+                        onClick={() => void action("reject_final")}
+                      >
+                        最终驳回并清理图片
                       </button>
                     </>
                   )}
@@ -1059,7 +1201,7 @@ export function AdminProductEditor({
                         ["draft", "rejected"].includes(row.status) && (
                           <button
                             className="button-outline"
-                            disabled={locked}
+                            disabled={writeLocked || dirty || imagePending}
                             onClick={() => void action("submit")}
                           >
                             提交审核
@@ -1069,7 +1211,7 @@ export function AdminProductEditor({
                         ["offline", "sold", "rented"].includes(row.status)) && (
                         <button
                           className="button-white"
-                          disabled={locked}
+                          disabled={writeLocked || dirty || imagePending}
                           onClick={() => void action("publish")}
                         >
                           确认上架
@@ -1077,19 +1219,19 @@ export function AdminProductEditor({
                       )}
                     </>
                   )}
-                  {row.status === "published" && (
+                  {["published", "publishing"].includes(row.status) && (
                     <button
                       className="button-outline"
-                      disabled={locked}
+                      disabled={writeLocked}
                       onClick={() => void action("offline")}
                     >
-                      下架商品
+                      {row.status === "publishing" ? "取消上架" : "下架商品"}
                     </button>
                   )}
                   {row.status === "published" && (
                     <button
                       className="button-outline"
-                      disabled={locked}
+                      disabled={writeLocked}
                       onClick={() =>
                         void action(
                           row.trade_type === "sale" ? "sold" : "rented",

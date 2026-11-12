@@ -26,6 +26,12 @@ type Files interface {
 	RemoveRaw(string)
 	Open(context.Context, string, string, bool) (*domain.File, error)
 }
+type CapacityChecker interface {
+	CheckCapacity(context.Context, int64) error
+}
+type ProductCapacityChecker interface {
+	CheckProductCapacity(context.Context, int64) error
+}
 type Limiter interface {
 	Allow(context.Context, string, int, time.Duration) error
 }
@@ -75,8 +81,11 @@ func (s *Service) Create(ctx context.Context, actor domain.Actor, in domain.Crea
 	if in.Purpose == "" {
 		in.Purpose = "product"
 	}
-	if (in.Purpose != "product" && in.Purpose != "chat" && in.Purpose != "avatar") || (in.Purpose == "chat" && validID(in.ConversationID) != nil) || (in.Purpose != "chat" && in.ConversationID != "") {
+	if (in.Purpose != "product" && in.Purpose != "chat" && in.Purpose != "avatar" && in.Purpose != "contact") || (in.Purpose == "chat" && validID(in.ConversationID) != nil) || (in.Purpose != "chat" && in.ConversationID != "") {
 		return nil, fault.New(fault.Invalid, "INVALID_MEDIA_PURPOSE", "图片用途或咨询编号无效")
+	}
+	if (in.Purpose == "contact" && actor.Role != "admin") || (in.Resumable && in.Purpose != "product") {
+		return nil, fault.New(fault.Invalid, "INVALID_MEDIA_PURPOSE", "此用途不支持此上传方式")
 	}
 	if in.Purpose == "avatar" && in.Size > 2<<20 {
 		return nil, fault.New(fault.TooLarge, "IMAGE_TOO_LARGE", "头像不能超过2MB")
@@ -90,14 +99,28 @@ func (s *Service) Create(ctx context.Context, actor domain.Actor, in domain.Crea
 	if !domain.ValidUploadName(in.Filename, in.MIME) {
 		return nil, fault.New(fault.Invalid, "INVALID_IMAGE_TYPE", "请选择扩展名与格式一致的 JPG、PNG 或 WebP 图片")
 	}
-	if err := s.limiter.Allow(ctx, "upload:"+actor.ID, 120, 10*time.Minute); err != nil {
+	limit := 120
+	if in.Purpose == "product" {
+		limit = productUploadLimit
+	}
+	if err := s.limiter.Allow(ctx, "upload:"+in.Purpose+":"+actor.ID, limit, 10*time.Minute); err != nil {
 		return nil, err
+	}
+	// An early refusal avoids reserving a ticket; each write must still recheck capacity.
+	if capacity, ok := s.files.(ProductCapacityChecker); ok && in.Purpose == "product" {
+		if err := capacity.CheckProductCapacity(ctx, in.Size); err != nil {
+			return nil, err
+		}
+	} else if capacity, ok := s.files.(CapacityChecker); ok {
+		if err := capacity.CheckCapacity(ctx, in.Size); err != nil {
+			return nil, err
+		}
 	}
 	id, token := s.newID(), s.newToken()
 	if err := s.repo.Create(ctx, actor, in, id, "uploads/"+id+".raw", s.hash(token)); err != nil {
 		return nil, err
 	}
-	return map[string]any{"data": map[string]any{"media_id": id, "upload_url": "/api/v1/uploads/" + id + "/content?token=" + token, "method": "PUT", "headers": map[string]string{"Content-Type": in.MIME}, "expires_in": 900}}, nil
+	return map[string]any{"data": map[string]any{"media_id": id, "upload_url": "/api/v1/uploads/" + id + "/content?token=" + token, "method": "PUT", "headers": map[string]string{"Content-Type": in.MIME}, "expires_in": 900, "chunk_size": ChunkSize, "offset": 0}}, nil
 }
 func (s *Service) Receive(ctx context.Context, id, token string, length int64, source io.Reader) error {
 	if err := validID(id); err != nil {
@@ -109,6 +132,9 @@ func (s *Service) Receive(ctx context.Context, id, token string, length int64, s
 	upload, err := s.repo.Ticket(ctx, id, s.surface)
 	if err != nil || !s.checkTicket(upload, token) {
 		return tokenInvalid()
+	}
+	if upload.Resumable {
+		return fault.New(fault.Invalid, "CONTENT_RANGE_REQUIRED", "分块上传需要 Content-Range")
 	}
 	if upload.State == "uploaded" || upload.State == "ready" {
 		return nil
@@ -151,6 +177,26 @@ func (s *Service) Complete(ctx context.Context, actor domain.Actor, id string) (
 	if err := validID(id); err != nil {
 		return nil, err
 	}
+	ticket, err := s.repo.Ticket(ctx, id, s.surface)
+	if err != nil {
+		return nil, err
+	}
+	if ticket.Owner != actor.ID {
+		return nil, fault.New(fault.NotFound, "NOT_FOUND", "未找到资料")
+	}
+	if ticket.State == "ready" {
+		// A lost Complete response needs authorization, but no decoder or storage work.
+		err = s.repo.WithUpload(ctx, id, s.surface, actor.ID, func(current domain.Upload, _ domain.Mutation) error {
+			if current.State != "ready" {
+				return fault.New(fault.Conflict, "UPLOAD_CLOSED", "此上传已关闭或发生变化")
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return readyUploadResult(id), nil
+	}
 	timer := time.NewTimer(15 * time.Second)
 	defer timer.Stop()
 	select {
@@ -161,6 +207,85 @@ func (s *Service) Complete(ctx context.Context, actor domain.Actor, id string) (
 	case <-timer.C:
 		return nil, fault.New(fault.RateLimited, "IMAGE_PROCESSOR_BUSY", "图片处理繁忙，请稍后重试")
 	}
+	if !ticket.Resumable && !ticket.Managed {
+		return s.completeLocal(ctx, actor, id)
+	}
+	token := s.newToken()
+	// Check ownership under the final lock before expensive processing; network I/O follows outside it.
+	var upload domain.Upload
+	err = s.repo.WithUpload(ctx, id, s.surface, actor.ID, func(u domain.Upload, m domain.Mutation) error {
+		upload = u
+		if u.State != "ready" && u.State != "uploaded" {
+			return fault.New(fault.Invalid, "MEDIA_NOT_UPLOADED", "图片尚未上传或未通过校验")
+		}
+		if u.State == "uploaded" {
+			if u.ProcessingValid {
+				return fault.New(fault.RateLimited, "IMAGE_PROCESSOR_BUSY", "图片正在处理，请稍后重试")
+			}
+			cm, ok := m.(ChunkMutation)
+			if !ok {
+				return fault.New(fault.Unavailable, "RESUME_UNAVAILABLE", "上传服务暂不可用")
+			}
+			return cm.Claim(ctx, token)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if upload.State != "ready" {
+		upload.ProcessingToken = token
+		// Managed outputs use a unique generation; concurrent completions never overwrite each other.
+		processingCtx, stopProcessing := context.WithTimeout(ctx, 4*time.Minute)
+		processed, processErr := s.files.Sanitize(processingCtx, upload)
+		stopProcessing()
+		invalid := false
+		if f, ok := fault.As(processErr); ok && f.Code == "INVALID_IMAGE" {
+			invalid = true
+		}
+		if processErr != nil && !invalid {
+			s.releaseProcessing(ctx, actor, id, token)
+			return nil, processErr
+		}
+		installed := false
+		err = s.repo.WithUpload(ctx, id, s.surface, actor.ID, func(current domain.Upload, m domain.Mutation) error {
+			if current.State == "ready" {
+				return nil
+			}
+			if current.State != "uploaded" || current.Key != upload.Key || current.ProcessingToken != token || !current.ProcessingValid {
+				return fault.New(fault.Conflict, "UPLOAD_CLOSED", "此上传已关闭或发生变化")
+			}
+			if invalid {
+				return m.Failed(ctx)
+			}
+			if e := m.Ready(ctx, processed); e != nil {
+				return e
+			}
+			installed = true
+			return nil
+		})
+		// A failed commit is ambiguous: retain candidates for reconciliation, never delete the winner.
+		if err != nil {
+			s.releaseProcessing(ctx, actor, id, token)
+			return nil, err
+		}
+		if !installed && !invalid {
+			s.files.RemoveRaw(processed.Key)
+		}
+		if installed || invalid {
+			s.files.RemoveRaw(upload.Key)
+		}
+		if invalid {
+			return nil, processErr
+		}
+	}
+
+	return readyUploadResult(id), nil
+}
+func readyUploadResult(id string) map[string]any {
+	return map[string]any{"data": map[string]any{"id": id, "status": "ready", "url": "/api/v1/media/" + id + "/file", "preview_url": "/api/v1/media/" + id + "/preview"}}
+}
+func (s *Service) completeLocal(ctx context.Context, actor domain.Actor, id string) (map[string]any, error) {
 	var invalid error
 	rawKey := ""
 	err := s.repo.WithUpload(ctx, id, s.surface, actor.ID, func(upload domain.Upload, mutation domain.Mutation) error {
@@ -196,7 +321,7 @@ func (s *Service) Complete(ctx context.Context, actor domain.Actor, id string) (
 	if invalid != nil {
 		return nil, invalid
 	}
-	return map[string]any{"data": map[string]any{"id": id, "status": "ready", "url": "/api/v1/media/" + id + "/file", "preview_url": "/api/v1/media/" + id + "/preview"}}, nil
+	return readyUploadResult(id), nil
 }
 func (s *Service) Open(ctx context.Context, id string, thumbnail bool, resolve func(context.Context) (domain.Actor, error)) (*domain.File, error) {
 	if err := validID(id); err != nil {

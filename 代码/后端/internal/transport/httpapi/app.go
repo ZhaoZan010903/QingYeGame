@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	mediaapp "qingye/backend/internal/application/media"
 	configuration "qingye/backend/internal/config"
 	"qingye/backend/internal/infrastructure/security"
 	"strings"
@@ -18,6 +19,7 @@ import (
 
 type Config = configuration.Config
 type App struct {
+	MediaFiles   mediaapp.Files
 	DB           *pgxpool.Pool
 	Redis        *redis.Client
 	Config       Config
@@ -31,6 +33,7 @@ func (a *App) Routes() http.Handler {
 	if a.surface() == "admin" {
 		a.registerAdmin(mux)
 		a.registerAdminImages(mux)
+		a.registerMediaAdministration(mux)
 		mux.HandleFunc("GET /api/v1/publish-form", a.publicPublishForm)
 		// Preview reads run behind the same administrator gate as management writes.
 		mux.HandleFunc("GET /api/v1/categories", a.publicCategories)

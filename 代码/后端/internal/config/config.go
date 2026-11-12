@@ -13,6 +13,7 @@ import (
 )
 
 type Config struct {
+	MediaR20                                                            MediaR20Config
 	Addr, DatabaseURL, RedisURL, MediaDir, PublicBaseURL, SessionSecret string
 	ProductCredentialKey                                                string
 	Surface                                                             string
@@ -42,6 +43,11 @@ func Load() (Config, error) {
 	}
 	c := Config{Surface: surface, Addr: env("QINGYE_ADDR", env("HTTP_ADDR", addr)), DatabaseURL: os.Getenv("DATABASE_URL"), RedisURL: env("REDIS_URL", "redis://127.0.0.1:6381/0"), MediaDir: env("MEDIA_DIR", "./data/media"), PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), SessionSecret: os.Getenv("SESSION_SECRET"), AllowedOrigins: strings.Split(env("ALLOWED_ORIGINS", origin), ",")}
 	c.ProductCredentialKey = os.Getenv("PRODUCT_CREDENTIAL_KEY")
+	var mediaErr error
+	c.MediaR20, mediaErr = loadMediaR20()
+	if mediaErr != nil {
+		return c, mediaErr
+	}
 	c.ChatWTAddr, c.ChatWTURL = os.Getenv("CHAT_WT_ADDR"), os.Getenv("CHAT_WT_URL")
 	c.ChatWTCert, c.ChatWTKey = os.Getenv("CHAT_WT_CERT"), os.Getenv("CHAT_WT_KEY")
 	for _, item := range []struct {
@@ -105,6 +111,9 @@ func (c Config) Defaults() Config {
 }
 
 func (c Config) Validate() error {
+	if err := c.MediaR20.validate(); err != nil {
+		return err
+	}
 	if c.ProductCredentialKey != "" {
 		key, err := base64.StdEncoding.DecodeString(c.ProductCredentialKey)
 		if err != nil || len(key) != 32 {

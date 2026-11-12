@@ -6,10 +6,14 @@ import (
 	"errors"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"path/filepath"
 	chatapp "qingye/backend/internal/application/chat"
+	mediaapp "qingye/backend/internal/application/medialifecycle"
 	recommendationapp "qingye/backend/internal/application/recommendation"
 	"qingye/backend/internal/config"
 	"qingye/backend/internal/infrastructure/cache"
+	"qingye/backend/internal/infrastructure/mediafiles"
+	"qingye/backend/internal/infrastructure/mediaobject"
 	"qingye/backend/internal/infrastructure/postgres"
 	"qingye/backend/internal/infrastructure/security"
 	"qingye/backend/internal/maintenance"
@@ -22,6 +26,8 @@ type Runtime struct {
 	Maintenance     *maintenance.Service
 	Chat            *chatapp.Service
 	Recommendations *recommendationapp.Service
+	Media           *mediaapp.Worker
+	mediaDB         *pgxpool.Pool
 	db              *pgxpool.Pool
 	redis           *redis.Client
 }
@@ -62,10 +68,41 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 	r.Recommendations = recommendationapp.New(&postgres.RecommendationStore{DB: db}, security.NewID, func(ctx context.Context, batch string) {
 		_ = client.Set(ctx, "qingye:recommendations:batch", batch, time.Hour).Err()
 	})
+	if c.MediaR20.Enabled {
+		mc := c.MediaR20
+		temp := filepath.Join(c.MediaDir, "r20-tmp")
+		stage, err := mediaobject.NewS3(mediaobject.Config{Environment: mc.Environment, Endpoint: mc.StageEndpoint, Bucket: mc.StageBucket, AccessKeyID: mc.StageAccessKeyID, AccessKeySecret: mc.StageAccessKeySecret, TempDir: temp, MinFreeBytes: mc.MinFreeBytes, CapacityPath: mc.StageCapacityPath})
+		if err != nil {
+			r.Close()
+			return nil, err
+		}
+		published, err := mediaobject.NewOSS(mediaobject.Config{Environment: mc.Environment, Endpoint: mc.OSSEndpoint, Bucket: mc.OSSBucket, AccessKeyID: mc.OSSAccessKeyID, AccessKeySecret: mc.OSSAccessKeySecret, TempDir: temp, MinFreeBytes: mc.MinFreeBytes})
+		if err != nil {
+			r.Close()
+			return nil, err
+		}
+		r.HTTP.MediaFiles = &mediaobject.Files{Local: &mediafiles.Store{Root: c.MediaDir, MinFreeBytes: mc.MinFreeBytes}, Staging: stage, Published: published, Repository: &postgres.MediaLifecycleStore{DB: db, NewID: security.NewID}, Environment: mc.Environment, TempDir: temp, NewID: security.NewID}
+		if c.Surface == "public" {
+			workerConfig := poolConfig.Copy()
+			workerConfig.MaxConns = 2
+			r.mediaDB, err = pgxpool.NewWithConfig(ctx, workerConfig)
+			if err != nil {
+				r.Close()
+				return nil, errors.New("media worker database initialization failed")
+			}
+			r.Media = &mediaapp.Worker{Repository: &postgres.MediaLifecycleStore{DB: r.mediaDB, NewID: security.NewID}, Staging: stage, Published: published}
+		}
+	}
 	return r, nil
 }
 
-func (r *Runtime) Close() { r.db.Close(); _ = r.redis.Close() }
+func (r *Runtime) Close() {
+	if r.mediaDB != nil {
+		r.mediaDB.Close()
+	}
+	r.db.Close()
+	_ = r.redis.Close()
+}
 
 func redisOptions(c config.Config) (*redis.Options, error) {
 	ro, err := redis.ParseURL(c.RedisURL)

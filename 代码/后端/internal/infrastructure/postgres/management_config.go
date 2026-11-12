@@ -151,7 +151,7 @@ func (s *ManagementStore) SaveContact(ctx context.Context, actor management.Acto
 	}
 	if in.QRMediaID != nil && *in.QRMediaID != "" {
 		var mediaID string
-		err = tx.QueryRow(ctx, `SELECT m.id FROM media_files m WHERE m.id=$1 AND m.purpose='product' AND m.status='ready' AND m.deleted_at IS NULL
+		err = tx.QueryRow(ctx, `SELECT m.id FROM media_files m WHERE m.id=$1 AND m.purpose IN ('product','contact') AND m.status='ready' AND NOT EXISTS(SELECT 1 FROM media_objects o WHERE o.media_id=m.id) AND m.deleted_at IS NULL
    AND (m.owner_id=$2 OR EXISTS(SELECT 1 FROM contacts c WHERE c.id=$3 AND c.qr_media_id=m.id)) FOR SHARE OF m`, *in.QRMediaID, actor.ID, id).Scan(&mediaID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fault.New(fault.Invalid, "INVALID_MEDIA", "请选择本人已上传的二维码素材")

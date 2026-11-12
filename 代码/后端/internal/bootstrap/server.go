@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
+	"qingye/backend/internal/infrastructure/mediafiles"
+	"qingye/backend/internal/infrastructure/mediaobject"
 	"sync"
 	"time"
 )
@@ -36,6 +39,34 @@ func (r *Runtime) Serve(parent context.Context) error {
 	start := func(fn func()) { jobs.Add(1); go func() { defer jobs.Done(); fn() }() }
 	// 双进程共用数据库，只有public进程运行周期任务，避免重复重算。
 	if r.HTTP.Config.Surface == "public" {
+		if r.Media != nil {
+			start(func() {
+				runJob(ctx, 5*time.Minute, time.Minute, true, func(job context.Context) error {
+					_, err := mediaobject.CleanupSpool(filepath.Join(r.HTTP.Config.MediaDir, "r20-tmp"), time.Now())
+					if err == nil {
+						_, err = (&mediafiles.Store{Root: r.HTTP.Config.MediaDir}).CleanupScratch(time.Now())
+					}
+					return err
+				})
+			})
+			start(func() {
+				for ctx.Err() == nil {
+					job, stop := context.WithTimeout(ctx, 10*time.Minute)
+					done, err := r.Media.RunOnce(job)
+					stop()
+					if err != nil && ctx.Err() == nil {
+						slog.Warn("media lifecycle task failed")
+					}
+					if !done || err != nil {
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(2 * time.Second):
+						}
+					}
+				}
+			})
+		}
 		start(func() {
 			runJob(ctx, 5*time.Minute, 45*time.Second, true, func(job context.Context) error {
 				result, err := r.Maintenance.CleanupDrafts(job, 100)

@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,7 +23,10 @@ import (
 
 var ImageProcessors = make(chan struct{}, 1)
 
-type Store struct{ Root string }
+type Store struct {
+	Root         string
+	MinFreeBytes int64
+}
 
 func hash(value string) string {
 	sum := sha256.Sum256([]byte(value))
@@ -138,9 +142,15 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.source.Read(p)
 }
 func (s *Store) Receive(ctx context.Context, key string, size int64, source io.Reader) (media.Staged, error) {
+	if size < 1 || size > math.MaxInt64/2 {
+		return nil, fault.New(fault.Invalid, "UPLOAD_SIZE_MISMATCH", "图片上传大小无效")
+	}
 	path, err := Path(s.Root, key)
 	if err != nil {
 		return nil, fault.Wrap(fault.Internal, "STORAGE_ERROR", "图片存储不可用", err)
+	}
+	if err = CheckAvailable(filepath.Dir(path), s.MinFreeBytes, size*2); err != nil {
+		return nil, err
 	}
 	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, fault.Wrap(fault.Unavailable, "STORAGE_ERROR", "图片存储不可用", err)
@@ -159,6 +169,15 @@ func (s *Store) Receive(ctx context.Context, key string, size int64, source io.R
 	return staged, nil
 }
 func (s *Store) Sanitize(_ context.Context, upload media.Upload) (media.Processed, error) {
+	return s.sanitize(upload, s.Root)
+}
+
+// SanitizeTo keeps R20 intermediate copies inside a disposable processing directory.
+func (s *Store) SanitizeTo(_ context.Context, upload media.Upload, outputRoot string) (media.Processed, error) {
+	return s.sanitize(upload, outputRoot)
+}
+
+func (s *Store) sanitize(upload media.Upload, outputRoot string) (media.Processed, error) {
 	sourcePath, err := ReadPath(s.Root, upload.Key)
 	if err != nil {
 		return media.Processed{}, fault.Wrap(fault.Unavailable, "STORAGE_ERROR", "找不到已上传的图片，请重新上传", err)
@@ -168,13 +187,20 @@ func (s *Store) Sanitize(_ context.Context, upload media.Upload) (media.Processe
 		return media.Processed{}, fault.Wrap(fault.Unavailable, "STORAGE_ERROR", "读取图片失败", err)
 	}
 	defer src.Close()
-	outputKey := "images/" + upload.ID + ".png"
-	if upload.MIME == "image/jpeg" {
-		outputKey = "images/" + upload.ID + ".jpg"
+	outputID := upload.ID
+	if upload.Resumable && upload.ProcessingToken != "" {
+		outputID += "-" + hash(upload.ProcessingToken)[:16]
 	}
-	outputPath, err := Path(s.Root, outputKey)
+	outputKey := "images/" + outputID + ".png"
+	if upload.MIME == "image/jpeg" {
+		outputKey = "images/" + outputID + ".jpg"
+	}
+	outputPath, err := Path(outputRoot, outputKey)
 	if err != nil {
 		return media.Processed{}, fault.Wrap(fault.Internal, "STORAGE_ERROR", "存储路径无效", err)
+	}
+	if err = CheckAvailable(filepath.Dir(outputPath), s.MinFreeBytes, 64<<20); err != nil {
+		return media.Processed{}, err
 	}
 	if err = os.MkdirAll(filepath.Dir(outputPath), 0700); err != nil {
 		return media.Processed{}, fault.Wrap(fault.Unavailable, "STORAGE_ERROR", "图片存储不可用", err)

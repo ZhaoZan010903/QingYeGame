@@ -28,6 +28,7 @@ func (s *Service) CleanupDrafts(ctx context.Context, limit int) (DraftCleanupRes
 	rows, err := tx.Query(ctx, `SELECT p.id FROM products p WHERE p.deleted_at IS NULL AND p.status='draft' AND p.source='member' AND p.published_at IS NULL AND p.legacy_id IS NULL AND p.draft_expires_at<=now()
  AND NOT EXISTS(SELECT 1 FROM product_reviews r WHERE r.product_id=p.id AND r.decision='published')
  AND NOT `+postgres.DraftHasActiveUploadsSQL+`
+ AND NOT `+postgres.DraftHasRetainedMediaSQL+`
  ORDER BY p.draft_expires_at,p.id LIMIT $1 FOR UPDATE OF p SKIP LOCKED`, limit)
 	if err != nil {
 		return out, err
@@ -60,7 +61,7 @@ func (s *Service) CleanupDrafts(ctx context.Context, limit int) (DraftCleanupRes
 		}
 		out.Expired++
 	}
-	rows, err = tx.Query(ctx, `SELECT m.id FROM media_files m WHERE m.managed_upload AND m.source_url='' AND m.deleted_at IS NULL AND COALESCE(m.ready_at,m.created_at)<=now()-interval '72 hours' AND (m.upload_expires_at IS NULL OR m.upload_expires_at<=now()) AND NOT EXISTS(SELECT 1 FROM product_images pi WHERE pi.media_id=m.id)
+	rows, err = tx.Query(ctx, `SELECT m.id FROM media_files m WHERE m.managed_upload AND m.source_url='' AND m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM media_objects o WHERE o.media_id=m.id) AND ((COALESCE(m.ready_at,m.created_at)<=now()-interval '72 hours' AND (NOT (m.resumable OR m.lifecycle_managed) OR m.created_at<=now()-interval '5 days')) OR (m.purpose='product' AND m.lifecycle_managed AND m.upload_cleanup_requested)) AND (m.processing_token IS NULL OR m.processing_until<=now()) AND (m.upload_expires_at IS NULL OR m.upload_expires_at<=now()) AND NOT EXISTS(SELECT 1 FROM product_images pi WHERE pi.media_id=m.id)
  AND NOT EXISTS(SELECT 1 FROM contacts c WHERE c.qr_media_id=m.id)
  AND NOT EXISTS(SELECT 1 FROM chat_message_images a WHERE a.media_id=m.id)
  AND NOT EXISTS(SELECT 1 FROM users u WHERE u.avatar_media_id=m.id)

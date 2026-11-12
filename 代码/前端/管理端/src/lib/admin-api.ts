@@ -15,6 +15,36 @@ export const canManage = (user: User | null | undefined) =>
 
 /** Admin requests always reach the server; there is no local or fixture-backed admin mode. */
 export const adminApi = {
+  async mediaSync(id: string): Promise<AdminRecord> {
+    return unwrap(await request(`${path(id)}/media-sync`));
+  },
+  async retryMediaSync(id: string, version: number): Promise<void> {
+    await request(`${path(id)}/media-sync/retry`, "POST", { expected_version: version });
+  },
+  async uploadRestriction(id: string): Promise<AdminRecord> {
+    return unwrap(
+      await request(
+        `/admin/users/${encodeURIComponent(id)}/upload-restriction`,
+      ),
+    );
+  },
+  async saveUploadRestriction(
+    id: string,
+    values: {
+      blocked: boolean;
+      expected_version: number;
+      reason: string;
+      purge_staging: boolean;
+    },
+  ): Promise<AdminRecord> {
+    return unwrap(
+      await request(
+        `/admin/users/${encodeURIComponent(id)}/upload-restriction`,
+        "PUT",
+        values,
+      ),
+    );
+  },
   async dictionaries(): Promise<DictionaryGroup[]> {
     return rows(await request("/admin/dictionaries")) as DictionaryGroup[];
   },

@@ -5,6 +5,7 @@ import { StateView } from "./shared";
 import { Link } from "react-router-dom";
 import { RefreshCw, TrendingUp } from "lucide-react";
 import { useUnsavedChanges } from "../lib/admin-ux";
+import { UploadRestrictionPanel } from "./UploadRestrictionPanel";
 
 const message = (error: unknown) =>
   error instanceof Error ? error.message : "操作失败，请重试。";
@@ -26,6 +27,8 @@ export function AdminUsers() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [restrictionMember, setRestrictionMember] =
+    useState<AdminRecord | null>(null);
   async function load(more = false) {
     const sequence = ++requestSequence.current;
     setBusy(true);
@@ -154,12 +157,28 @@ export function AdminUsers() {
                       {member.enabled ? "停用账户" : "启用账户"}
                     </button>
                   )}
+                  {member.role === "member" && (
+                    <button
+                      className="button-outline"
+                      disabled={busy}
+                      onClick={() => setRestrictionMember(member)}
+                    >
+                      上传权限
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {restrictionMember && (
+        <UploadRestrictionPanel
+          key={restrictionMember.id}
+          member={restrictionMember}
+          close={() => setRestrictionMember(null)}
+        />
+      )}
       {busy && <p role="status">正在处理…</p>}
       {!busy && !items.length && (
         <p className="admin-empty">没有匹配的账户。</p>

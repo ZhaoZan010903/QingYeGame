@@ -1,4 +1,5 @@
 import { canDeleteDraft } from '../lib/publish-dictionaries';
+import { publicationInterrupted } from '../../../共享/upload-progress';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -21,8 +22,10 @@ import '../member.css';
 export const listingStatus: Record<Product['status'], string> = {
   draft: '草稿',
   pending: '审核中',
+  publishing: '上架中',
   published: '已展示',
   rejected: '退回修改',
+  rejected_final: '未通过',
   offline: '已下架',
   sold: '已售出',
   rented: '租用中',
@@ -511,9 +514,15 @@ export function MemberPage() {
                         {tab === 'listings' ? (
                           <>
                             <span className={`status-badge status-${product.status}`}>
-                              {listingStatus[product.status]}
+                              {publicationInterrupted(
+                                product.status,
+                                product.publicationInterrupted,
+                              )
+                                ? '上架已中止'
+                                : listingStatus[product.status]}
                             </span>
-                            {!isDemo ? (
+                            {!isDemo &&
+                            !['publishing', 'rejected_final'].includes(product.status) ? (
                               <Link className="text-button" to={`/me/listings/${product.id}/edit`}>
                                 {['published', 'pending'].includes(product.status)
                                   ? '编辑并重新审核'
@@ -528,7 +537,9 @@ export function MemberPage() {
                                 联系修改资料
                               </button>
                             ) : (
-                              product.status !== 'pending' && (
+                              !['pending', 'publishing', 'rejected_final'].includes(
+                                product.status,
+                              ) && (
                                 <Link
                                   className="text-button"
                                   to={`/me/listings/${product.id}/edit`}
@@ -546,7 +557,7 @@ export function MemberPage() {
                                 删除草稿
                               </button>
                             )}
-                            {['published', 'pending'].includes(product.status) && (
+                            {['published', 'pending', 'publishing'].includes(product.status) && (
                               <button
                                 className="text-button"
                                 disabled={!!busy}
@@ -556,7 +567,9 @@ export function MemberPage() {
                                   ? '正在处理…'
                                   : product.status === 'pending'
                                     ? '撤回审核'
-                                    : '下架商品'}
+                                    : product.status === 'publishing'
+                                      ? '取消上架'
+                                      : '下架商品'}
                               </button>
                             )}
                           </>

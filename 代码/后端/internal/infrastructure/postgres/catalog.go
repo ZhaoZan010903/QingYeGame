@@ -55,7 +55,8 @@ const ProductJSON = `jsonb_build_object(
  'attribute_labels',COALESCE((SELECT jsonb_object_agg(g.key,COALESCE((SELECT string_agg(COALESCE(o.label,v.value #>> '{}'),'、' ORDER BY v.position)
  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.attributes->g.key)='array' THEN p.attributes->g.key ELSE jsonb_build_array(p.attributes->g.key) END) WITH ORDINALITY v(value,position)
  LEFT JOIN product_dictionary_options o ON o.dictionary_key=g.key AND o.value=v.value #>> '{}'),'')) FROM product_dictionary_groups g WHERE p.attributes ? g.key),'{}'::jsonb),
- 'status',p.status,'source',p.source,'version',p.version,'approved_version',p.approved_version,
+ 'status',p.status,'publication_interrupted',p.status='publishing' AND EXISTS(SELECT 1 FROM product_images ip JOIN media_objects io ON io.media_id=ip.media_id WHERE ip.product_id=p.id AND (io.force_delete OR io.deleted_at IS NOT NULL)),
+ 'source',p.source,'version',p.version,'approved_version',p.approved_version,
  'draft_expires_at',p.draft_expires_at,'manual_rank',p.manual_rank,'review_note',p.review_note,'legacy_price',p.legacy_price,
  'legacy_category',p.legacy_category,'verification_status',p.verification_status,
  'created_at',p.created_at,'updated_at',p.updated_at,'published_at',p.published_at,

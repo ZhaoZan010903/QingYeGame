@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	service "qingye/backend/internal/application/media"
 	domain "qingye/backend/internal/domain/media"
 	"qingye/backend/internal/infrastructure/cache"
 	"qingye/backend/internal/infrastructure/mediafiles"
 	"qingye/backend/internal/infrastructure/postgres"
+	"strings"
 )
 
 const maxImagePixels = domain.MaxImagePixels
@@ -35,11 +37,14 @@ func (w *limitedImageWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 func (a *App) mediaService() *service.Service {
-	// OSS 待读图迁移完成后再显式装配，当前继续本地读取；不要取消此注释直接切换。
-	// 预备实现：internal/infrastructure/mediafilesoss（仅 oss_read 标签编译）。
-	// 未来在 bootstrap 复用已验证清单和只读客户端，再注入 service.New 的 Files；
-	// 必须保持 Service.Open 的商品/聊天/头像权限检查先于任何远端读，缩略图仍走本地。
-	return service.New(&postgres.MediaStore{DB: a.DB}, &mediafiles.Store{Root: a.Config.MediaDir}, cache.Limiter{Client: a.Redis}, a.surface(), a.uploadMax(), imageProcessors, newID, randomToken, tokenHash)
+	// R20 仅由 bootstrap 注入新商品对象适配；旧迁移读取预备仍不启用。
+	// mediafilesoss 继续受 oss_read 标签隔离，不能据此切换历史图片路径。
+	// 所有适配都必须先经过 Service.Open 的用途与资源权限校验。
+	files := a.MediaFiles
+	if files == nil {
+		files = &mediafiles.Store{Root: a.Config.MediaDir}
+	}
+	return service.New(&postgres.MediaStore{DB: a.DB, ManagedEnabled: a.Config.MediaR20.Enabled}, files, cache.Limiter{Client: a.Redis}, a.surface(), a.uploadMax(), imageProcessors, newID, randomToken, tokenHash)
 }
 func (a *App) mediaActor(u *User) domain.Actor {
 	return domain.Actor{ID: u.ID, Role: u.Role, Surface: a.surface()}
@@ -48,6 +53,8 @@ func (a *App) registerMedia(mux routeRegistrar) {
 	mux.HandleFunc("POST /api/v1/uploads", a.memberMutation(a.createUpload))
 	mux.HandleFunc("PUT /api/v1/uploads/{id}/content", a.memberMutation(a.receiveUpload))
 	mux.HandleFunc("POST /api/v1/uploads/{id}/complete", a.memberMutation(a.completeUpload))
+	mux.HandleFunc("GET /api/v1/uploads/{id}/status", a.uploadStatus)
+	mux.HandleFunc("DELETE /api/v1/uploads/{id}", a.memberMutation(a.cancelUpload))
 	mux.HandleFunc("GET /api/v1/media/{id}", a.serveMedia)
 	mux.HandleFunc("GET /api/v1/media/{id}/file", a.serveMedia)
 	mux.HandleFunc("GET /api/v1/media/{id}/preview", a.serveMedia)
@@ -76,7 +83,12 @@ func (a *App) createUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, out)
 }
 func (a *App) receiveUpload(w http.ResponseWriter, r *http.Request) {
-	err := a.mediaService().Receive(r.Context(), r.PathValue("id"), r.URL.Query().Get("token"), r.ContentLength, r.Body)
+	var err error
+	if header := r.Header.Get("Content-Range"); header != "" {
+		err = a.mediaService().ReceiveRange(r.Context(), r.PathValue("id"), r.URL.Query().Get("token"), header, r.ContentLength, r.Body)
+	} else {
+		err = a.mediaService().Receive(r.Context(), r.PathValue("id"), r.URL.Query().Get("token"), r.ContentLength, r.Body)
+	}
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -97,7 +109,7 @@ func (a *App) completeUpload(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) serveMedia(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	file, err := a.mediaService().Open(r.Context(), id, r.URL.Query().Get("variant") == "thumb", func(ctx context.Context) (domain.Actor, error) {
+	file, err := a.mediaService().Open(r.Context(), id, r.URL.Query().Get("variant") == "thumb" || strings.HasSuffix(r.URL.Path, "/preview"), func(ctx context.Context) (domain.Actor, error) {
 		u, err := a.currentUserBySession(ctx, a.requestSessionHash(r))
 		if err != nil {
 			return domain.Actor{}, err
@@ -108,10 +120,59 @@ func (a *App) serveMedia(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	if file.RedirectURL != "" {
+		w.Header().Set("Cache-Control", "private, no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		http.Redirect(w, r, file.RedirectURL, http.StatusFound)
+		return
+	}
 	defer file.Reader.Close()
 	w.Header().Set("Content-Type", file.MIME)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", id))
 	http.ServeContent(w, r, id, file.Modified, file.Reader)
+}
+
+func (a *App) uploadStatus(w http.ResponseWriter, r *http.Request) {
+	// This GET refreshes a capability; it requires the same trusted source as upload writes.
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		if ref, e := url.Parse(r.Referer()); e == nil && ref.Host != "" {
+			origin = ref.Scheme + "://" + ref.Host
+		}
+	}
+	allowed := false
+	for _, v := range a.Config.AllowedOrigins {
+		if origin != "" && origin == strings.TrimRight(v, "/") {
+			allowed = true
+			break
+		}
+	}
+	if !allowed || r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+		fail(w, 403, "ORIGIN_REJECTED", "请求来源不允许")
+		return
+	}
+
+	u, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	out, err := a.mediaService().Status(r.Context(), a.mediaActor(u), r.PathValue("id"))
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+func (a *App) cancelUpload(w http.ResponseWriter, r *http.Request) {
+	u, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if err := a.mediaService().Cancel(r.Context(), a.mediaActor(u), r.PathValue("id")); err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"ok": true}})
 }

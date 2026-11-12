@@ -245,7 +245,7 @@ func (s *MemberStore) Create(ctx context.Context, u member.Actor, input catalog.
 	if err != nil {
 		return nil, memberStoreError(err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO products(id,product_code,owner_id,category_id,title,trade_type,price_amount,price_unit,attributes,description,source,draft_expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'member',now()+interval '72 hours')`, id, code, u.ID, input.CategoryID, input.Title, input.TradeType, input.PriceAmount, input.PriceUnit, input.Attributes, input.Description)
+	_, err = tx.Exec(ctx, `INSERT INTO products(id,product_code,owner_id,category_id,title,trade_type,price_amount,price_unit,attributes,description,source,draft_expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'member',now()+interval '5 days')`, id, code, u.ID, input.CategoryID, input.Title, input.TradeType, input.PriceAmount, input.PriceUnit, input.Attributes, input.Description)
 	if err == nil {
 		err = saveProductExtras(ctx, tx, id, s.CredentialKey, input)
 	}
@@ -271,9 +271,12 @@ func (s *MemberStore) Edit(ctx context.Context, u member.Actor, id string, input
 		return nil, memberStoreError(err)
 	}
 	defer tx.Rollback(ctx)
-	version, _, err := lockedOwner(ctx, tx, id, u.ID)
+	version, status, err := lockedOwner(ctx, tx, id, u.ID)
 	if err != nil {
 		return nil, memberStoreError(err)
+	}
+	if status == "rejected_final" {
+		return nil, fault.New(fault.Conflict, "PRODUCT_FINALLY_REJECTED", "此商品已被最终驳回，不能修改或重新提交")
 	}
 	if err := member.CheckVersion(version, input.ExpectedVersion); err != nil {
 		return nil, err
@@ -314,6 +317,9 @@ func (s *MemberStore) Transition(ctx context.Context, u member.Actor, id string,
 	if err := member.CheckVersion(version, input.ExpectedVersion); err != nil {
 		return nil, err
 	}
+	if _, err = tx.Exec(ctx, `SELECT media_id FROM media_objects WHERE product_id=$1 ORDER BY media_id,variant FOR UPDATE`, id); err != nil {
+		return nil, memberStoreError(err)
+	}
 	next, err := member.NextStatus(status, submit)
 	if err != nil {
 		return nil, err
@@ -332,7 +338,7 @@ func (s *MemberStore) Transition(ctx context.Context, u member.Actor, id string,
 			return nil, fault.New(fault.Invalid, "INCOMPLETE_PRODUCT", err.Error())
 		}
 		var count int
-		err = tx.QueryRow(ctx, `SELECT count(*) FROM product_images pi JOIN media_files m ON m.id=pi.media_id WHERE pi.product_id=$1 AND m.status='ready'`, id).Scan(&count)
+		err = tx.QueryRow(ctx, `SELECT count(*) FROM product_images pi JOIN media_files m ON m.id=pi.media_id WHERE pi.product_id=$1 AND m.status='ready' AND m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM media_objects o WHERE o.media_id=m.id AND (o.force_delete OR o.deleted_at IS NOT NULL))`, id).Scan(&count)
 		if err != nil {
 			return nil, memberStoreError(err)
 		}
@@ -467,9 +473,12 @@ func (s *MemberStore) AppendImages(ctx context.Context, u member.Actor, id strin
 		tx.Rollback(ctx)
 		return s.productResult(ctx, replay)
 	}
-	version, _, err := lockedImageOwner(ctx, tx, u, id)
+	version, status, err := lockedImageOwner(ctx, tx, u, id)
 	if err != nil {
 		return nil, memberStoreError(err)
+	}
+	if status == "rejected_final" {
+		return nil, fault.New(fault.Conflict, "PRODUCT_FINALLY_REJECTED", "此商品已被最终驳回，不能修改或重新提交")
 	}
 	if err := member.CheckVersion(version, input.ExpectedVersion); err != nil {
 		return nil, err
@@ -480,7 +489,13 @@ func (s *MemberStore) AppendImages(ctx context.Context, u member.Actor, id strin
 		return nil, memberStoreError(err)
 	}
 	// Lock shared media in one stable order even when clients request opposite display orders.
-	mediaRows, err := tx.Query(ctx, `SELECT id,COALESCE(owner_id,''),status FROM media_files WHERE id=ANY($1::text[]) AND purpose='product' AND deleted_at IS NULL ORDER BY id FOR UPDATE`, input.MediaIDs)
+	if err = lockMemberQuota(ctx, tx, u.ID); err != nil {
+		return nil, memberStoreError(err)
+	}
+	if err = checkProductUploadAllowed(ctx, tx, u.ID); err != nil {
+		return nil, err
+	}
+	mediaRows, err := tx.Query(ctx, `SELECT id,COALESCE(owner_id,''),status FROM media_files m WHERE id=ANY($1::text[]) AND purpose='product' AND deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM media_objects o WHERE o.media_id=m.id AND (o.deleted_at IS NOT NULL OR o.force_delete)) ORDER BY id FOR UPDATE`, input.MediaIDs)
 	if err != nil {
 		return nil, memberStoreError(err)
 	}
@@ -526,7 +541,7 @@ func (s *MemberStore) AppendImages(ctx context.Context, u member.Actor, id strin
 	}
 	_, err = tx.Exec(ctx, `UPDATE products SET version=version+1,status='draft',approved_version=NULL,review_note='',updated_at=now(),
  last_media_upload_at=(SELECT max(COALESCE(ready_at,created_at)) FROM media_files WHERE id=ANY($2::text[])),
- draft_expires_at=CASE WHEN source='member' AND published_at IS NULL AND legacy_id IS NULL THEN GREATEST(COALESCE(draft_expires_at,created_at+interval '72 hours'),(SELECT max(COALESCE(ready_at,created_at))+interval '72 hours' FROM media_files WHERE id=ANY($2::text[]))) ELSE NULL END WHERE id=$1`, id, input.MediaIDs)
+ draft_expires_at=CASE WHEN source='member' AND published_at IS NULL AND legacy_id IS NULL THEN GREATEST(COALESCE(draft_expires_at,created_at+interval '72 hours'),(SELECT max(COALESCE(m.ready_at,m.created_at))+CASE WHEN EXISTS(SELECT 1 FROM media_objects WHERE media_id=ANY($2::text[])) THEN interval '5 days' ELSE interval '72 hours' END FROM media_files m WHERE m.id=ANY($2::text[]))) ELSE NULL END WHERE id=$1`, id, input.MediaIDs)
 	if err == nil {
 		err = recordProductReplay(ctx, tx, u.ID, "append:"+id, input.RequestID, hash, id)
 	}
@@ -548,9 +563,12 @@ func (s *MemberStore) ChangeImage(ctx context.Context, u member.Actor, id, mid s
 		return nil, memberStoreError(err)
 	}
 	defer tx.Rollback(ctx)
-	version, _, err := lockedImageOwner(ctx, tx, u, id)
+	version, status, err := lockedImageOwner(ctx, tx, u, id)
 	if err != nil {
 		return nil, memberStoreError(err)
+	}
+	if status == "rejected_final" {
+		return nil, fault.New(fault.Conflict, "PRODUCT_FINALLY_REJECTED", "此商品已被最终驳回，不能修改或重新提交")
 	}
 	if err := member.CheckVersion(version, input.ExpectedVersion); err != nil {
 		return nil, err
