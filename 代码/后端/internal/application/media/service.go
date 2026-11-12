@@ -18,6 +18,7 @@ type Repository interface {
 	WithUpload(context.Context, string, string, string, func(domain.Upload, domain.Mutation) error) error
 	Lookup(context.Context, string) (domain.Upload, error)
 	OwnedProduct(context.Context, string, string) (bool, error)
+	ScopedAccess(context.Context, string, domain.Actor) (bool, error)
 }
 type Files interface {
 	Receive(context.Context, string, int64, io.Reader) (domain.Staged, error)
@@ -70,6 +71,18 @@ func (s *Service) checkTicket(u domain.Upload, token string) bool {
 func (s *Service) Create(ctx context.Context, actor domain.Actor, in domain.CreateInput) (map[string]any, error) {
 	if !s.validActor(actor) {
 		return nil, unauthenticated()
+	}
+	if in.Purpose == "" {
+		in.Purpose = "product"
+	}
+	if (in.Purpose != "product" && in.Purpose != "chat" && in.Purpose != "avatar") || (in.Purpose == "chat" && validID(in.ConversationID) != nil) || (in.Purpose != "chat" && in.ConversationID != "") {
+		return nil, fault.New(fault.Invalid, "INVALID_MEDIA_PURPOSE", "图片用途或咨询编号无效")
+	}
+	if in.Purpose == "avatar" && in.Size > 2<<20 {
+		return nil, fault.New(fault.TooLarge, "IMAGE_TOO_LARGE", "头像不能超过2MB")
+	}
+	if in.Purpose == "chat" && in.Size > 10<<20 {
+		return nil, fault.New(fault.TooLarge, "IMAGE_TOO_LARGE", "聊天图片不能超过10MB")
 	}
 	if in.Size <= 0 || in.Size > s.max {
 		return nil, fault.New(fault.TooLarge, "IMAGE_TOO_LARGE", "单张图片大小超过限制")
@@ -204,8 +217,16 @@ func (s *Service) Open(ctx context.Context, id string, thumbnail bool, resolve f
 		if err != nil || !s.validActor(actor) {
 			return hidden()
 		}
-		permitted := actor.Role == "admin" || actor.ID == upload.Owner
-		if !permitted {
+		permitted := false
+		if upload.Purpose == "chat" || upload.Purpose == "avatar" {
+			permitted, err = s.repo.ScopedAccess(ctx, id, actor)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			permitted = actor.Role == "admin" || actor.ID == upload.Owner
+		}
+		if !permitted && upload.Purpose != "chat" && upload.Purpose != "avatar" {
 			permitted, err = s.repo.OwnedProduct(ctx, id, actor.ID)
 			if err != nil {
 				return nil, err

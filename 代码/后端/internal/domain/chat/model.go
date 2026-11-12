@@ -14,8 +14,12 @@ type StartInput struct {
 	ProductID string `json:"product_id"`
 }
 type SendInput struct {
-	Body     string `json:"body"`
-	ClientID string `json:"client_id"`
+	Body     string   `json:"body"`
+	ClientID string   `json:"client_id"`
+	ImageIDs []string `json:"image_ids,omitempty"`
+}
+type ProfileInput struct {
+	AvatarID *string `json:"avatar_id"`
 }
 type ReadInput struct {
 	Through string `json:"through"`

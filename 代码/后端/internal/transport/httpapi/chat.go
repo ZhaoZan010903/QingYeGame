@@ -41,6 +41,8 @@ func (a *App) registerChat(m routeRegistrar) {
 		prefix = "/api/v1/admin/chat"
 	}
 	m.HandleFunc("GET "+prefix+"/conversations", a.chatList)
+	m.HandleFunc("GET "+prefix+"/profile", a.chatProfile)
+	m.HandleFunc("PATCH "+prefix+"/profile", a.memberMutation(a.chatProfile))
 	m.HandleFunc("GET "+prefix+"/conversations/{id}", a.chatDetail)
 	m.HandleFunc("GET "+prefix+"/conversations/{id}/messages", a.chatMessages)
 	m.HandleFunc("POST "+prefix+"/conversations/{id}/messages", a.memberMutation(a.chatSend))
@@ -54,6 +56,21 @@ func (a *App) registerChat(m routeRegistrar) {
 	} else {
 		m.HandleFunc("POST "+prefix+"/conversations", a.memberMutation(a.chatStart))
 	}
+}
+func (a *App) chatProfile(w http.ResponseWriter, r *http.Request) {
+	actor, ok := a.chatActor(w, r)
+	if !ok {
+		return
+	}
+	var in *domain.ProfileInput
+	if r.Method == "PATCH" {
+		in = &domain.ProfileInput{}
+		if !readJSON(w, r, in) {
+			return
+		}
+	}
+	out, err := a.chatService().Profile(r.Context(), actor, in)
+	chatResult(w, out, err)
 }
 
 func (a *App) chatStart(w http.ResponseWriter, r *http.Request) {

@@ -62,6 +62,8 @@ func (s *Service) CleanupDrafts(ctx context.Context, limit int) (DraftCleanupRes
 	}
 	rows, err = tx.Query(ctx, `SELECT m.id FROM media_files m WHERE m.managed_upload AND m.source_url='' AND m.deleted_at IS NULL AND COALESCE(m.ready_at,m.created_at)<=now()-interval '72 hours' AND (m.upload_expires_at IS NULL OR m.upload_expires_at<=now()) AND NOT EXISTS(SELECT 1 FROM product_images pi WHERE pi.media_id=m.id)
  AND NOT EXISTS(SELECT 1 FROM contacts c WHERE c.qr_media_id=m.id)
+ AND NOT EXISTS(SELECT 1 FROM chat_message_images a WHERE a.media_id=m.id)
+ AND NOT EXISTS(SELECT 1 FROM users u WHERE u.avatar_media_id=m.id)
  AND NOT EXISTS(SELECT 1 FROM product_reviews r WHERE r.snapshot->'images' @> jsonb_build_array(jsonb_build_object('id',m.id)))
  AND NOT EXISTS(SELECT 1 FROM media_files other WHERE other.storage_key=m.storage_key AND other.id<>m.id AND other.deleted_at IS NULL)
  ORDER BY m.id LIMIT $1 FOR UPDATE OF m SKIP LOCKED`, limit)

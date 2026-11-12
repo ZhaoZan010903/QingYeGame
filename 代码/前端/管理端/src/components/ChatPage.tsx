@@ -1,4 +1,3 @@
-import { adminProductPath } from "../lib/product-links";
 import {
   useCallback,
   useEffect,
@@ -16,6 +15,7 @@ import {
   Package,
   Smile,
 } from "lucide-react";
+import { adminProductPath } from "../lib/product-links";
 import { createRequestId } from "../lib/api";
 import { useSession } from "../context";
 import { chatAdmin, chatApi } from "../lib/chat-api";
@@ -30,8 +30,36 @@ import {
   type Conversation,
 } from "../../../共享/chat-types";
 import "../chat.css";
+import {
+  AvatarEditor,
+  ChatAvatar,
+  ChatImageGrid,
+  ChatLightbox,
+  ImageDrafts,
+  ImagePicker,
+  useChatImages,
+} from "./ChatMedia";
+import type { ChatImage } from "../../../共享/chat-types";
 import { ChatOutbox } from "../../../共享/chat-outbox";
 
+const emojis = [
+  "😊",
+  "😄",
+  "🥰",
+  "👍",
+  "🙏",
+  "🤝",
+  "🎉",
+  "❤️",
+  "✨",
+  "👀",
+  "👌",
+  "🤔",
+  "😅",
+  "😭",
+  "🙌",
+  "🌿",
+];
 const statusNames = { waiting: "等待接待", active: "咨询中", closed: "已结束" };
 const units: Record<string, string> = {
   account: "元",
@@ -71,7 +99,7 @@ function ProductCard({ product }: { product: ChatProduct }) {
         )}
       </span>
       <span>
-        <small>正在咨询的商品 · 发起时的资料</small>
+        <small>咨询商品 · 报价以客服确认为准</small>
         <strong>{product.title}</strong>
         <b>
           {product.price !== null && product.unit !== "unknown"
@@ -84,6 +112,18 @@ function ProductCard({ product }: { product: ChatProduct }) {
 }
 
 export function ChatPage() {
+  const pageElement = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const resize = () =>
+      pageElement.current?.style.setProperty(
+        "--chat-visual-height",
+        `${viewport?.height ?? window.innerHeight}px`,
+      );
+    resize();
+    viewport?.addEventListener("resize", resize);
+    return () => viewport?.removeEventListener("resize", resize);
+  }, []);
   const { user } = useSession();
   const {
     list,
@@ -109,25 +149,22 @@ export function ChatPage() {
     listBusy = useRef(false),
     listGeneration = useRef(0);
   const previousHead = useRef<Conversation[]>([]);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const startRequest = useRef<{ key: string; promise: Promise<string> } | null>(
+    null,
+  );
   const [text, setText] = useState(""),
     [error, setError] = useState(""),
     [starting, setStarting] = useState(false),
     [startRetry, setStartRetry] = useState(0);
-  const [emojiOpen, setEmojiOpen] = useState(false);
-  const composer = useRef<HTMLTextAreaElement>(null);
-  function insertText(value: string) {
-    const node = composer.current;
-    const start = node?.selectionStart ?? text.length;
-    const end = node?.selectionEnd ?? text.length;
-    const next = text.slice(0, start) + value + text.slice(end);
-    if (Array.from(next).length > 2000) return;
-    setText(next);
-    drafts.current.set(selected, next);
-    requestAnimationFrame(() => {
-      node?.focus();
-      node?.setSelectionRange(start + value.length, start + value.length);
-    });
-  }
+  const images = useChatImages(user?.id || "", selected, setError);
+  const [myAvatar, setMyAvatar] = useState("");
+  const [gallery, setGallery] = useState<{
+    images: ChatImage[];
+    index: number;
+  } | null>(null);
+  const sendLock = useRef(false);
   const [loading, setLoading] = useState(false),
     [loadingOlder, setLoadingOlder] = useState(false),
     [loadingList, setLoadingList] = useState(false),
@@ -171,12 +208,18 @@ export function ChatPage() {
     previousHead.current = list.data;
   }, [list, user?.id]);
   useEffect(() => {
-    if (!productId || chatAdmin || !connected) return;
+    if (!productId) {
+      startRequest.current = null;
+      return;
+    }
+    if (chatAdmin || !connected) return;
     let active = true;
     setStarting(true);
     setError("");
-    chatApi
-      .start(productId)
+    const key = `${user?.id}:${productId}:${startRetry}`;
+    if (startRequest.current?.key !== key)
+      startRequest.current = { key, promise: chatApi.start(productId) };
+    startRequest.current.promise
       .then((id) => {
         if (active) {
           setParams({ conversation: id }, { replace: true });
@@ -206,11 +249,11 @@ export function ChatPage() {
     messageCache.current = [];
     lastRead.current = "";
     bottom.current = true;
+    setGallery(null);
     setConversation(null);
     setMessages([]);
     setBefore(null);
     setText(drafts.current.get(selected) || "");
-    setEmojiOpen(false);
     setError("");
     setAtBottom(true);
     setLoadingOlder(false);
@@ -220,7 +263,13 @@ export function ChatPage() {
     };
   }, [selected, user?.id]);
   const latest = useCallback(async () => {
-    if (!selected || inFlight.current || historyBusy.current) return;
+    if (
+      !selected ||
+      currentID.current !== selected ||
+      inFlight.current ||
+      historyBusy.current
+    )
+      return;
     const current = sequence.current;
     inFlight.current = true;
     try {
@@ -348,20 +397,54 @@ export function ChatPage() {
       }
     }
   }
+  function insertText(value: string) {
+    const node = composer.current;
+    const start = node?.selectionStart ?? text.length,
+      end = node?.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + value + text.slice(end);
+    if (Array.from(next).length > 2000) return;
+    setText(next);
+    drafts.current.set(selected, next);
+    setEmojiOpen(false);
+    requestAnimationFrame(() => {
+      node?.focus();
+      node?.setSelectionRange(start + value.length, start + value.length);
+    });
+  }
   async function send(event: FormEvent) {
     event.preventDefault();
     const body = text.trim();
-    if (!body || sending || !conversation || conversation.status === "closed")
+    if (
+      (!body && !images.items.length) ||
+      sendLock.current ||
+      !images.ready ||
+      !conversation ||
+      conversation.status === "closed"
+    )
       return;
+    if (!connected) {
+      setError("连接恢复后即可发送，输入内容已保留。");
+      return;
+    }
     if (Array.from(body).length > 2000) {
       setError("每条消息最多 2000 字。");
       return;
     }
-    const input = pending.current.prepare(selected, body, createRequestId);
+    const input = pending.current.prepare(
+      selected,
+      body,
+      createRequestId,
+      images.items.map((image) => image.mediaID!),
+    );
+    const keys = images.items.map((image) => image.key);
+    const generation = listGeneration.current;
+    sendLock.current = true;
     setSending(true);
     setError("");
     try {
-      await chatApi.send(input.id, input.body, input.client);
+      await chatApi.send(input.id, input.body, input.client, input.images);
+      if (generation !== listGeneration.current) return;
+      images.clear(input.id, keys);
       drafts.current.delete(input.id);
       if (currentID.current === input.id) {
         setText("");
@@ -372,9 +455,13 @@ export function ChatPage() {
       pending.current.acknowledge(input);
       void refresh();
     } catch (e) {
-      if (currentID.current === input.id)
+      if (
+        generation === listGeneration.current &&
+        currentID.current === input.id
+      )
         setError(`${errorText(e)} 内容已保留，可以重新发送。`);
     } finally {
+      sendLock.current = false;
       setSending(false);
     }
   }
@@ -402,6 +489,7 @@ export function ChatPage() {
   ];
   return (
     <section
+      ref={pageElement}
       className={`chat-page ${chatAdmin ? "chat-admin" : "chat-member"} ${selected ? "has-selection" : ""}`}
     >
       <header className="chat-page-heading">
@@ -412,8 +500,8 @@ export function ChatPage() {
           <h1>{chatAdmin ? "在线咨询" : "与清叶聊一聊"}</h1>
           <p>
             {chatAdmin
-              ? "每位用户一个对话，询价商品和沟通记录集中保存。"
-              : "商品和聊天放在一起，沟通更清楚。"}
+              ? "查看商品资料，直接回复咨询用户。"
+              : "价格、租期、账号资料，在同一个对话中慢慢聊。"}
           </p>
         </div>
         <DesktopNoticeButton />
@@ -469,8 +557,12 @@ export function ChatPage() {
           <button onClick={() => setStartRetry((v) => v + 1)}>重新连接</button>
         </p>
       )}
+      {gallery && (
+        <ChatLightbox gallery={gallery} close={() => setGallery(null)} />
+      )}
       <div className="chat-workspace">
         <aside className="chat-list">
+          <AvatarEditor identity={user?.id || ""} onChange={setMyAvatar} />
           <div className="chat-list-heading">
             <strong>
               全部咨询 <span>{list.total}</span>
@@ -489,12 +581,11 @@ export function ChatPage() {
               className={`conversation-item ${selected === item.id ? "active" : ""}`}
               onClick={() => setParams({ conversation: item.id })}
             >
-              <span className="conversation-avatar">
-                {(chatAdmin
-                  ? item.member_name
-                  : item.admin_name || "清叶"
-                ).slice(0, 1)}
-              </span>
+              <ChatAvatar
+                className="conversation-avatar"
+                src={chatAdmin ? item.member_avatar : item.admin_avatar}
+                name={chatAdmin ? item.member_name : item.admin_name || "清叶"}
+              />
               <span className="conversation-copy">
                 <span>
                   <strong>
@@ -506,9 +597,9 @@ export function ChatPage() {
                 </span>
                 <b>
                   {item.product_count && item.product_count > 1
-                    ? `已咨询 ${item.product_count} 件 · `
+                    ? `已咨询 ${item.product_count} 个账号 · `
                     : ""}
-                  {item.product.title}
+                  {item.product.code || item.product.title}
                 </b>
                 <span>
                   <small>{item.last_message || statusNames[item.status]}</small>
@@ -527,7 +618,7 @@ export function ChatPage() {
               <p>
                 {chatAdmin
                   ? "开启接待后，系统会随机分配待接待的用户。"
-                  : "在商品详情点击“咨询这个账号”即可开始。"}
+                  : "从商品详情发起咨询。不同账号的咨询会归入同一对话。"}
               </p>
             </div>
           )}
@@ -563,7 +654,7 @@ export function ChatPage() {
                   <small>
                     {conversation ? statusNames[conversation.status] : ""}
                     {conversation?.status === "active"
-                      ? " · 核实商品、报价与交付条件"
+                      ? " · 当前由你接待"
                       : ""}
                   </small>
                 </div>
@@ -581,6 +672,27 @@ export function ChatPage() {
                 <p className="chat-queue" role="status">
                   暂时没有空闲管理员，已进入等待队列。你可以先留言，有人接待时会收到提醒。
                 </p>
+              )}
+              {conversation && (
+                <div className="chat-context-bar">
+                  <Package size={15} />
+                  <span>
+                    正在咨询 · <b>{conversation.product.code}</b>
+                  </span>
+                  <a
+                    href={
+                      chatAdmin
+                        ? "/products/" +
+                          encodeURIComponent(conversation.product.id)
+                        : "/accounts/" +
+                          encodeURIComponent(conversation.product.id)
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    查看商品 ↗
+                  </a>
+                </div>
               )}
               <div
                 className="chat-history"
@@ -609,30 +721,74 @@ export function ChatPage() {
                     正在读取聊天记录…
                   </p>
                 )}
-                {messages.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`chat-message ${item.mine ? "mine" : ""}`}
-                  >
-                    <small>
-                      {item.mine
-                        ? "我"
-                        : item.sender_role === "admin"
-                          ? "平台客服"
-                          : conversation?.member_name}{" "}
-                      · {date(item.created_at)}
-                    </small>
-                    {item.kind === "product" && item.product ? (
-                      <ProductCard product={item.product} />
-                    ) : (
-                      <p>{item.body}</p>
+                {messages.map((item, index) => (
+                  <div key={item.id} className="chat-message-group">
+                    {(index === 0 ||
+                      new Date(item.created_at).getTime() -
+                        new Date(messages[index - 1].created_at).getTime() >
+                        300000) && (
+                      <div className="chat-time-divider">
+                        <time>{date(item.created_at)}</time>
+                      </div>
                     )}
-                    {item.mine && item.kind === "text" && (
-                      <span className="chat-sent">
-                        <Check size={11} />
-                        已发送
-                      </span>
-                    )}
+                    <div className={`chat-message ${item.mine ? "mine" : ""}`}>
+                      <ChatAvatar
+                        src={item.mine ? myAvatar : item.avatar_url}
+                        name={
+                          item.mine
+                            ? user?.nickname || "我"
+                            : item.sender_name ||
+                              (item.sender_role === "admin"
+                                ? "客服"
+                                : conversation?.member_name || "会员")
+                        }
+                      />
+                      <div className="chat-message-content">
+                        <small>
+                          {item.mine
+                            ? "我"
+                            : item.sender_name ||
+                              (item.sender_role === "admin"
+                                ? "平台客服"
+                                : conversation?.member_name)}
+                          {item.sender_role === "admin" && <em>客服</em>}
+                        </small>
+                        {item.kind === "product" && item.product ? (
+                          <ProductCard product={item.product} />
+                        ) : (
+                          <div className="chat-bubble">
+                            {!!item.images?.length && (
+                              <ChatImageGrid
+                                images={item.images}
+                                open={(images, index) =>
+                                  setGallery({ images, index })
+                                }
+                                loaded={() => {
+                                  if (bottom.current && scroll.current)
+                                    scroll.current.scrollTop =
+                                      scroll.current.scrollHeight;
+                                }}
+                              />
+                            )}
+                            {item.body && <p>{item.body}</p>}
+                          </div>
+                        )}
+                        <span className="chat-message-meta">
+                          <time>
+                            {new Date(item.created_at).toLocaleTimeString(
+                              "zh-CN",
+                              { hour: "2-digit", minute: "2-digit" },
+                            )}
+                          </time>
+                          {item.mine && (
+                            <span className="chat-sent">
+                              <Check size={11} />
+                              已发送
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -670,60 +826,58 @@ export function ChatPage() {
                   </div>
                 ) : (
                   <>
-                    <div className="chat-composer-tools">
+                    <ImageDrafts images={images} disabled={sending} />
+                    <div className="chat-compose-tools">
+                      <ImagePicker
+                        images={images}
+                        disabled={sending || !conversation}
+                      />
                       <button
                         type="button"
-                        className="chat-tool"
-                        aria-label="选择表情"
+                        aria-label="插入表情"
                         aria-expanded={emojiOpen}
-                        disabled={!conversation || sending}
-                        onClick={() => setEmojiOpen(!emojiOpen)}
+                        disabled={sending || !conversation}
+                        onClick={() => setEmojiOpen((v) => !v)}
                       >
-                        <Smile size={20} /> 表情
+                        <Smile size={19} />
+                        <span>表情</span>
                       </button>
-                      <span>快捷回复</span>
-                      {[
-                        "您好，想了解这个账号的哪些资料？",
-                        "请问您计划租用多久？我帮您核实对应报价。",
-                        "我正在核实账号状态与价格，请稍等。",
-                      ].map((reply) => (
-                        <button
-                          key={reply}
-                          type="button"
-                          disabled={!conversation || sending}
-                          onClick={() => insertText(reply)}
-                        >
-                          {reply}
-                        </button>
-                      ))}
+                      <small>{Array.from(text).length} / 2000</small>
                     </div>
                     {emojiOpen && (
-                      <div className="chat-emoji-picker" aria-label="表情面板">
-                        {[
-                          "😊",
-                          "🙂",
-                          "😄",
-                          "🥰",
-                          "🤝",
-                          "👍",
-                          "👌",
-                          "🙏",
-                          "❤️",
-                          "✨",
-                          "🎉",
-                          "🌿",
-                          "👋",
-                          "🤔",
-                          "✅",
-                          "💬",
-                        ].map((emoji) => (
+                      <div
+                        className="chat-emoji-picker"
+                        role="group"
+                        aria-label="选择表情"
+                      >
+                        {emojis.map((emoji) => (
                           <button
                             key={emoji}
                             type="button"
-                            aria-label={`插入表情 ${emoji}`}
+                            aria-label={`插入 ${emoji}`}
                             onClick={() => insertText(emoji)}
                           >
                             {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {!text && !images.items.length && conversation && (
+                      <div
+                        className="chat-quick-questions"
+                        aria-label="快捷咨询"
+                      >
+                        {[
+                          "你好，想了解这个账号的哪些信息？",
+                          "稍等，我帮你核实一下账号情况。",
+                          "可以发张截图，我帮你看看。",
+                        ].map((question) => (
+                          <button
+                            type="button"
+                            key={question}
+                            onClick={() => insertText(question)}
+                          >
+                            {question}
                           </button>
                         ))}
                       </div>
@@ -732,11 +886,22 @@ export function ChatPage() {
                       ref={composer}
                       aria-label="输入咨询消息"
                       placeholder={
-                        chatAdmin ? "输入回复内容…" : "说说你想了解的商品资料…"
+                        chatAdmin
+                          ? "输入回复内容…"
+                          : "想问价格、租期，还是账号配置？"
                       }
                       value={text}
                       maxLength={4000}
                       disabled={sending || !conversation}
+                      onPaste={(e) => {
+                        const files = Array.from(e.clipboardData.files).filter(
+                          (file) => file.type.startsWith("image/"),
+                        );
+                        if (files.length) {
+                          e.preventDefault();
+                          images.add(files);
+                        }
+                      }}
                       onChange={(e) => {
                         setText(e.target.value);
                         drafts.current.set(selected, e.target.value);
@@ -745,7 +910,8 @@ export function ChatPage() {
                         if (
                           e.key === "Enter" &&
                           !e.shiftKey &&
-                          !e.nativeEvent.isComposing
+                          !e.nativeEvent.isComposing &&
+                          window.matchMedia("(pointer: fine)").matches
                         ) {
                           e.preventDefault();
                           void send(e);
@@ -753,15 +919,16 @@ export function ChatPage() {
                       }}
                     />
                     <div>
-                      <span>
-                        {Array.from(text).length}/2000 · Enter 发送 · Shift +
-                        Enter 换行
-                      </span>
+                      <span>Enter 发送 · Shift + Enter 换行</span>
                       <button
                         type="submit"
                         className="button-white"
                         disabled={
-                          sending || !text.trim() || !conversation || !connected
+                          sending ||
+                          (!text.trim() && !images.items.length) ||
+                          !images.ready ||
+                          !conversation ||
+                          !connected
                         }
                       >
                         <Send size={15} />
@@ -776,7 +943,7 @@ export function ChatPage() {
             <div className="chat-empty chat-room-empty">
               <MessageSquare size={42} />
               <h2>选择一个咨询，开始沟通</h2>
-              <p>商品资料、历史消息都会保留在对应对话中。</p>
+              <p>同一账号的咨询集中在这里，切换商品也不会丢失上下文。</p>
               {chatAdmin && <p>点击上方“开始接待”，即可接收用户咨询。</p>}
             </div>
           )}

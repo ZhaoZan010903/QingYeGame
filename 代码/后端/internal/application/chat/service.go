@@ -25,6 +25,7 @@ type Repository interface {
 	UpdatePresence(context.Context, domain.Actor, domain.PresenceInput) error
 	Participants(context.Context, string) ([]string, error)
 	Dispatch(context.Context) ([]string, error)
+	Profile(context.Context, domain.Actor, *domain.ProfileInput) (map[string]any, error)
 }
 type Limiter interface {
 	Allow(context.Context, string, int, time.Duration) error
@@ -181,8 +182,15 @@ func (s *Service) Send(ctx context.Context, actor domain.Actor, id string, in do
 		return nil, err
 	}
 	in.Body = strings.TrimSpace(in.Body)
-	if in.Body == "" || utf8.RuneCountInString(in.Body) > 2000 || !utf8.ValidString(in.Body) || !domain.ValidID(in.ClientID, 80) || strings.ContainsRune(in.Body, 0) {
-		return nil, fault.New(fault.Invalid, "INVALID_MESSAGE", "消息需为 1–2000 字，请重新输入")
+	if (in.Body == "" && len(in.ImageIDs) == 0) || len(in.ImageIDs) > 9 || utf8.RuneCountInString(in.Body) > 2000 || !utf8.ValidString(in.Body) || !domain.ValidID(in.ClientID, 80) || strings.ContainsRune(in.Body, 0) {
+		return nil, fault.New(fault.Invalid, "INVALID_MESSAGE", "请填写文字或添加图片，文字最多2000字、图片最多9张")
+	}
+	seen := map[string]bool{}
+	for _, mid := range in.ImageIDs {
+		if !domain.ValidID(mid, 100) || seen[mid] {
+			return nil, fault.New(fault.Invalid, "INVALID_IMAGES", "每条消息最多9张图片，不能重复添加")
+		}
+		seen[mid] = true
 	}
 	if err := s.allow(ctx, "chat-send:"+actor.ID, 60); err != nil {
 		return nil, err
@@ -193,6 +201,21 @@ func (s *Service) Send(ctx context.Context, actor domain.Actor, id string, in do
 	}
 	s.notifyConversation(ctx, id)
 	return out, nil
+}
+func (s *Service) Profile(ctx context.Context, actor domain.Actor, in *domain.ProfileInput) (map[string]any, error) {
+	if err := s.authorize(actor); err != nil {
+		return nil, err
+	}
+	if in != nil {
+		if in.AvatarID == nil || (*in.AvatarID != "" && !domain.ValidID(*in.AvatarID, 100)) {
+			return nil, fault.New(fault.Invalid, "INVALID_AVATAR", "请选择头像")
+		}
+		if err := s.allow(ctx, "chat-profile:"+actor.ID, 20); err != nil {
+			return nil, err
+		}
+	}
+	out, err := s.repo.Profile(ctx, actor, in)
+	return out, databaseError(err)
 }
 func (s *Service) Read(ctx context.Context, actor domain.Actor, id string, in domain.ReadInput) (map[string]any, error) {
 	if err := s.authorize(actor); err != nil {

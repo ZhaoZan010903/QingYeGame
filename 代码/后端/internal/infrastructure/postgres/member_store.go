@@ -480,7 +480,7 @@ func (s *MemberStore) AppendImages(ctx context.Context, u member.Actor, id strin
 		return nil, memberStoreError(err)
 	}
 	// Lock shared media in one stable order even when clients request opposite display orders.
-	mediaRows, err := tx.Query(ctx, `SELECT id,COALESCE(owner_id,''),status FROM media_files WHERE id=ANY($1::text[]) AND deleted_at IS NULL ORDER BY id FOR UPDATE`, input.MediaIDs)
+	mediaRows, err := tx.Query(ctx, `SELECT id,COALESCE(owner_id,''),status FROM media_files WHERE id=ANY($1::text[]) AND purpose='product' AND deleted_at IS NULL ORDER BY id FOR UPDATE`, input.MediaIDs)
 	if err != nil {
 		return nil, memberStoreError(err)
 	}

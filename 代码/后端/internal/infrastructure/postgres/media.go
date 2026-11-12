@@ -29,23 +29,38 @@ func (s *MediaStore) Create(ctx context.Context, actor media.Actor, in media.Cre
 		return mediaDBError(err)
 	}
 	defer tx.Rollback(ctx)
-	if actor.Surface == "public" {
+	if in.Purpose == "" {
+		in.Purpose = "product"
+	}
+	if in.Purpose == "chat" {
+		column := "member_id"
+		if actor.Surface == "admin" {
+			column = "admin_id"
+		}
+		var canonical string
+		err = tx.QueryRow(ctx, `SELECT c.id FROM chat_conversations old JOIN chat_conversations c ON c.id=coalesce(old.merged_into,old.id) WHERE old.id=$1 AND c.`+column+`=$2 AND c.status<>'closed' FOR SHARE OF c`, in.ConversationID, actor.ID).Scan(&canonical)
+		if err != nil {
+			return mediaDBError(err)
+		}
+		in.ConversationID = canonical
+	}
+	if actor.Surface == "public" || in.Purpose != "product" {
 		if err = checkUploadQuota(ctx, tx, actor.ID, "", in.Size, true); err != nil {
 			return err
 		}
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO media_files(id,owner_id,filename,mime_type,byte_size,storage_key,upload_token_hash,upload_expires_at,upload_audience,managed_upload) VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '15 minutes',$8,true)`, id, actor.ID, in.Filename, in.MIME, in.Size, key, hash, actor.Surface)
+	_, err = tx.Exec(ctx, `INSERT INTO media_files(id,owner_id,filename,mime_type,byte_size,storage_key,upload_token_hash,upload_expires_at,upload_audience,managed_upload,purpose,conversation_id) VALUES($1,$2,$3,$4,$5,$6,$7,now()+interval '15 minutes',$8,true,$9,NULLIF($10,''))`, id, actor.ID, in.Filename, in.MIME, in.Size, key, hash, actor.Surface, in.Purpose, in.ConversationID)
 	if err == nil {
 		err = tx.Commit(ctx)
 	}
 	return mediaDBError(err)
 }
 
-const uploadColumns = `id,coalesce(owner_id,''),storage_key,mime_type,status,byte_size,coalesce(upload_token_hash,''),coalesce(upload_expires_at,created_at)>now()`
+const uploadColumns = `id,coalesce(owner_id,''),storage_key,mime_type,status,byte_size,coalesce(upload_token_hash,''),coalesce(upload_expires_at,created_at)>now(),purpose`
 
 func scanUpload(row pgx.Row) (media.Upload, error) {
 	var u media.Upload
-	err := row.Scan(&u.ID, &u.Owner, &u.Key, &u.MIME, &u.State, &u.Size, &u.TokenHash, &u.Valid)
+	err := row.Scan(&u.ID, &u.Owner, &u.Key, &u.MIME, &u.State, &u.Size, &u.TokenHash, &u.Valid, &u.Purpose)
 	return u, err
 }
 func (s *MediaStore) Ticket(ctx context.Context, id, surface string) (media.Upload, error) {
@@ -57,6 +72,7 @@ type mediaMutation struct {
 	tx             pgx.Tx
 	id             string
 	owner, surface string
+	purpose        string
 }
 
 func (m mediaMutation) Uploaded(ctx context.Context) error {
@@ -68,7 +84,7 @@ func (m mediaMutation) Failed(ctx context.Context) error {
 	return err
 }
 func (m mediaMutation) Ready(ctx context.Context, p media.Processed) error {
-	if m.surface == "public" {
+	if m.surface == "public" || m.purpose != "product" {
 		if err := checkUploadQuota(ctx, m.tx, m.owner, m.id, p.Size, false); err != nil {
 			return err
 		}
@@ -84,7 +100,7 @@ func (s *MediaStore) WithUpload(ctx context.Context, id, surface, owner string, 
 	defer tx.Rollback(ctx)
 	// Lifecycle cleanup and upload mutations use owner -> media lock order.
 	// The network body has already been staged before this transaction starts.
-	if surface == "public" {
+	{
 		var uploadOwner string
 		if err = tx.QueryRow(ctx, `SELECT coalesce(owner_id,'') FROM media_files WHERE id=$1 AND upload_audience=$2 AND ($3='' OR owner_id=$3) AND deleted_at IS NULL`, id, surface, owner).Scan(&uploadOwner); err != nil {
 			return mediaDBError(err)
@@ -99,7 +115,7 @@ func (s *MediaStore) WithUpload(ctx context.Context, id, surface, owner string, 
 	if err != nil {
 		return mediaDBError(err)
 	}
-	if err = fn(u, mediaMutation{tx: tx, id: id, owner: u.Owner, surface: surface}); err != nil {
+	if err = fn(u, mediaMutation{tx: tx, id: id, owner: u.Owner, surface: surface, purpose: u.Purpose}); err != nil {
 		return mediaDBError(err)
 	}
 	return mediaDBError(tx.Commit(ctx))
@@ -107,11 +123,22 @@ func (s *MediaStore) WithUpload(ctx context.Context, id, surface, owner string, 
 func (s *MediaStore) Lookup(ctx context.Context, id string) (media.Upload, error) {
 	var u media.Upload
 	u.ID = id
-	err := s.DB.QueryRow(ctx, `SELECT COALESCE(m.owner_id,''),m.storage_key,m.mime_type,m.status,
- EXISTS(SELECT 1 FROM product_images pi JOIN products p ON p.id=pi.product_id JOIN categories c ON c.id=p.category_id WHERE pi.media_id=m.id AND p.status='published' AND p.approved_version=p.version AND c.enabled)
- OR EXISTS(SELECT 1 FROM contacts c WHERE c.qr_media_id=m.id AND c.enabled)
- FROM media_files m WHERE m.id=$1 AND m.deleted_at IS NULL`, id).Scan(&u.Owner, &u.Key, &u.MIME, &u.State, &u.Public)
+	err := s.DB.QueryRow(ctx, `SELECT COALESCE(m.owner_id,''),m.storage_key,m.mime_type,m.status,m.purpose,
+ m.purpose='product' AND (EXISTS(SELECT 1 FROM product_images pi JOIN products p ON p.id=pi.product_id JOIN categories c ON c.id=p.category_id WHERE pi.media_id=m.id AND p.status='published' AND p.approved_version=p.version AND c.enabled)
+ OR EXISTS(SELECT 1 FROM contacts c WHERE c.qr_media_id=m.id AND c.enabled))
+ FROM media_files m WHERE m.id=$1 AND m.deleted_at IS NULL`, id).Scan(&u.Owner, &u.Key, &u.MIME, &u.State, &u.Purpose, &u.Public)
 	return u, mediaDBError(err)
+}
+func (s *MediaStore) ScopedAccess(ctx context.Context, id string, actor media.Actor) (bool, error) {
+	column := "member_id"
+	if actor.Surface == "admin" {
+		column = "admin_id"
+	}
+	var ok bool
+	err := s.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM media_files m WHERE m.id=$1 AND m.deleted_at IS NULL AND m.status='ready' AND (
+ (m.purpose='chat' AND EXISTS(SELECT 1 FROM chat_conversations c WHERE c.id=m.conversation_id AND c.`+column+`=$2 AND (m.owner_id=$2 OR EXISTS(SELECT 1 FROM chat_message_images a WHERE a.media_id=m.id))))
+ OR (m.purpose='avatar' AND (m.owner_id=$2 OR EXISTS(SELECT 1 FROM users u WHERE u.avatar_media_id=m.id AND u.enabled)))))`, id, actor.ID).Scan(&ok)
+	return ok, mediaDBError(err)
 }
 func (s *MediaStore) OwnedProduct(ctx context.Context, id, owner string) (bool, error) {
 	var ok bool

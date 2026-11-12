@@ -12,6 +12,14 @@ export const chatRoute = '/messages';
 const prefix = '/chat';
 
 export const chatApi = {
+  async profile(avatar_id?: string): Promise<{ nickname: string; avatar_url: string }> {
+    const result = await request(
+      prefix + '/profile',
+      avatar_id === undefined ? 'GET' : 'PATCH',
+      avatar_id === undefined ? undefined : { avatar_id },
+    );
+    return result.data;
+  },
   async ticket(transport: TransportKind = 'webtransport'): Promise<TransportTicket> {
     const r = await request(`${prefix}/transport-ticket`, 'POST', { transport });
     return r.data as TransportTicket;
@@ -36,8 +44,12 @@ export const chatApi = {
       `${prefix}/conversations/${encodeURIComponent(id)}/messages?${new URLSearchParams(page)}`,
     )) as unknown as MessagePage;
   },
-  async send(id: string, body: string, client_id: string) {
-    return chatTransport.command('send', id, { body, client_id });
+  async send(id: string, body: string, client_id: string, image_ids: string[] = []) {
+    return chatTransport.command('send', id, {
+      body,
+      client_id,
+      ...(image_ids.length ? { image_ids } : {}),
+    });
   },
   async read(id: string, through: string) {
     return chatTransport.command('read', id, { through });

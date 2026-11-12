@@ -13,15 +13,18 @@ const ThumbnailEdge = 720
 
 type Actor struct{ ID, Role, Surface string }
 type CreateInput struct {
-	Filename string `json:"filename"`
-	MIME     string `json:"mime_type"`
-	Size     int64  `json:"byte_size"`
+	Filename       string `json:"filename"`
+	MIME           string `json:"mime_type"`
+	Size           int64  `json:"byte_size"`
+	Purpose        string `json:"purpose,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
 }
 type Upload struct {
 	ID, Owner, Key, MIME, State, TokenHash string
 	Size                                   int64
 	Valid                                  bool
 	Public                                 bool
+	Purpose                                string
 }
 type Processed struct {
 	Key, MIME string

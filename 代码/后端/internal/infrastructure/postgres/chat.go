@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"qingye/backend/internal/domain/chat"
 	"qingye/backend/internal/domain/fault"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -32,9 +33,10 @@ func chatReadColumn(actor chat.Actor) string {
 
 const chatProjection = `jsonb_build_object('id',c.id,'status',c.status,'product',c.product_snapshot,'created_at',c.created_at,'updated_at',c.updated_at,
  'member_name',m.nickname,'admin_name',coalesce(ad.nickname,''),
+ 'member_avatar',coalesce('/api/v1/media/'||m.avatar_media_id||'/file?variant=thumb',''),'admin_avatar',coalesce('/api/v1/media/'||ad.avatar_media_id||'/file?variant=thumb',''),
  'product_count',context_count.n,
  'last_message_mine',coalesce(last.sender_id=$1,false),
- 'last_message',coalesce(CASE WHEN last.kind='product' THEN '咨询这个商品' ELSE left(last.body,80) END,''),
+ 'last_message',coalesce(CASE WHEN last.kind='product' THEN '咨询这个商品' WHEN last.kind='image' THEN '[图片] '||left(last.body,70) ELSE left(last.body,80) END,''),
  'last_message_id',coalesce(last.id::text,'0'),
  'unread',unread.n)`
 
@@ -192,8 +194,10 @@ func (s *ChatStore) Messages(ctx context.Context, actor chat.Actor, id string, p
 	if forward {
 		predicate, order, cursor = "x.id>$3", "ASC", page.After
 	}
-	rows, e := s.chatJSONRows(ctx, `SELECT jsonb_build_object('id',x.id::text,'body',x.body,'kind',x.kind,'product',x.product_snapshot,'sender_role',x.sender_role,'mine',x.sender_id=$2,'created_at',x.created_at,'client_id',CASE WHEN x.sender_id=$2 THEN x.client_id ELSE '' END)
- FROM chat_messages x JOIN chat_conversations c ON c.id=x.conversation_id WHERE c.id=$1 AND c.`+chatOwnerColumn(actor)+`=$2 AND `+predicate+` ORDER BY x.id `+order+` LIMIT 51`, id, actor.ID, cursor)
+	rows, e := s.chatJSONRows(ctx, `SELECT jsonb_build_object('id',x.id::text,'body',x.body,'kind',x.kind,'product',x.product_snapshot,'sender_role',x.sender_role,'mine',x.sender_id=$2,'created_at',x.created_at,'client_id',CASE WHEN x.sender_id=$2 THEN x.client_id ELSE '' END,
+ 'sender_name',u.nickname,'avatar_url',coalesce('/api/v1/media/'||u.avatar_media_id||'/file?variant=thumb',''),
+ 'images',coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.media_id,'url','/api/v1/media/'||a.media_id||'/file','thumbnail_url','/api/v1/media/'||a.media_id||'/file?variant=thumb') ORDER BY a.position) FROM chat_message_images a WHERE a.message_id=x.id),'[]'::jsonb))
+ FROM chat_messages x JOIN users u ON u.id=x.sender_id JOIN chat_conversations c ON c.id=x.conversation_id WHERE c.id=$1 AND c.`+chatOwnerColumn(actor)+`=$2 AND `+predicate+` ORDER BY x.id `+order+` LIMIT 51`, id, actor.ID, cursor)
 	if e != nil {
 		return nil, e
 	}
@@ -235,15 +239,46 @@ func (s *ChatStore) Send(ctx context.Context, actor chat.Actor, id string, in ch
 	var oldBody string
 	e = tx.QueryRow(ctx, "SELECT id,body FROM chat_messages WHERE conversation_id=$1 AND sender_id=$2 AND client_id=$3", id, actor.ID, in.ClientID).Scan(&messageID, &oldBody)
 	if e == nil {
-		if oldBody != in.Body {
+		var oldImages []string
+		if e = tx.QueryRow(ctx, `SELECT coalesce(array_agg(media_id ORDER BY position),'{}') FROM chat_message_images WHERE message_id=$1`, messageID).Scan(&oldImages); e != nil {
+			return nil, e
+		}
+		if oldBody != in.Body || !slices.Equal(oldImages, in.ImageIDs) {
 			return nil, fault.New(fault.Conflict, "MESSAGE_REPLAY_CONFLICT", "重试标识已用于另一条消息")
 		}
 	} else if errors.Is(e, pgx.ErrNoRows) {
 		if status == "closed" {
 			return nil, fault.New(fault.Conflict, "CHAT_CLOSED", "咨询已结束，请从商品页重新发起")
 		}
-		if e = tx.QueryRow(ctx, "INSERT INTO chat_messages(conversation_id,sender_id,sender_role,client_id,body) VALUES($1,$2,$3,$4,$5) RETURNING id", id, actor.ID, actor.Role, in.ClientID, in.Body).Scan(&messageID); e != nil {
+		kind := "text"
+		if len(in.ImageIDs) > 0 {
+			kind = "image"
+			// Lock files in a stable order against orphan cleanup; only this sender's
+			// ready uploads in this conversation can become message attachments.
+			rows, err := tx.Query(ctx, `SELECT m.id FROM media_files m WHERE m.id=ANY($1::text[]) AND m.owner_id=$2 AND m.purpose='chat' AND m.conversation_id=$3 AND m.status='ready' AND m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM chat_message_images a WHERE a.media_id=m.id) ORDER BY m.id FOR UPDATE OF m`, in.ImageIDs, actor.ID, id)
+			if err != nil {
+				return nil, err
+			}
+			count := 0
+			for rows.Next() {
+				count++
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			if count != len(in.ImageIDs) {
+				return nil, fault.New(fault.Invalid, "INVALID_IMAGES", "图片未上传完成、已发送或不属于本次咨询，请重新选择")
+			}
+		}
+		if e = tx.QueryRow(ctx, "INSERT INTO chat_messages(conversation_id,sender_id,sender_role,client_id,body,kind) VALUES($1,$2,$3,$4,$5,$6) RETURNING id", id, actor.ID, actor.Role, in.ClientID, in.Body, kind).Scan(&messageID); e != nil {
 			return nil, e
+		}
+		for position, mid := range in.ImageIDs {
+			if _, e = tx.Exec(ctx, `INSERT INTO chat_message_images(message_id,media_id,position) VALUES($1,$2,$3)`, messageID, mid, position); e != nil {
+				return nil, e
+			}
 		}
 		if _, e = tx.Exec(ctx, "UPDATE chat_conversations SET updated_at=now() WHERE id=$1", id); e != nil {
 			return nil, e
