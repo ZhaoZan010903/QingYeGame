@@ -41,6 +41,3 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.tsbuildinfo
-
-# HTML preview generated check script
-文档/原型代码/HTML/src/compiled.js
