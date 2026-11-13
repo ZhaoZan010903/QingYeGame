@@ -31,3 +31,24 @@ func TestRegistrationConfigFailClosed(t *testing.T) {
 		t.Fatal("implicit OSS credential fallback")
 	}
 }
+func TestR21SMSLoginConfigSeparateGates(t *testing.T) {
+	c := RegistrationConfig{LoginEnabled: true, LoginScheme: "qy-login", AccessKeyID: "test-access-id", AccessKeySecret: strings.Repeat("x", 32), SignName: "test", Template: "100001", Scheme: "qy-register", DailyLimit: 20, AllowedPhones: []string{"13800000000"}}
+	safety := MediaSafetyConfig{Enabled: true, Hostnames: []string{"qingye.test"}}
+	if err := c.validate(safety); err != nil {
+		t.Fatal(err)
+	}
+	for _, scheme := range []string{"", c.Scheme, strings.Repeat("s", 21)} {
+		next := c
+		next.LoginScheme = scheme
+		if next.validate(safety) == nil {
+			t.Fatal("unsafe scenario accepted")
+		}
+	}
+	t.Setenv("SMS_LOGIN_ENABLED", "true")
+	t.Setenv("SMS_REGISTER_ENABLED", "false")
+	t.Setenv("SMS_LOGIN_SCHEME", "qy-login")
+	got, err := loadRegistration()
+	if err != nil || !got.LoginEnabled || got.Enabled || got.LoginScheme != "qy-login" {
+		t.Fatal("independent gate", err)
+	}
+}

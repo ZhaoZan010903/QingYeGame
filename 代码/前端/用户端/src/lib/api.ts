@@ -671,9 +671,10 @@ export const api = {
   },
   async smsChallenge(
     phone: string,
+    purpose: 'register' | 'login' = 'register',
   ): Promise<{ challenge_id: string; site_key: string; action: string }> {
     if (isDemo) return demoUnsupported();
-    return unwrap(await request('/auth/sms/challenges', 'POST', { phone, purpose: 'register' }));
+    return unwrap(await request('/auth/sms/challenges', 'POST', { phone, purpose }));
   },
   async sms(
     phone: string,
@@ -688,6 +689,25 @@ export const api = {
     productUploader.reset();
     if (isDemo) return demoUnsupported();
     return userFrom(unwrap(await request('/auth/login', 'POST', payload)));
+  },
+  async smsLogin(payload: {
+    phone: string;
+    code: string;
+    challenge_id: string;
+  }): Promise<
+    | { status: 'registration_required'; challenge_id: string }
+    | { status: 'authenticated'; user: User }
+  > {
+    if (isDemo) return demoUnsupported();
+    const data = unwrap(
+      await request('/auth/login', 'POST', { ...payload, method: 'sms' }),
+    ) as RecordData;
+    if (data.status === 'registration_required' && data.challenge_id === payload.challenge_id)
+      return { status: 'registration_required', challenge_id: payload.challenge_id };
+    if (data.status !== 'authenticated' || !data.user)
+      throw new ApiError('登录结果未确认，请稍后重试。', 502, 'INVALID_AUTH_RESPONSE');
+    productUploader.reset();
+    return { status: 'authenticated', user: userFrom(data.user as RecordData) };
   },
   async register(payload: RecordData): Promise<User> {
     if (isDemo) return demoUnsupported();

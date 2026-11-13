@@ -11,6 +11,8 @@ import (
 
 type RegistrationConfig struct {
 	Enabled                                                  bool
+	LoginEnabled                                             bool
+	LoginScheme                                              string
 	AccessKeyID, AccessKeySecret, SignName, Template, Scheme string
 	AllowedPhones                                            []string
 	DailyLimit                                               int
@@ -23,6 +25,11 @@ func loadRegistration() (RegistrationConfig, error) {
 	if err != nil {
 		return c, errors.New("SMS_REGISTER_ENABLED must be boolean")
 	}
+	c.LoginEnabled, err = strconv.ParseBool(env("SMS_LOGIN_ENABLED", "false"))
+	if err != nil {
+		return c, errors.New("SMS_LOGIN_ENABLED must be boolean")
+	}
+	c.LoginScheme = env("SMS_LOGIN_SCHEME", "qingye-test-login")
 	c.DailyLimit, err = strconv.Atoi(env("SMS_DAILY_LIMIT", "20"))
 	if err != nil {
 		return c, errors.New("SMS_DAILY_LIMIT must be integer")
@@ -35,11 +42,14 @@ func loadRegistration() (RegistrationConfig, error) {
 	return c, nil
 }
 func (c RegistrationConfig) validate(s MediaSafetyConfig) error {
-	if !c.Enabled {
+	if !c.Enabled && !c.LoginEnabled {
 		return nil
 	}
 	if len(c.AccessKeyID) < 8 || len(c.AccessKeySecret) < 16 || strings.TrimSpace(c.SignName) == "" || c.Template != "100001" || utf8.RuneCountInString(c.Scheme) < 1 || utf8.RuneCountInString(c.Scheme) > 20 {
 		return errors.New("registration SMS credentials, sign, scheme and template 100001 required")
+	}
+	if c.LoginEnabled && (strings.TrimSpace(c.LoginScheme) == "" || utf8.RuneCountInString(c.LoginScheme) > 20 || c.LoginScheme == c.Scheme) {
+		return errors.New("SMS_LOGIN_SCHEME must be a distinct scheme of 1..20 characters")
 	}
 	if !s.Enabled || len(s.Hostnames) == 0 {
 		return errors.New("registration requires configured Turnstile verification")

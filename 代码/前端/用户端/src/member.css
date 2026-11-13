@@ -1291,3 +1291,30 @@ button:disabled {
   font-size: 12px;
   color: var(--text-secondary);
 }
+.auth-sms-hint {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.8;
+  margin: 14px 0;
+}
+.registration-complete {
+  width: min(460px, calc(100vw - 32px));
+}
+.registration-complete .member-form {
+  margin-top: 24px;
+}
+.registration-complete .muted {
+  font-size: 13px;
+  line-height: 1.8;
+}
+.registration-phone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 14px;
+  margin: 0 0 10px;
+}
+.registration-phone > span {
+  color: var(--gold-text);
+}

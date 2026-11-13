@@ -1,5 +1,7 @@
 # 数据库 E-R 图与核心字段（R17）
 
+> R21短信登录增量：0014为sms_challenges增加completion_hash，将短信所有权证明与最终注册提交分别绑定；新增registration_pending、logged_in状态，不新增持久表。原有用户密码仍保存bcrypt成本12哈希，短信核验不保存验证码。见[R21登录与注册衔接](../计划/AUTH-R21--短信登录与注册衔接.md)。
+
 > R21增量：0013新增registration_consents，保存注册用户同意的服务/隐私协议版本；sms_challenges增加PNVS供应商、绑定、执行阶段、请求指纹和注册会员关联，code_hash允许为空，不保存短信验证码。新增关系图与状态说明见[R21注册短信设计](../计划/AUTH-R21--注册短信认证接入方案.md#数据与一致性)。下方表数量仍为历史版本，不能代替0012/0013后的实时结构。
 
 > R19增量：当前28张持久表。0011新增`chat_message_images`，为`media_files`增加purpose/conversation_id，为`users`增加avatar_media_id，消息kind增加image。完整增量E-R图、字段和权限见[R19图文与头像设计](CHAT-R19--图文聊天与头像设计.md#3-数据库增量)。下方27张表与关系图保留为R17基础版本。

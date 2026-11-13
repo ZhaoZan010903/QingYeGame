@@ -18,7 +18,7 @@ func (a *App) registrationMAC(value string) string {
 }
 func (a *App) registrationSubject(w http.ResponseWriter, r *http.Request, phone string, create bool) (domain.Subject, bool) {
 	if a.Registration == nil {
-		fail(w, 503, "SMS_NOT_CONFIGURED", "注册短信暂未启用，请稍后再试")
+		fail(w, 503, "SMS_NOT_CONFIGURED", "短信服务暂未启用，请稍后再试")
 		return domain.Subject{}, false
 	}
 	host, ok := a.mediaChallengeOrigin(w, r)
@@ -54,7 +54,14 @@ func (a *App) registrationSubject(w http.ResponseWriter, r *http.Request, phone 
 	return domain.Subject{Binding: a.registrationMAC("binding:" + value), IP: ip, IPKey: a.registrationMAC("ip:" + ip), PhoneKey: a.registrationMAC("phone:" + phone), Hostname: host}, true
 }
 func (a *App) registrationCapabilities(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, map[string]any{"data": map[string]any{"registration_sms": a.Registration != nil, "sms_login": false, "password_reset": false}})
+	writeJSON(w, 200, map[string]any{"data": map[string]any{"registration_sms": a.Registration != nil && a.Config.Registration.Enabled, "sms_login": a.Registration != nil && a.Config.Registration.LoginEnabled, "password_reset": false}})
+}
+func (a *App) smsPurposeEnabled(w http.ResponseWriter, purpose string) bool {
+	enabled := a.surface() == "public" && ((purpose == "register" && a.Config.Registration.Enabled) || (purpose == "login" && a.Config.Registration.LoginEnabled))
+	if !enabled {
+		fail(w, 503, "SMS_PURPOSE_DISABLED", "此短信功能暂未启用")
+	}
+	return enabled
 }
 func (a *App) registrationChallenge(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -64,15 +71,14 @@ func (a *App) registrationChallenge(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if in.Purpose != "register" {
-		fail(w, 400, "SMS_PURPOSE_DISABLED", "此短信功能暂未启用")
+	if !a.smsPurposeEnabled(w, in.Purpose) {
 		return
 	}
 	who, ok := a.registrationSubject(w, r, in.Phone, true)
 	if !ok {
 		return
 	}
-	c, err := a.Registration.Create(r.Context(), who, in.Phone)
+	c, err := a.Registration.CreatePurpose(r.Context(), who, in.Phone, in.Purpose)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -89,15 +95,14 @@ func (a *App) registrationSend(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if in.Purpose != "register" {
-		fail(w, 503, "SMS_PURPOSE_DISABLED", "此短信功能暂未启用")
+	if !a.smsPurposeEnabled(w, in.Purpose) {
 		return
 	}
 	who, ok := a.registrationSubject(w, r, in.Phone, false)
 	if !ok {
 		return
 	}
-	if err := a.Registration.Send(r.Context(), who, in.Phone, in.ChallengeID, in.Token); err != nil {
+	if err := a.Registration.SendPurpose(r.Context(), who, in.Phone, in.ChallengeID, in.Token, in.Purpose); err != nil {
 		writeAppError(w, err)
 		return
 	}
@@ -106,6 +111,12 @@ func (a *App) registrationSend(w http.ResponseWriter, r *http.Request) {
 func (a *App) registrationComplete(w http.ResponseWriter, r *http.Request) {
 	var in domain.Input
 	if !readJSON(w, r, &in) {
+		return
+	}
+	if !a.smsPurposeEnabled(w, "register") {
+		return
+	}
+	if domain.Purpose(in.Purpose) == "login" && !a.smsPurposeEnabled(w, "login") {
 		return
 	}
 	who, ok := a.registrationSubject(w, r, in.Phone, false)
@@ -119,4 +130,29 @@ func (a *App) registrationComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{Name: a.cookieName(), Value: session.Token, Path: "/", HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteLaxMode, MaxAge: 7 * 86400, Expires: session.Expires})
 	writeJSON(w, 200, map[string]any{"data": userWire(&session.User)})
+}
+
+func (a *App) smsLogin(w http.ResponseWriter, r *http.Request, in domain.Input) {
+	if !a.smsPurposeEnabled(w, "login") {
+		return
+	}
+	who, ok := a.registrationSubject(w, r, in.Phone, false)
+	if !ok {
+		return
+	}
+	session, pending, err := a.Registration.Login(r.Context(), who, in)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	if pending {
+		if !a.Config.Registration.Enabled {
+			fail(w, 503, "REGISTRATION_DISABLED", "手机号已验证，当前暂未开放新用户注册")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"data": map[string]any{"status": "registration_required", "challenge_id": in.ChallengeID}})
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: a.cookieName(), Value: session.Token, Path: "/", HttpOnly: true, Secure: a.Config.SecureCookies, SameSite: http.SameSiteLaxMode, MaxAge: 7 * 86400, Expires: session.Expires})
+	writeJSON(w, 200, map[string]any{"data": map[string]any{"status": "authenticated", "user": userWire(&session.User)}})
 }

@@ -62,6 +62,13 @@ func NewAliyun(c config.RegistrationConfig) *Aliyun {
 func options() *dara.RuntimeOptions {
 	return &dara.RuntimeOptions{Autoretry: dara.Bool(false), MaxAttempts: dara.Int(1), ConnectTimeout: dara.Int(2000), ReadTimeout: dara.Int(7000)}
 }
+
+// Login and registration use distinct provider scenarios but share the call budget.
+func (a *Aliyun) WithScheme(scheme string) *Aliyun {
+	copy := *a
+	copy.config.Scheme = scheme
+	return &copy
+}
 func (a *Aliyun) acquire(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return domain.ErrUnavailable

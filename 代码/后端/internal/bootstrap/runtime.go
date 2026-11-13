@@ -72,8 +72,9 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 		r.HTTP.ReadSafety = &securityapp.ReadService{Store: store, Audit: postgres.MediaReadAudit{DB: db}, NewID: security.NewID}
 		r.HTTP.HumanSafety = &securityapp.HumanService{Store: store, Verifier: security.NewTurnstile(c.MediaSafety.Secret), NewID: security.NewID}
 	}
-	if c.Registration.Enabled && c.Surface == "public" {
-		r.HTTP.Registration = &registrationapp.Service{Store: postgres.RegistrationStore{DB: db}, Provider: sms.NewAliyun(c.Registration), Human: security.NewTurnstile(c.MediaSafety.Secret), Limits: cache.RegistrationLimiter{Client: client, DailyLimit: c.Registration.DailyLimit}, NewID: security.NewID, NewToken: security.RandomToken, Hash: security.TokenHash, MAC: security.RegistrationMAC(c.SessionSecret), PasswordHash: security.NewPasswordVerifier(2).Hash, AllowedPhones: c.Registration.AllowedPhones}
+	if (c.Registration.Enabled || c.Registration.LoginEnabled) && c.Surface == "public" {
+		provider := sms.NewAliyun(c.Registration)
+		r.HTTP.Registration = &registrationapp.Service{Store: postgres.RegistrationStore{DB: db}, Provider: provider, LoginProvider: provider.WithScheme(c.Registration.LoginScheme), Human: security.NewTurnstile(c.MediaSafety.Secret), Limits: cache.RegistrationLimiter{Client: client, DailyLimit: c.Registration.DailyLimit}, NewID: security.NewID, NewToken: security.RandomToken, Hash: security.TokenHash, MAC: security.RegistrationMAC(c.SessionSecret), PasswordHash: security.NewPasswordVerifier(2).Hash, AllowedPhones: c.Registration.AllowedPhones}
 	}
 	r.Chat = chatapp.New(&postgres.ChatStore{DB: db}, cache.Limiter{Client: client}, cache.ChatNotifier{Client: client}, c.Surface, security.NewID)
 	r.Recommendations = recommendationapp.New(&postgres.RecommendationStore{DB: db}, security.NewID, func(ctx context.Context, batch string) {

@@ -52,6 +52,7 @@ func registrationFixture(t *testing.T) (*App, *registrationFakeProvider, domain.
 	a.Config.SessionSecret = strings.Repeat("test-secret-", 4)
 	a.Config.MediaSafety.Hostnames = []string{"qingye.test"}
 	a.Config.MediaSafety.SiteKey = "test-only"
+	a.Config.Registration.Enabled = true
 	p := &registrationFakeProvider{}
 	prefix := newID() + ":"
 	a.Registration = &app.Service{Store: postgres.RegistrationStore{DB: a.DB}, Provider: p, Human: registrationHuman{true, t}, Limits: cache.RegistrationLimiter{Client: a.Redis, DailyLimit: 20, Prefix: prefix}, NewID: newID, NewToken: randomToken, Hash: tokenHash, MAC: security.RegistrationMAC(a.Config.SessionSecret), PasswordHash: func(_ context.Context, p string) (string, error) {

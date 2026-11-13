@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { api, isDemo } from '../lib/api';
 import { useSession, useUi } from '../context';
 import '../member.css';
+import { CompleteRegistration, type VerifiedPhone } from '../components/CompleteRegistration';
 import {
   RegistrationVerification,
   type SmsChallenge,
@@ -36,6 +37,8 @@ export function AuthPage() {
   const [method, setMethod] = useState<'sms' | 'password'>('password');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirm, setPasswordConfirm] = useState('');
+  const [pendingRegistration, setPendingRegistration] = useState<VerifiedPhone | null>(null);
   const [code, setCode] = useState('');
   const [challenge, setChallenge] = useState('');
   const [agreed, setAgreed] = useState(false);
@@ -82,6 +85,9 @@ export function AuthPage() {
     setSending(false);
     setError('');
     setPassword('');
+    setPasswordConfirm('');
+    setPendingRegistration(null);
+    setBusy(false);
     setCode('');
     setChallenge('');
     setAgreed(false);
@@ -140,7 +146,7 @@ export function AuthPage() {
     setChallenge('');
     setCode('');
     try {
-      const result = await api.smsChallenge(phone);
+      const result = await api.smsChallenge(phone, register ? 'register' : 'login');
       if (version !== generation.current) return;
       if (!result.challenge_id) throw new Error('短信服务未返回有效凭据，请稍后重试。');
       setVerification(result);
@@ -155,7 +161,12 @@ export function AuthPage() {
     const version = generation.current;
     setSending(true);
     try {
-      const result = await api.sms(phone, 'register', verification.challenge_id, token);
+      const result = await api.sms(
+        phone,
+        register ? 'register' : 'login',
+        verification.challenge_id,
+        token,
+      );
       if (version !== generation.current) return;
       setChallenge(result.challenge_id);
       setRemaining(Math.max(60, Number(result.retry_after) || 60));
@@ -206,6 +217,11 @@ export function AuthPage() {
       setError('请阅读并同意服务协议与隐私说明。');
       return;
     }
+    if (register && password !== passwordConfirm) {
+      setError('两次输入的密码不一致。');
+      return;
+    }
+    const version = generation.current;
     setBusy(true);
     try {
       if (reset) {
@@ -222,25 +238,30 @@ export function AuthPage() {
             code,
             challenge_id: challenge,
             password,
+            password_confirm: passwordConfirm,
             agreement: {
               accepted: true,
               terms_version: agreementVersions.terms,
               privacy_version: agreementVersions.privacy,
             },
           });
-        } else
-          await api.login(
-            method === 'sms'
-              ? { method, phone, code, challenge_id: challenge }
-              : { method, phone, password },
-          );
+        } else if (method === 'sms') {
+          const proof = { phone, code, challenge_id: challenge };
+          const result = await api.smsLogin(proof);
+          if (version !== generation.current) return;
+          if (result.status === 'registration_required') {
+            setPendingRegistration(proof);
+            return;
+          }
+        } else await api.login({ method, phone, password });
+        if (version !== generation.current) return;
         await refresh();
         navigate(returnTo, { replace: true });
       }
     } catch (e) {
-      setError(errorText(e));
+      if (version === generation.current) setError(errorText(e));
     } finally {
-      setBusy(false);
+      if (version === generation.current) setBusy(false);
     }
   }
   async function demo() {
@@ -297,10 +318,15 @@ export function AuthPage() {
                 type="button"
                 role="tab"
                 aria-selected={method === value}
-                disabled={value === 'sms' && !capabilities.sms_login}
+                disabled={busy || sending || (value === 'sms' && !capabilities.sms_login)}
                 className={method === value ? 'active' : ''}
                 onClick={() => {
                   setMethod(value);
+                  generation.current++;
+                  setVerification(null);
+                  setChallenge('');
+                  setCode('');
+                  setPassword('');
                   setError('');
                 }}
               >
@@ -308,6 +334,9 @@ export function AuthPage() {
               </button>
             ))}
           </div>
+        )}
+        {!register && !reset && method === 'sms' && (
+          <p className="auth-sms-hint">已有账户验证后直接登录；新手机号验证后可继续注册。</p>
         )}
         {needsSms && !smsEnabled && (
           <p className="auth-service-note" role="note">
@@ -413,6 +442,22 @@ export function AuthPage() {
             </label>
           )}
           {register && (
+            <label className="form-field">
+              确认密码
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={passwordConfirm}
+                onChange={(e) => setPasswordConfirm(e.target.value)}
+                placeholder="再次输入密码"
+                minLength={8}
+                maxLength={128}
+                required
+                disabled={busy}
+              />
+            </label>
+          )}
+          {register && (
             <label className="agreement-check">
               <input
                 type="checkbox"
@@ -466,6 +511,19 @@ export function AuthPage() {
             <span aria-hidden="true">↗</span>
           </button>
         </form>
+        {pendingRegistration && (
+          <CompleteRegistration
+            proof={pendingRegistration}
+            onClose={() => {
+              setPendingRegistration(null);
+              setError('');
+            }}
+            onComplete={async () => {
+              await refresh();
+              navigate(returnTo, { replace: true });
+            }}
+          />
+        )}
         <div className="auth-links">
           {!register && !reset ? (
             <>

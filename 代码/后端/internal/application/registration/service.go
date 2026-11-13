@@ -13,11 +13,13 @@ import (
 
 type Repository interface {
 	Create(context.Context, domain.Challenge) error
-	ClaimSend(context.Context, string, string, string, string) (domain.Challenge, error)
+	ClaimSend(context.Context, string, string, string, string, string) (domain.Challenge, error)
 	Mark(context.Context, domain.Challenge, string, domain.Receipt) error
 	ClaimCheck(context.Context, domain.Input, string, string, string) (domain.Challenge, error)
 	CheckResult(context.Context, domain.Challenge, bool) error
-	Register(context.Context, domain.Input, string, string, string, string, string, time.Time) (identity.User, error)
+	Register(context.Context, domain.Input, string, string, string, string, string, string, time.Time) (identity.User, error)
+	Login(context.Context, domain.Input, string, string, string, time.Time) (identity.User, bool, error)
+	PendingRegistration(context.Context, domain.Input, string, string, string) error
 }
 type Provider interface {
 	Send(context.Context, string, string) (domain.Receipt, error)
@@ -31,6 +33,7 @@ type Limiter interface {
 type Service struct {
 	Store           Repository
 	Provider        Provider
+	LoginProvider   Provider
 	Human           securityapp.HumanVerifier
 	Limits          Limiter
 	NewID, NewToken func() string
@@ -45,6 +48,12 @@ type Session struct {
 }
 
 func (s *Service) Create(ctx context.Context, who domain.Subject, phone string) (domain.Challenge, error) {
+	return s.CreatePurpose(ctx, who, phone, "register")
+}
+func (s *Service) CreatePurpose(ctx context.Context, who domain.Subject, phone, purpose string) (domain.Challenge, error) {
+	if purpose != "register" && purpose != "login" {
+		return domain.Challenge{}, domain.ErrChallenge
+	}
 	if !domain.ValidPhone(phone) {
 		return domain.Challenge{}, fault.New(fault.Invalid, "INVALID_PHONE", "请输入有效的11位手机号")
 	}
@@ -60,14 +69,21 @@ func (s *Service) Create(ctx context.Context, who domain.Subject, phone string) 
 	if err := s.Limits.Challenge(ctx, who); err != nil {
 		return domain.Challenge{}, err
 	}
-	c := domain.Challenge{ID: s.NewID(), Phone: phone, Binding: who.Binding, Hostname: who.Hostname, Stage: "challenge"}
+	c := domain.Challenge{ID: s.NewID(), Phone: phone, Binding: who.Binding, Hostname: who.Hostname, Stage: "challenge", Purpose: purpose}
 	return c, s.Store.Create(ctx, c)
 }
 func (s *Service) Send(ctx context.Context, who domain.Subject, phone, id, token string) error {
+	return s.SendPurpose(ctx, who, phone, id, token, "register")
+}
+func (s *Service) SendPurpose(ctx context.Context, who domain.Subject, phone, id, token, purpose string) error {
+	provider := s.provider(purpose)
+	if provider == nil {
+		return domain.ErrUnavailable
+	}
 	if !domain.ValidPhone(phone) || !domain.ValidID(id) || len(token) < 1 || len(token) > 2048 || strings.TrimSpace(token) != token {
 		return domain.ErrChallenge
 	}
-	c, err := s.Store.ClaimSend(ctx, id, phone, who.Binding, s.NewID())
+	c, err := s.Store.ClaimSend(ctx, id, phone, who.Binding, s.NewID(), purpose)
 	if err != nil {
 		return err
 	}
@@ -92,7 +108,7 @@ func (s *Service) Send(ctx context.Context, who domain.Subject, phone, id, token
 	if err = s.Store.Mark(ctx, c, "sending", domain.Receipt{}); err != nil {
 		return err
 	}
-	receipt, err := s.Provider.Send(ctx, phone, c.ID)
+	receipt, err := provider.Send(ctx, phone, c.ID)
 	if err != nil {
 		_ = finish("unknown", domain.Receipt{})
 		return fault.New(fault.Unavailable, "SMS_SEND_UNCERTAIN", "发送结果暂未确认，请留意手机短信，稍后再试")
@@ -108,24 +124,14 @@ func (s *Service) Register(ctx context.Context, who domain.Subject, in domain.In
 	}
 	raw, _ := json.Marshal(in)
 	fingerprint := s.MAC(string(raw))
-	c, err := s.Store.ClaimCheck(ctx, in, who.Binding, fingerprint, s.NewID())
-	if err != nil {
-		return Session{}, err
-	}
-	if c.Stage == "checking" {
-		ok, providerErr := s.Provider.Check(ctx, in.Phone, in.Code, c.ID)
-		done, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		err = s.Store.CheckResult(done, c, providerErr == nil && ok)
-		cancel()
-		if err != nil {
+	proof := fingerprint
+	if domain.Purpose(in.Purpose) == "login" {
+		proof = s.loginFingerprint(in)
+		if err := s.Store.PendingRegistration(ctx, in, who.Binding, proof, fingerprint); err != nil {
 			return Session{}, err
 		}
-		if providerErr != nil {
-			return Session{}, domain.ErrUnavailable
-		}
-		if !ok {
-			return Session{}, domain.ErrCode
-		}
+	} else if err := s.check(ctx, who, in, fingerprint); err != nil {
+		return Session{}, err
 	}
 	hash, err := s.PasswordHash(ctx, in.Password)
 	if err != nil {
@@ -133,9 +139,36 @@ func (s *Service) Register(ctx context.Context, who domain.Subject, in domain.In
 	}
 	token := s.NewToken()
 	expires := time.Now().Add(7 * 24 * time.Hour)
-	user, err := s.Store.Register(ctx, in, who.Binding, fingerprint, hash, s.NewID(), s.Hash(token), expires)
+	user, err := s.Store.Register(ctx, in, who.Binding, fingerprint, proof, hash, s.NewID(), s.Hash(token), expires)
 	if err != nil {
 		return Session{}, err
 	}
 	return Session{User: user, Token: token, Expires: expires}, nil
+}
+
+func (s *Service) check(ctx context.Context, who domain.Subject, in domain.Input, fingerprint string) error {
+	provider := s.provider(domain.Purpose(in.Purpose))
+	if provider == nil {
+		return domain.ErrUnavailable
+	}
+	c, err := s.Store.ClaimCheck(ctx, in, who.Binding, fingerprint, s.NewID())
+	if err != nil {
+		return err
+	}
+	if c.Stage == "checking" {
+		ok, providerErr := provider.Check(ctx, in.Phone, in.Code, c.ID)
+		done, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		err = s.Store.CheckResult(done, c, providerErr == nil && ok)
+		cancel()
+		if err != nil {
+			return err
+		}
+		if providerErr != nil {
+			return domain.ErrUnavailable
+		}
+		if !ok {
+			return domain.ErrCode
+		}
+	}
+	return nil
 }

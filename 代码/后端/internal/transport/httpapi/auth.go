@@ -9,6 +9,7 @@ import (
 	"net/url"
 	application "qingye/backend/internal/application/identity"
 	domain "qingye/backend/internal/domain/identity"
+	registration "qingye/backend/internal/domain/registration"
 	"qingye/backend/internal/infrastructure/cache"
 	"qingye/backend/internal/infrastructure/postgres"
 	"qingye/backend/internal/infrastructure/security"
@@ -189,6 +190,10 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		ChallengeID string `json:"challenge_id"`
 	}
 	if !readJSON(w, r, &input) {
+		return
+	}
+	if input.Method == "sms" {
+		a.smsLogin(w, r, registration.Input{Purpose: "login", Phone: input.Phone, Code: input.Code, ChallengeID: input.ChallengeID})
 		return
 	}
 	session, err := a.identityService().Login(r.Context(), application.LoginInput{Phone: input.Phone, Password: input.Password, Method: input.Method, IP: requestIP(r)})

@@ -22,6 +22,7 @@ var ErrLimited = fault.New(fault.RateLimited, "SMS_RATE_LIMITED", "获取次数�
 type Subject struct{ Binding, IPKey, PhoneKey, Hostname, IP string }
 type Challenge struct {
 	ID, Phone, Binding, Hostname, Stage, Attempt, RequestHash, UserID, BizID, ProviderRequestID string
+	Purpose, CompletionHash                                                                     string
 	Expires                                                                                     time.Time
 	Attempts                                                                                    int
 }
@@ -31,22 +32,39 @@ type Agreement struct {
 	Privacy  int  `json:"privacy_version"`
 }
 type Input struct {
-	Phone       string    `json:"phone"`
-	Code        string    `json:"code"`
-	ChallengeID string    `json:"challenge_id"`
-	Password    string    `json:"password"`
-	Agreement   Agreement `json:"agreement"`
+	Purpose         string    `json:"purpose,omitempty"`
+	Phone           string    `json:"phone"`
+	Code            string    `json:"code"`
+	ChallengeID     string    `json:"challenge_id"`
+	Password        string    `json:"password"`
+	PasswordConfirm string    `json:"password_confirm,omitempty"`
+	Agreement       Agreement `json:"agreement"`
 }
 type Receipt struct{ BizID, RequestID string }
 
 func ValidPhone(phone string) bool { return phonePattern.MatchString(phone) }
 func ValidID(id string) bool       { return idPattern.MatchString(id) }
-func Validate(in Input) error {
-	if !ValidPhone(in.Phone) || !ValidID(in.ChallengeID) || !codePattern.MatchString(in.Code) {
+func Purpose(value string) string {
+	if value == "" {
+		return "register"
+	}
+	return value
+}
+func ValidateCode(in Input) error {
+	if !ValidPhone(in.Phone) || !ValidID(in.ChallengeID) || !codePattern.MatchString(in.Code) || (Purpose(in.Purpose) != "register" && Purpose(in.Purpose) != "login") {
 		return ErrCode
+	}
+	return nil
+}
+func Validate(in Input) error {
+	if err := ValidateCode(in); err != nil {
+		return err
 	}
 	if !utf8.ValidString(in.Password) || utf8.RuneCountInString(in.Password) < 8 || len(in.Password) > 72 || strings.ContainsRune(in.Password, 0) {
 		return fault.New(fault.Invalid, "INVALID_PASSWORD", "密码需为8位以上，且不超过72字节")
+	}
+	if (Purpose(in.Purpose) == "login" || in.PasswordConfirm != "") && in.Password != in.PasswordConfirm {
+		return fault.New(fault.Invalid, "PASSWORD_MISMATCH", "两次输入的密码不一致")
 	}
 	if !in.Agreement.Accepted || in.Agreement.Terms < 1 || in.Agreement.Privacy < 1 {
 		return fault.New(fault.Invalid, "AGREEMENT_REQUIRED", "请阅读并同意当前服务协议与隐私说明")

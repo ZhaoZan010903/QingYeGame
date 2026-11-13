@@ -19,24 +19,24 @@ func (s RegistrationStore) Create(ctx context.Context, c domain.Challenge) error
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.Exec(ctx, `INSERT INTO sms_challenges(id,phone,purpose,provider,binding_hash,hostname,stage,expires_at) VALUES($1,$2,'register','pnvs',$3,$4,'challenge',now()+interval '5 minutes')`, c.ID, c.Phone, c.Binding, c.Hostname)
+	_, err = s.DB.Exec(ctx, `INSERT INTO sms_challenges(id,phone,purpose,provider,binding_hash,hostname,stage,expires_at) VALUES($1,$2,$5,'pnvs',$3,$4,'challenge',now()+interval '5 minutes')`, c.ID, c.Phone, c.Binding, c.Hostname, domain.Purpose(c.Purpose))
 	return err
 }
-func registrationRow(ctx context.Context, tx pgx.Tx, id, phone, binding string) (domain.Challenge, error) {
+func registrationRow(ctx context.Context, tx pgx.Tx, id, phone, binding, purpose string) (domain.Challenge, error) {
 	var c domain.Challenge
-	err := tx.QueryRow(ctx, `SELECT id,phone,binding_hash,hostname,stage,attempt_id,request_hash,coalesce(registered_user_id,''),attempts,expires_at FROM sms_challenges WHERE id=$1 AND phone=$2 AND binding_hash=$3 AND purpose='register' AND provider='pnvs' AND expires_at>now() FOR UPDATE`, id, phone, binding).Scan(&c.ID, &c.Phone, &c.Binding, &c.Hostname, &c.Stage, &c.Attempt, &c.RequestHash, &c.UserID, &c.Attempts, &c.Expires)
+	err := tx.QueryRow(ctx, `SELECT id,phone,binding_hash,hostname,stage,attempt_id,request_hash,coalesce(registered_user_id,''),attempts,expires_at,purpose,completion_hash FROM sms_challenges WHERE id=$1 AND phone=$2 AND binding_hash=$3 AND purpose=$4 AND provider='pnvs' AND expires_at>now() FOR UPDATE`, id, phone, binding, domain.Purpose(purpose)).Scan(&c.ID, &c.Phone, &c.Binding, &c.Hostname, &c.Stage, &c.Attempt, &c.RequestHash, &c.UserID, &c.Attempts, &c.Expires, &c.Purpose, &c.CompletionHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, domain.ErrChallenge
 	}
 	return c, err
 }
-func (s RegistrationStore) ClaimSend(ctx context.Context, id, phone, binding, attempt string) (domain.Challenge, error) {
+func (s RegistrationStore) ClaimSend(ctx context.Context, id, phone, binding, attempt, purpose string) (domain.Challenge, error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return domain.Challenge{}, err
 	}
 	defer tx.Rollback(ctx)
-	c, err := registrationRow(ctx, tx, id, phone, binding)
+	c, err := registrationRow(ctx, tx, id, phone, binding, purpose)
 	if err != nil {
 		return c, err
 	}
@@ -73,11 +73,11 @@ func (s RegistrationStore) ClaimCheck(ctx context.Context, in domain.Input, bind
 		return domain.Challenge{}, err
 	}
 	defer tx.Rollback(ctx)
-	c, err := registrationRow(ctx, tx, in.ChallengeID, in.Phone, binding)
+	c, err := registrationRow(ctx, tx, in.ChallengeID, in.Phone, binding, in.Purpose)
 	if err != nil {
 		return c, err
 	}
-	if c.Stage == "verified" || c.Stage == "registered" {
+	if c.Stage == "verified" || c.Stage == "registered" || c.Stage == "registration_pending" || c.Stage == "logged_in" {
 		if c.RequestHash != fingerprint {
 			return c, domain.ErrChallenge
 		}
@@ -112,21 +112,25 @@ func (s RegistrationStore) CheckResult(ctx context.Context, c domain.Challenge, 
 	}
 	return err
 }
-func (s RegistrationStore) Register(ctx context.Context, in domain.Input, binding, fingerprint, hash, id, sessionHash string, expires time.Time) (identity.User, error) {
+func (s RegistrationStore) Register(ctx context.Context, in domain.Input, binding, fingerprint, proof, hash, id, sessionHash string, expires time.Time) (identity.User, error) {
 	var u identity.User
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return u, err
 	}
 	defer tx.Rollback(ctx)
-	c, err := registrationRow(ctx, tx, in.ChallengeID, in.Phone, binding)
+	c, err := registrationRow(ctx, tx, in.ChallengeID, in.Phone, binding, in.Purpose)
 	if err != nil {
 		return u, err
 	}
-	if (c.Stage != "verified" && c.Stage != "registered") || c.RequestHash != fingerprint {
+	ready := "verified"
+	if domain.Purpose(in.Purpose) == "login" {
+		ready = "registration_pending"
+	}
+	if (c.Stage != ready && c.Stage != "registered") || c.RequestHash != proof || (c.Stage == "registered" && ready == "registration_pending" && c.CompletionHash != fingerprint) {
 		return u, domain.ErrChallenge
 	}
-	if c.Stage == "verified" {
+	if c.Stage == ready {
 		// Lock the published agreement versions until account and consent commit together.
 		rows, e := tx.Query(ctx, `SELECT slug,version FROM content_pages WHERE slug IN ('terms','privacy') AND published ORDER BY slug FOR SHARE`)
 		if e != nil {
@@ -160,7 +164,7 @@ func (s RegistrationStore) Register(ctx context.Context, in domain.Input, bindin
 		if e != nil {
 			return u, e
 		}
-		_, e = tx.Exec(ctx, `UPDATE sms_challenges SET stage='registered',used_at=now(),registered_user_id=$2 WHERE id=$1`, c.ID, id)
+		_, e = tx.Exec(ctx, `UPDATE sms_challenges SET stage='registered',used_at=now(),registered_user_id=$2,completion_hash=$3 WHERE id=$1`, c.ID, id, fingerprint)
 		if e != nil {
 			return u, e
 		}
