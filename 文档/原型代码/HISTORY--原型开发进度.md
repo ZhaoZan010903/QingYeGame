@@ -1,6 +1,6 @@
 # HISTORY -- 0.6原型开发进度
 
-> 归档说明（2026年11月13日）：下文HTML路径及操作描述属于历史记录，旧HTML原型已从当前仓库清理。查阅方式见[历史原型说明](README--历史原型说明.md)；当前开发以业务源码和最新接手文档为准。
+> 归档说明（2026年11月13日）：下文HTML、React原型路径及操作描述属于历史记录，两套旧原型代码已从当前仓库清理。查阅方式见[历史原型说明](README--历史原型说明.md)；当前开发以业务源码和最新接手文档为准。
 
 以下内容保留上一轮原型发布记录；其中“尚未交付”描述的是0.6.0时点，当前后端状态以上文及测试联调说明为准。
 
@@ -47,10 +47,10 @@
 
 关键实现位置：
 
-- [首页过渡](../原型代码/React/src/components/HomeEntrance.tsx)及[首页内容](../原型代码/React/src/pages/HomePage.tsx)。
-- [集市搜索](../原型代码/React/src/components/CatalogSearch.tsx)、[下拉组件](../原型代码/React/src/components/CatalogSelect.tsx)及[集市页面](../原型代码/React/src/pages/CatalogPage.tsx)。
-- [共享商品卡片](../原型代码/React/src/components/shared.tsx)、[登录页面](../原型代码/React/src/pages/AuthPage.tsx)及[会员页面](../原型代码/React/src/pages/MemberPages.tsx)。
-- [接口层](../原型代码/React/src/lib/api.ts)及[集中管理的演示样例](../原型代码/React/src/lib/fixtures.ts)。
+- [首页过渡](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/components/HomeEntrance.tsx)及[首页内容](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/pages/HomePage.tsx)。
+- [集市搜索](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/components/CatalogSearch.tsx)、[下拉组件](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/components/CatalogSelect.tsx)及[集市页面](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/pages/CatalogPage.tsx)。
+- [共享商品卡片](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/components/shared.tsx)、[登录页面](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/pages/AuthPage.tsx)及[会员页面](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/pages/MemberPages.tsx)。
+- [接口层](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/lib/api.ts)及[集中管理的演示样例](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/src/lib/fixtures.ts)。
 
 ## 3 已完成的验证
 
@@ -102,6 +102,6 @@ pnpm test
 pnpm build
 ```
 
-启动配置见[前端README](React/README--React原型说明.md)。本地预览和服务器5178预览使用演示模式，接入真实服务时按接口文档配置，不能把演示数据替换成生产请求失败的备用结果。
+启动配置见[前端README](https://github.com/ZhaoZan010903/QingYeGame/blob/158e8d224a34beff242c417975a2b5ac0e9282f0/文档/原型代码/React/README--React原型说明.md)。本地预览和服务器5178预览使用演示模式，接入真实服务时按接口文档配置，不能把演示数据替换成生产请求失败的备用结果。
 
 服务器公开目录只存放构建产物；开发进度与源码交接资料应保存在私有仓库或`/root/qingye-private/`。本文不保存登录凭据、真实会员数据或逐字对话记录。
