@@ -179,6 +179,7 @@ func (a *App) registerAuthMember(mux routeRegistrar) {
 		a.registerMember(mux)
 	}
 	a.registerMedia(mux)
+	a.registerProfile(mux)
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {

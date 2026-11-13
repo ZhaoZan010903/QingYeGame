@@ -18,7 +18,7 @@ export const queryValues = (params: URLSearchParams, key: string) =>
 export function toApiQuery(source: URLSearchParams): URLSearchParams {
   const p = new URLSearchParams(source);
   const filters: Record<string, string[]> = {};
-  for (const key of ['server', 'gender', 'level', 'kind', 'tag']) {
+  for (const key of ['server', 'gender', 'level', 'kind', 'tag', 'keyword']) {
     const list = queryValues(p, key).filter((v) => v !== 'all');
     if (list.length) filters[key] = list;
     p.delete(key);

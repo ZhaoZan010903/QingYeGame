@@ -9,12 +9,13 @@ import { CatalogSelect } from '../components/CatalogSelect';
 import type { FilterGroup } from '../types';
 import { useSession } from '../context';
 import { catalogPriceUnits } from '../lib/catalog-units';
+import { catalogFilters, catalogRequest } from '../lib/catalog-filters';
 import '../catalog.css';
 const defaultFilters: FilterGroup[] = [
   {
     key: 'server',
     label: '游戏区服',
-    options: ['华东一区', '华南一区', '华北一区'].map((v) => ({ value: v, label: v })),
+    options: ['一舞时光', '拾忆光阴', '十年之约', '其他'].map((v) => ({ value: v, label: v })),
   },
   {
     key: 'gender',
@@ -26,19 +27,11 @@ const defaultFilters: FilterGroup[] = [
   },
   {
     key: 'level',
-    label: 'XVIP 等级',
-    options: [7, 8, 9, 10].map((n) => ({ value: String(n), label: `VIP ${n}` })),
-  },
-  {
-    key: 'kind',
-    label: '账号类型',
-    options: [
-      { value: 'single', label: '独立账号' },
-      { value: 'linked', label: '双号连体' },
-    ],
+    label: 'VIP 等级',
+    options: ['星钻', '银钻', '金钻', '彩钻', '王钻'].map((v) => ({ value: v, label: v })),
   },
 ];
-function FilterForm({
+export function FilterForm({
   params,
   onChange,
   groups,
@@ -70,8 +63,29 @@ function FilterForm({
     p.delete('cursor');
     onChange(p);
   };
+  const renderGroup = (g: FilterGroup) => (
+    <fieldset className="filter-field" key={g.key}>
+      <legend>
+        {g.label}
+        <small>可多选</small>
+      </legend>
+      <div className="filter-options">
+        {g.options.map((o) => (
+          <label key={o.value}>
+            <input
+              type="checkbox"
+              checked={params.getAll(g.key).includes(o.value)}
+              onChange={() => toggle(g.key, o.value)}
+            />
+            <span>{o.label}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
   return (
     <div className="filter-form">
+      {groups.filter((g) => g.key === 'keyword' && g.options.length > 0).map(renderGroup)}
       <fieldset className="filter-field">
         <legend>预算范围</legend>
         <CatalogSelect
@@ -119,26 +133,7 @@ function FilterForm({
         </div>
         <p className="budget-hint">先选择报价单位，再按预算筛选或价格排序。</p>
       </fieldset>
-      {groups.map((g) => (
-        <fieldset className="filter-field" key={g.key}>
-          <legend>
-            {g.label}
-            <small>可多选</small>
-          </legend>
-          <div className="filter-options">
-            {g.options.map((o) => (
-              <label key={o.value}>
-                <input
-                  type="checkbox"
-                  checked={params.getAll(g.key).includes(o.value)}
-                  onChange={() => toggle(g.key, o.value)}
-                />
-                <span>{o.label}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      ))}
+      {groups.filter((g) => g.key !== 'keyword').map(renderGroup)}
     </div>
   );
 }
@@ -166,19 +161,11 @@ export function Catalog({ home = false }: { home?: boolean }) {
         });
       }
     return {
-      groups: relevant.length ? [...merged.values()] : isDemo ? defaultFilters : [],
+      groups: catalogFilters(relevant.length ? [...merged.values()] : isDemo ? defaultFilters : []),
       priceUnits: catalogPriceUnits(relevant, mode),
     };
   }, [categories.data, params.get('trade_type')]);
-  const request = new URLSearchParams(params);
-  request.set('limit', home ? '6' : '9');
-  const filterValues: Record<string, string[]> = {};
-  groups.forEach((group) => {
-    const values = request.getAll(group.key);
-    if (values.length) filterValues[group.key] = values;
-    request.delete(group.key);
-  });
-  if (Object.keys(filterValues).length) request.set('filters', JSON.stringify(filterValues));
+  const request = catalogRequest(params, groups, home ? 6 : 9);
   const { user } = useSession();
   const result = useLoad(
     () => api.products(request),
@@ -195,14 +182,20 @@ export function Catalog({ home = false }: { home?: boolean }) {
   };
   const resetFilters = (source: URLSearchParams) => {
     const p = new URLSearchParams(source);
-    ['price_unit', 'min_price', 'max_price', 'cursor', ...groups.map((g) => g.key)].forEach((key) =>
-      p.delete(key),
-    );
+    [
+      'price_unit',
+      'min_price',
+      'max_price',
+      'cursor',
+      'kind',
+      'filters',
+      ...groups.map((g) => g.key),
+    ].forEach((key) => p.delete(key));
     if (p.get('sort')?.startsWith('price')) p.delete('sort');
     return p;
   };
   const active = [...params.entries()].filter(
-    ([k]) => !['sort', 'cursor', 'q', 'trade_type'].includes(k),
+    ([k]) => !['sort', 'cursor', 'q', 'trade_type', 'kind', 'filters'].includes(k),
   );
   const filterLabel = (key: string, value: string) => {
     if (key === 'price_unit') return unitLabels[value]?.replace('/ ', '每') || value;

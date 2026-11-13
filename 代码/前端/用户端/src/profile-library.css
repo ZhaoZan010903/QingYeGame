@@ -1,0 +1,61 @@
+.profile-avatar-library {
+  margin-bottom: 26px;
+}
+.profile-avatar-library .profile-avatar-editor {
+  margin-bottom: 16px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.profile-avatar-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 10px;
+}
+.profile-avatar-options button {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 5px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+.profile-avatar-options button[aria-pressed='true'] {
+  border-color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+.profile-avatar-options img {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.profile-avatar-options span {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.nickname-status {
+  grid-column: 1 / -1;
+  padding: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+}
+.nickname-status:has(p) {
+  padding: 12px 15px;
+  border-radius: 10px;
+  background: var(--bg-subtle);
+}
+.nickname-status p {
+  margin: 0;
+}
+.profile-form > .profile-avatar-feedback {
+  grid-column: 1 / -1;
+}
+.nickname-refresh {
+  justify-self: start;
+  grid-column: 1 / -1;
+}

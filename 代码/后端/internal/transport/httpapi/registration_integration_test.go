@@ -97,6 +97,9 @@ func TestR21RegistrationAtomicAccountAndRetry(t *testing.T) {
 	if session.User.Role != "member" || !session.User.Enabled {
 		t.Fatal("wrong role")
 	}
+	if session.User.Nickname != "清叶会员0000" {
+		t.Fatal("new member nickname must include the last four phone digits")
+	}
 	again, e := a.Registration.Register(ctx, s, in)
 	if e != nil || again.User.ID != session.User.ID || again.Token == session.Token {
 		t.Fatal("lost response recovery", e)

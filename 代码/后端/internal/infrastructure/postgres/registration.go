@@ -153,7 +153,7 @@ func (s RegistrationStore) Register(ctx context.Context, in domain.Input, bindin
 		if versions["terms"] != in.Agreement.Terms || versions["privacy"] != in.Agreement.Privacy {
 			return u, fault.New(fault.Conflict, "AGREEMENT_CHANGED", "协议已更新，请重新阅读并同意")
 		}
-		tag, e := tx.Exec(ctx, `INSERT INTO users(id,phone,password_hash,nickname,role,enabled) VALUES($1,$2,$3,'清叶会员','member',true) ON CONFLICT(phone) DO NOTHING`, id, in.Phone, hash)
+		tag, e := tx.Exec(ctx, `INSERT INTO users(id,phone,password_hash,nickname,role,enabled) VALUES($1,$2,$3,'清叶会员'||right($2,4),'member',true) ON CONFLICT(phone) DO NOTHING`, id, in.Phone, hash)
 		if e != nil {
 			return u, e
 		}

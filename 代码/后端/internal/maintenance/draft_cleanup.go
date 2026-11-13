@@ -65,6 +65,7 @@ func (s *Service) CleanupDrafts(ctx context.Context, limit int) (DraftCleanupRes
  AND NOT EXISTS(SELECT 1 FROM contacts c WHERE c.qr_media_id=m.id)
  AND NOT EXISTS(SELECT 1 FROM chat_message_images a WHERE a.media_id=m.id)
  AND NOT EXISTS(SELECT 1 FROM users u WHERE u.avatar_media_id=m.id)
+ AND NOT EXISTS(SELECT 1 FROM avatar_library a WHERE a.media_id=m.id)
  AND NOT EXISTS(SELECT 1 FROM product_reviews r WHERE r.snapshot->'images' @> jsonb_build_array(jsonb_build_object('id',m.id)))
  AND NOT EXISTS(SELECT 1 FROM media_files other WHERE other.storage_key=m.storage_key AND other.id<>m.id AND other.deleted_at IS NULL)
  ORDER BY m.id LIMIT $1 FOR UPDATE OF m SKIP LOCKED`, limit)

@@ -62,10 +62,11 @@ func TestChatImagesPersistencePermissionsAndAvatar(t *testing.T) {
 	f.call(t, f.first, "POST", "/api/v1/admin/products/"+f.product+"/images", map[string]any{"expected_version": 1, "request_id": newID(), "media_ids": []string{reply}}, 422)
 	f.call(t, f.first, "POST", adminPath, map[string]any{"body": "", "client_id": "image-only", "image_ids": []string{reply}}, 200)
 	f.mediaCall(t, f.member, "GET", "/api/v1/media/"+reply+"/file?variant=thumb", nil, 200)
-	avatar := f.image(t, f.member, "avatar", "")
+	avatar := f.image(t, f.first, "avatar", "")
 	statusIs(t, surfaceRequest(t, f.pub, "PATCH", "/api/v1/chat/profile", "http://foreign.test", map[string]any{"avatar_id": avatar}, f.cookies[f.member]), 403)
 	f.call(t, f.member, "PATCH", "/api/v1/chat/profile", map[string]any{"avatar_id": one}, 422)
 	f.call(t, f.other, "PATCH", "/api/v1/chat/profile", map[string]any{"avatar_id": avatar}, 422)
+	f.call(t, f.first, "POST", "/api/v1/admin/avatar-library", map[string]any{"name": "测试头像", "media_id": avatar, "enabled": true, "sort_order": 0}, 200)
 	f.call(t, f.member, "PATCH", "/api/v1/chat/profile", map[string]any{"avatar_id": avatar}, 200)
 	profile := f.call(t, f.member, "GET", "/api/v1/chat/profile", nil, 200)
 	if !strings.Contains(profile.Body.String(), avatar) {
@@ -102,7 +103,7 @@ func TestChatImagesPersistencePermissionsAndAvatar(t *testing.T) {
 	f.mediaCall(t, f.second, "GET", file, nil, 200)
 	f.mediaCall(t, f.first, "POST", "/api/v1/uploads", map[string]any{"filename": "x.png", "mime_type": "image/png", "byte_size": 50, "purpose": "chat", "conversation_id": id}, 404)
 	f.call(t, f.member, "PATCH", "/api/v1/chat/profile", map[string]any{"avatar_id": ""}, 200)
-	f.mediaCall(t, f.second, "GET", "/api/v1/media/"+avatar+"/file", nil, 404)
+	f.mediaCall(t, f.second, "GET", "/api/v1/media/"+avatar+"/file", nil, 200) // Enabled library avatars remain selectable.
 }
 
 func TestChatImagesTransportAndConcurrentRetry(t *testing.T) {

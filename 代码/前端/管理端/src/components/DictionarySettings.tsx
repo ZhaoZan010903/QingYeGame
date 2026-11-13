@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ArrowDown, ArrowUp, Plus, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Search, Trash2 } from "lucide-react";
 import { adminApi } from "../lib/admin-api";
 import {
   addDictionaryOption,
   validateDictionary,
-  fixedProductFields,
+  dictionarySettingsFields,
   type DictionaryGroup,
   type DictionaryKey,
 } from "../lib/dictionaries";
@@ -81,6 +81,24 @@ export function DictionaryOptions({
             {option.enabled ? "可选" : "已停用"}
           </label>
           <div className="dictionary-order">
+            {group.key === "keyword" && (
+              <button
+                type="button"
+                className="icon-button"
+                title="删除关键词"
+                aria-label={`删除关键词${option.label}`}
+                onClick={() =>
+                  onChange({
+                    ...group,
+                    options: group.options
+                      .filter((_, i) => i !== index)
+                      .map((value, sort_order) => ({ ...value, sort_order })),
+                  })
+                }
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
             <button
               type="button"
               className="icon-button"
@@ -117,7 +135,7 @@ function SharedDictionaries({
   onBusyChange: (busy: boolean) => void;
 }) {
   const [groups, setGroups] = useState<DictionaryGroup[]>([]),
-    [selected, setSelected] = useState<DictionaryKey>("server");
+    [selected, setSelected] = useState<DictionaryKey>("keyword");
   const [busy, setBusy] = useState(true),
     [dirty, setDirty] = useState(false),
     [error, setError] = useState(""),
@@ -162,7 +180,11 @@ function SharedDictionaries({
         old.map((value) => (value.key === saved.key ? saved : value)),
       );
       setDirty(false);
-      setNotice("已保存，出售与租赁共用这组最新选项。");
+      setNotice(
+        group.key === "keyword"
+          ? "热门筛选已保存，用户端将按当前顺序展示启用的关键词。"
+          : "已保存，出售与租赁共用这组最新选项。",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存失败");
     } finally {
@@ -183,14 +205,14 @@ function SharedDictionaries({
       <div className="admin-heading">
         <div>
           <span className="eyebrow">统一商品选项</span>
-          <h1>区服与账号字典</h1>
+          <h1>热门筛选与账号字典</h1>
           <p>
-            出售、租赁共用完整选项。录入字段固定，只需维护选项名称与可用状态。
+            管理热门关键词及区服、性别、VIP 等级和账号结构选项，出售与租赁共用。
           </p>
         </div>
       </div>
       <nav className="zone-tabs" aria-label="字典分类">
-        {fixedProductFields.map((field) => (
+        {dictionarySettingsFields.map((field) => (
           <button
             type="button"
             disabled={busy}
@@ -207,7 +229,7 @@ function SharedDictionaries({
           <div className="section-heading">
             <h2>
               {group?.label ||
-                fixedProductFields.find((field) => field.key === selected)
+                dictionarySettingsFields.find((field) => field.key === selected)
                   ?.label}
             </h2>
             <span>
@@ -258,7 +280,9 @@ function SharedDictionaries({
             </div>
           </div>
           <p className="field-hint">
-            停用选项会从新发布和筛选中隐藏，已有商品资料保留。名称可以修改，标识固定；清空搜索后可调整顺序。
+            {selected === "keyword"
+              ? "关键词按名称匹配商品标题、介绍和标签，可添加、改名、停用、删除或排序。多个热门条件满足任意一个即可；清空搜索后可调整顺序。"
+              : "停用选项会从新发布和筛选中隐藏，已有商品资料保留。名称可以修改，标识固定；清空搜索后可调整顺序。"}
           </p>
           {group && (
             <DictionaryOptions group={group} query={query} onChange={update} />

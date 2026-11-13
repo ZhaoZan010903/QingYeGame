@@ -27,6 +27,9 @@ func mediaDBError(err error) error {
 	return fault.Wrap(fault.Unavailable, "DATABASE_UNAVAILABLE", "服务暂不可用，请稍后重试", err)
 }
 func (s *MediaStore) Create(ctx context.Context, actor media.Actor, in media.CreateInput, id, key, hash string) error {
+	if in.Purpose == "avatar" && (actor.Role != "admin" || actor.Surface != "admin") {
+		return fault.New(fault.Forbidden, "AVATAR_LIBRARY_ONLY", "请从头像库选择头像")
+	}
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return mediaDBError(err)
@@ -196,7 +199,7 @@ func (s *MediaStore) ScopedAccess(ctx context.Context, id string, actor media.Ac
 	var ok bool
 	err := s.DB.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM media_files m WHERE m.id=$1 AND m.deleted_at IS NULL AND m.status='ready' AND (
  (m.purpose='chat' AND EXISTS(SELECT 1 FROM chat_conversations c WHERE c.id=m.conversation_id AND c.`+column+`=$2 AND (m.owner_id=$2 OR EXISTS(SELECT 1 FROM chat_message_images a WHERE a.media_id=m.id))))
- OR (m.purpose='avatar' AND (m.owner_id=$2 OR EXISTS(SELECT 1 FROM users u WHERE u.avatar_media_id=m.id AND u.enabled)))))`, id, actor.ID).Scan(&ok)
+ OR (m.purpose='avatar' AND (m.owner_id=$2 OR EXISTS(SELECT 1 FROM users u WHERE u.avatar_media_id=m.id AND u.enabled) OR EXISTS(SELECT 1 FROM avatar_library a WHERE a.media_id=m.id AND (a.enabled OR $3='admin'))))))`, id, actor.ID, actor.Role).Scan(&ok)
 	return ok, mediaDBError(err)
 }
 func (s *MediaStore) OwnedProduct(ctx context.Context, id, owner string) (bool, error) {

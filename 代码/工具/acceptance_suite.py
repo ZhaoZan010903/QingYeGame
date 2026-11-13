@@ -232,7 +232,20 @@ class Suite:
     def submit_approve(self, product_id):
         p = self.own(product_id)
         submitted = self.call("member", "POST", f"/api/v1/me/products/{product_id}/submit", {"expected_version": p["version"]}).data
-        return self.call("admin", "POST", f"/api/v1/admin/products/{product_id}/review", {"expected_version": submitted["version"], "decision": "approve"}).data
+        approved = self.call("admin", "POST", f"/api/v1/admin/products/{product_id}/review", {"expected_version": submitted["version"], "decision": "approve"}).data
+        return self.wait_published(product_id, approved)
+
+    def wait_published(self, product_id, product):
+        # R20 publication confirms storage asynchronously. Poll only the read API;
+        # never replay an approval or expose an item before its server state settles.
+        deadline = time.monotonic() + 45
+        while product.get("status") == "publishing" and time.monotonic() < deadline:
+            time.sleep(.25)
+            reply = self.clients["admin"].request("GET", f"/api/v1/admin/products/{product_id}")
+            self.expect("publication progress remains readable", reply)
+            product = reply.data
+        self.check("publication reaches confirmed published state", product.get("status") == "published")
+        return product
 
     def functional(self):
         self.state["functional_complete"] = False
@@ -309,6 +322,7 @@ class Suite:
         platform_image = self.upload("admin")
         platform = self.call("admin", "POST", f"/api/v1/admin/products/{platform['id']}/images", {"media_ids": [platform_image], "expected_version": platform["version"], "request_id": str(uuid.uuid4())}).data
         platform = self.call("admin", "POST", f"/api/v1/admin/products/{platform['id']}/publish", {"expected_version": platform["version"]}).data
+        platform = self.wait_published(platform['id'], platform)
         self.call("anonymous", "GET", f"/api/v1/products/{platform['id']}")
         self.fixtures["platform_product_id"], self.fixtures["admin_media_id"] = platform["id"], platform_image
         contact_body = {"name": prefix, "purpose": ["general"], "channel": "wechat", "contact_value": "acceptance-only", "hours": "test", "enabled": True}

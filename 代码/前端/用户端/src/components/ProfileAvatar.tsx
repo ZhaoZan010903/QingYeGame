@@ -1,105 +1,88 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera } from 'lucide-react';
 import { ProtectedImage } from '../../../共享/MediaSecurity';
-import { uploadChatImage, validateChatImage } from '../../../共享/chat-upload';
-import { request } from '../lib/api';
+import type { AvatarLibraryItem } from '../../../共享/profile-types';
+import { profileApi } from '../lib/profile-api';
 import { chatApi } from '../lib/chat-api';
 
 export function useProfileAvatar(identity: string, enabled: boolean) {
   const [url, setURL] = useState('');
+  const [items, setItems] = useState<AvatarLibraryItem[]>([]);
   const [loading, setLoading] = useState(enabled);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [progress, setProgress] = useState(0);
   const [revision, setRevision] = useState(0);
   const [saved, setSaved] = useState('');
   const generation = useRef(0);
-  const operation = useRef<AbortController | null>(null);
-
+  const operation = useRef(false);
   useEffect(() => {
     const current = ++generation.current;
-    let active = true;
     setURL('');
+    setItems([]);
     setBusy(false);
+    operation.current = false;
     setError('');
     setSaved('');
     setLoading(enabled && !!identity);
     if (enabled && identity) {
-      chatApi
-        .profile()
-        .then((profile) => {
-          if (active) setURL(profile.avatar_url);
-        })
-        .catch(() => {
-          if (active) setError('头像资料加载失败，请重试。');
+      Promise.allSettled([chatApi.profile(), profileApi.avatars()])
+        .then(([profile, library]) => {
+          if (generation.current !== current) return;
+          if (profile.status === 'fulfilled') setURL(profile.value.avatar_url);
+          if (library.status === 'fulfilled') setItems(library.value);
+          const failed = [profile, library].find((result) => result.status === 'rejected');
+          if (failed?.status === 'rejected')
+            setError(
+              failed.reason instanceof Error ? failed.reason.message : '头像库加载失败，请重试。',
+            );
         })
         .finally(() => {
-          if (active) setLoading(false);
+          if (generation.current === current) setLoading(false);
         });
     }
     return () => {
-      active = false;
-      if (generation.current === current) generation.current++;
-      operation.current?.abort();
-      operation.current = null;
+      generation.current++;
     };
   }, [identity, enabled, revision]);
-
-  async function change(file?: File) {
-    if (!enabled || !identity || loading || operation.current) return;
-    setSaved('');
-    if (file) {
-      const invalid = validateChatImage(file, true);
-      if (invalid) {
-        setError(invalid);
-        return;
-      }
-    }
+  async function change(item: AvatarLibraryItem) {
+    if (
+      !enabled ||
+      !identity ||
+      loading ||
+      operation.current ||
+      !items.some((row) => row.id === item.id)
+    )
+      return;
     const current = generation.current;
-    const controller = new AbortController();
-    operation.current = controller;
+    operation.current = true;
     setBusy(true);
     setError('');
-    setProgress(0);
+    setSaved('');
     try {
-      const id = file
-        ? await uploadChatImage(
-            request,
-            file,
-            { purpose: 'avatar' },
-            controller.signal,
-            (value) => {
-              if (generation.current === current) setProgress(value);
-            },
-          )
-        : '';
-      if (generation.current !== current) return;
-      const profile = await chatApi.profile(id);
+      const profile = await chatApi.profile(item.media_id);
       if (generation.current !== current) return;
       setURL(profile.avatar_url);
-      setSaved(file ? '头像已更新。' : '已恢复默认头像。');
+      setSaved('头像已更新。');
     } catch (e) {
       if (generation.current === current)
         setError(e instanceof Error ? e.message : '头像更新失败，请重试。');
     } finally {
       if (generation.current === current) {
-        operation.current = null;
+        operation.current = false;
         setBusy(false);
       }
     }
   }
   return {
     url,
+    items,
     loading,
     busy,
     error,
-    progress,
     saved,
     change,
     reload: () => setRevision((v) => v + 1),
   };
 }
-
 export function ProfileAvatar({ src, name }: { src: string; name: string }) {
   const [failed, setFailed] = useState('');
   return (
@@ -112,7 +95,6 @@ export function ProfileAvatar({ src, name }: { src: string; name: string }) {
     </div>
   );
 }
-
 export function ProfileAvatarEditor({
   avatar,
   name,
@@ -124,71 +106,58 @@ export function ProfileAvatarEditor({
   disabled: boolean;
   demo: boolean;
 }) {
-  const input = useRef<HTMLInputElement>(null);
   const unavailable = demo || disabled || avatar.loading || avatar.busy;
   return (
     <div
-      className="profile-avatar-editor"
+      className="profile-avatar-library"
       aria-label="修改头像"
       aria-busy={avatar.busy || avatar.loading}
     >
-      <ProfileAvatar src={avatar.url} name={name} />
-      <div className="profile-avatar-description">
-        <strong>我的头像</strong>
-        <p>{demo ? '登录真实账户后可更换头像。' : '用于个人中心和聊天展示，修改后自动保存。'}</p>
-        <small>支持 JPG、PNG、WebP，大小不超过 2 MB。</small>
-        <div className="profile-avatar-actions">
-          <button
-            className="button-outline"
-            type="button"
-            disabled={unavailable}
-            onClick={() => input.current?.click()}
-          >
-            <Camera size={15} aria-hidden="true" />
+      <div className="profile-avatar-editor">
+        <ProfileAvatar src={avatar.url} name={name} />
+        <div className="profile-avatar-description">
+          <strong>我的头像</strong>
+          <p>{demo ? '登录真实账户后可选择头像。' : '从头像库中选取，用于个人中心和聊天展示。'}</p>
+          <small>
             {avatar.loading
-              ? '正在加载…'
+              ? '正在加载头像库…'
               : avatar.busy
-                ? avatar.progress > 0 && avatar.progress < 100
-                  ? `正在上传 ${avatar.progress}%`
-                  : '正在保存…'
-                : '更换头像'}
-          </button>
-          {avatar.url && (
+                ? '正在保存…'
+                : '点击喜欢的头像即可保存。'}
+          </small>
+        </div>
+      </div>
+      {!demo && (
+        <div className="profile-avatar-options" role="group" aria-label="头像库">
+          {avatar.items.map((item) => (
             <button
-              className="profile-avatar-reset"
+              key={item.id}
               type="button"
               disabled={unavailable}
-              onClick={() => void avatar.change()}
+              aria-pressed={avatar.url === item.url}
+              onClick={() => void avatar.change(item)}
+              title={item.name}
             >
-              恢复默认
+              <ProtectedImage src={item.url} alt="" loading="lazy" />
+              <span>{item.name}</span>
             </button>
-          )}
+          ))}
         </div>
-        {avatar.error && (
-          <div className="profile-avatar-feedback">
-            <p role="alert">{avatar.error}</p>
-            <button type="button" disabled={unavailable} onClick={avatar.reload}>
-              重新加载头像
-            </button>
-          </div>
-        )}
-        <p className="profile-avatar-saved" role="status">
-          {avatar.saved}
-        </p>
-      </div>
-      <input
-        ref={input}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        aria-label="选择头像图片"
-        hidden
-        disabled={unavailable}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = '';
-          if (file) void avatar.change(file);
-        }}
-      />
+      )}
+      {!demo && !avatar.loading && !avatar.error && !avatar.items.length && (
+        <p className="profile-note">头像库暂时没有可选头像，请稍后再来。</p>
+      )}
+      {avatar.error && (
+        <div className="profile-avatar-feedback">
+          <p role="alert">{avatar.error}</p>
+          <button type="button" disabled={unavailable} onClick={avatar.reload}>
+            重新加载头像库
+          </button>
+        </div>
+      )}
+      <p className="profile-avatar-saved" role="status">
+        {avatar.saved}
+      </p>
     </div>
   );
 }

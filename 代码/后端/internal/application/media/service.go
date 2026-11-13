@@ -81,6 +81,9 @@ func (s *Service) Create(ctx context.Context, actor domain.Actor, in domain.Crea
 	if in.Purpose == "" {
 		in.Purpose = "product"
 	}
+	if in.Purpose == "avatar" && actor.Role != "admin" {
+		return nil, fault.New(fault.Forbidden, "AVATAR_LIBRARY_ONLY", "请从头像库选择头像")
+	}
 	if (in.Purpose != "product" && in.Purpose != "chat" && in.Purpose != "avatar" && in.Purpose != "contact") || (in.Purpose == "chat" && validID(in.ConversationID) != nil) || (in.Purpose != "chat" && in.ConversationID != "") {
 		return nil, fault.New(fault.Invalid, "INVALID_MEDIA_PURPOSE", "图片用途或咨询编号无效")
 	}

@@ -290,7 +290,6 @@ export function AuthPage() {
           <br />
           在清叶开启下一段故事。
         </p>
-        <div className="auth-art asset-art art-0" aria-hidden="true" />
       </section>
       <section className="auth-panel panel">
         <header className="auth-heading">

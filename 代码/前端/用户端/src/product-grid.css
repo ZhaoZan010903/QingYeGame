@@ -1,0 +1,96 @@
+/* The catalogue and homepage keep a shared two-column mobile reading rhythm. */
+.home-product-grid.recommendation-grid,
+.catalog-redesign.collection-section .collection-layout .asset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 850px) {
+  .home-product-grid.recommendation-grid,
+  .catalog-redesign.collection-section .collection-layout .asset-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 639px) {
+  .home-product-grid.recommendation-grid,
+  .catalog-redesign.collection-section .collection-layout .asset-grid {
+    gap: 12px;
+  }
+  .home-product-grid .asset-card,
+  .catalog-redesign .asset-grid .asset-card {
+    width: auto;
+    min-width: 0;
+  }
+  .home-product-grid .asset-open,
+  .catalog-redesign .asset-grid .asset-open {
+    padding: 7px;
+  }
+  .home-product-grid .asset-body,
+  .catalog-redesign .asset-grid .asset-body {
+    padding: 12px 3px 5px;
+    min-width: 0;
+  }
+  .home-product-grid .asset-title,
+  .catalog-redesign .asset-grid .asset-title {
+    min-height: 42px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .home-product-grid .asset-meta,
+  .catalog-redesign .asset-grid .asset-meta {
+    font-size: 10px;
+    column-gap: 4px;
+    row-gap: 2px;
+  }
+  .home-product-grid .asset-id,
+  .catalog-redesign .asset-grid .asset-id {
+    font-size: 10px;
+    overflow-wrap: anywhere;
+  }
+  .home-product-grid .pill-tags,
+  .catalog-redesign .asset-grid .pill-tags {
+    gap: 4px;
+  }
+  .home-product-grid .pill-tags > span,
+  .catalog-redesign .asset-grid .pill-tags > span {
+    font-size: 10px;
+    padding: 2px 5px;
+  }
+  .home-product-grid .asset-bottom,
+  .catalog-redesign .asset-grid .asset-bottom {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .home-product-grid .asset-price-side,
+  .catalog-redesign .asset-grid .asset-price-side {
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .home-product-grid .asset-price-side .price-box,
+  .catalog-redesign .asset-grid .asset-price-side .price-box {
+    align-items: flex-start;
+  }
+  .home-product-grid .price,
+  .catalog-redesign .asset-grid .price {
+    font-size: clamp(16px, 4.7vw, 23px);
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .home-product-grid .price-unit,
+  .catalog-redesign .asset-grid .price-unit {
+    font-size: 11px;
+    text-align: left;
+  }
+  .home-product-grid .asset-arrow,
+  .catalog-redesign .asset-grid .asset-arrow {
+    width: 26px;
+    height: 26px;
+  }
+  .home-product-grid .trade-badge,
+  .catalog-redesign .asset-grid .trade-badge {
+    font-size: 10px;
+    padding: 4px 6px;
+  }
+}

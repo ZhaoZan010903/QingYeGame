@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	application "qingye/backend/internal/application/identity"
 	"qingye/backend/internal/domain/identity"
+	"qingye/backend/internal/infrastructure/security"
 	"time"
 )
 
@@ -43,6 +44,5 @@ func (s IdentityStore) DeleteSession(ctx context.Context, hash, surface string) 
 	return err
 }
 func (s IdentityStore) UpdateNickname(ctx context.Context, id, nickname string) error {
-	_, err := s.DB.Exec(ctx, `UPDATE users SET nickname=$1,updated_at=now() WHERE id=$2`, nickname, id)
-	return err
+	return (ProfileStore{DB: s.DB, NewID: security.NewID}).RequestNickname(ctx, id, nickname)
 }

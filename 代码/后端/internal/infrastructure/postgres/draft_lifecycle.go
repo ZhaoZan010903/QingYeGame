@@ -43,7 +43,7 @@ func checkUploadQuota(ctx context.Context, tx pgx.Tx, owner, exclude string, add
 	}
 	var used int64
 	var orphan int
-	err := tx.QueryRow(ctx, `SELECT COALESCE(sum(m.byte_size),0),count(*) FILTER(WHERE m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM product_images pi WHERE pi.media_id=m.id) AND NOT EXISTS(SELECT 1 FROM chat_message_images a WHERE a.media_id=m.id) AND NOT EXISTS(SELECT 1 FROM users u WHERE u.avatar_media_id=m.id)) FROM media_files m WHERE m.owner_id=$1 AND m.managed_upload AND m.status<>'failed' AND (m.deleted_at IS NULL OR EXISTS(SELECT 1 FROM media_gc_queue q WHERE q.media_id=m.id AND q.completed_at IS NULL)) AND m.id<>$2 AND NOT EXISTS(SELECT 1 FROM product_images pi JOIN products p ON p.id=pi.product_id WHERE pi.media_id=m.id AND p.published_at IS NOT NULL)`, owner, exclude).Scan(&used, &orphan)
+	err := tx.QueryRow(ctx, `SELECT COALESCE(sum(m.byte_size),0),count(*) FILTER(WHERE m.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM product_images pi WHERE pi.media_id=m.id) AND NOT EXISTS(SELECT 1 FROM chat_message_images a WHERE a.media_id=m.id) AND NOT EXISTS(SELECT 1 FROM users u WHERE u.avatar_media_id=m.id) AND NOT EXISTS(SELECT 1 FROM avatar_library a WHERE a.media_id=m.id)) FROM media_files m WHERE m.owner_id=$1 AND m.managed_upload AND m.status<>'failed' AND (m.deleted_at IS NULL OR EXISTS(SELECT 1 FROM media_gc_queue q WHERE q.media_id=m.id AND q.completed_at IS NULL)) AND m.id<>$2 AND NOT EXISTS(SELECT 1 FROM product_images pi JOIN products p ON p.id=pi.product_id WHERE pi.media_id=m.id AND p.published_at IS NOT NULL)`, owner, exclude).Scan(&used, &orphan)
 	if err != nil {
 		return mediaDBError(err)
 	}
@@ -120,7 +120,7 @@ func QueueManagedMediaGC(ctx context.Context, tx pgx.Tx, id string) error {
 		return err
 	}
 	var referenced bool
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM product_images WHERE media_id=$1) OR EXISTS(SELECT 1 FROM chat_message_images WHERE media_id=$1) OR EXISTS(SELECT 1 FROM users WHERE avatar_media_id=$1) OR EXISTS(SELECT 1 FROM contacts WHERE qr_media_id=$1) OR EXISTS(SELECT 1 FROM product_reviews WHERE snapshot->'images' @> jsonb_build_array(jsonb_build_object('id',$1::text))) OR EXISTS(SELECT 1 FROM media_files WHERE storage_key=$2 AND id<>$1 AND deleted_at IS NULL)`, id, key).Scan(&referenced)
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM product_images WHERE media_id=$1) OR EXISTS(SELECT 1 FROM chat_message_images WHERE media_id=$1) OR EXISTS(SELECT 1 FROM users WHERE avatar_media_id=$1) OR EXISTS(SELECT 1 FROM avatar_library WHERE media_id=$1) OR EXISTS(SELECT 1 FROM contacts WHERE qr_media_id=$1) OR EXISTS(SELECT 1 FROM product_reviews WHERE snapshot->'images' @> jsonb_build_array(jsonb_build_object('id',$1::text))) OR EXISTS(SELECT 1 FROM media_files WHERE storage_key=$2 AND id<>$1 AND deleted_at IS NULL)`, id, key).Scan(&referenced)
 	if err != nil {
 		return err
 	}

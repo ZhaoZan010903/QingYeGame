@@ -50,6 +50,12 @@ export function filterProducts(products: Product[], params: URLSearchParams): Pr
       matches('gender', p.gender) &&
       matches('level', String(p.level)) &&
       matches('kind', p.kind) &&
+      (!selected('keyword').length ||
+        selected('keyword').some((keyword) =>
+          `${p.title} ${p.description} ${p.code ?? ''} ${p.server} ${p.tags.join(' ')}`
+            .toLowerCase()
+            .includes(keyword.toLowerCase()),
+        )) &&
       (!selected('tag').length ||
         selected('tag').some((t) => p.tags.some((tag) => tag.includes(t)))) &&
       (params.get('verified') !== 'true' || p.verification === 'verified') &&

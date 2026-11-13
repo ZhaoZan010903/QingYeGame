@@ -195,7 +195,7 @@ func PublicFields(p map[string]any) {
 
 var publicFields = map[string]bool{
 	"id": true, "product_code": true, "category_id": true, "title": true, "trade_type": true, "price_unit": true,
-	"attributes": true, "attribute_labels":true, "description": true, "status": true, "source": true, "version": true, "manual_rank": true,
+	"attributes": true, "attribute_labels": true, "description": true, "status": true, "source": true, "version": true, "manual_rank": true,
 	"legacy_price": true, "legacy_category": true, "verification_status": true, "created_at": true, "updated_at": true,
 	"published_at": true, "rental_quotes": true, "consultation_count": true, "price_amount": true, "price_note": true, "image_total": true, "images": true,
 }

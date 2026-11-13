@@ -4,12 +4,32 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import Mock, patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import acceptance_suite as suite
 
 
 class AcceptanceHelperTests(unittest.TestCase):
+    def test_publication_wait_is_read_only_and_rejects_unfinished_states(self):
+        check = suite.Suite.__new__(suite.Suite)
+        check.report = {"checks": []}
+        client = Mock()
+        check.clients = {"admin": client}
+        client.request.side_effect = [suite.Reply(200, json.dumps({"data": {"status": status, "version": 9}}).encode())
+                                      for status in ("publishing", "published")]
+        with patch.object(suite.time, "sleep"), patch.object(suite.time, "monotonic", side_effect=[0, 1, 2]):
+            result = check.wait_published("fixture", {"status": "publishing", "version": 8})
+        self.assertEqual(result, {"status": "published", "version": 9})
+        self.assertEqual([call.args for call in client.request.call_args_list],
+                         [("GET", "/api/v1/admin/products/fixture")] * 2)
+        client.reset_mock()
+        for state, clocks in (("rejected", [0]), ("publishing", [0, 46])):
+            with self.subTest(state=state), patch.object(suite.time, "monotonic", side_effect=clocks):
+                with self.assertRaises(suite.CheckFailure):
+                    check.wait_published("fixture", {"status": state})
+        client.request.assert_not_called()
+
     def test_only_loopback_without_credentials(self):
         for value in ("http://127.0.0.1:5184", "http://[::1]:5184", "http://localhost:5185"):
             self.assertEqual(suite.local_url(value), value)

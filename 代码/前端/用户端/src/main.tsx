@@ -18,6 +18,7 @@ import './theme.css';
 import './design-system.css';
 import './hero-atmosphere.css';
 import './storefront-backdrop.css';
+import './product-grid.css';
 // Keep the homepage available immediately; fetch other screens when their route is visited.
 const CatalogPage = lazy(() =>
   import('./pages/CatalogPage').then((m) => ({ default: m.CatalogPage })),

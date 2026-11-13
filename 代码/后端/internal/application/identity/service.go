@@ -6,6 +6,7 @@ import (
 	"errors"
 	"qingye/backend/internal/domain/fault"
 	domain "qingye/backend/internal/domain/identity"
+	"qingye/backend/internal/domain/profile"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -112,15 +113,21 @@ func (s *Service) Logout(ctx context.Context, hash string) error {
 
 func (s *Service) UpdateNickname(ctx context.Context, u domain.User, nickname string) (domain.User, error) {
 	nickname = strings.TrimSpace(nickname)
-	if n := utf8.RuneCountInString(nickname); n < 1 || n > 30 || !utf8.ValidString(nickname) || strings.ContainsRune(nickname, 0) {
+	if !profile.ValidNickname(nickname) {
 		return u, fault.New(fault.Invalid, "INVALID_NICKNAME", "昵称需为1至30个有效字符")
 	}
 	if !u.CanAccess(s.surface) {
 		return u, fault.New(fault.Forbidden, "FORBIDDEN", "无权修改此账号")
 	}
+	if err := s.limiter.Allow(ctx, "nickname-request:"+u.ID, 10, time.Hour); err != nil {
+		return u, err
+	}
 	if err := s.store.UpdateNickname(ctx, u.ID, nickname); err != nil {
+		if _, ok := fault.As(err); ok {
+			return u, err
+		}
 		return u, fault.Wrap(fault.Unavailable, "DATABASE_UNAVAILABLE", "保存失败", err)
 	}
-	u.Nickname = nickname
+	// 申请提交后旧昵称继续展示，只有管理员审核事务可更新公开昵称。
 	return u, nil
 }

@@ -21,9 +21,9 @@ func (s *ChatStore) Profile(ctx context.Context, actor chat.Actor, in *chat.Prof
 		}
 		if *in.AvatarID != "" {
 			var mid string
-			err = tx.QueryRow(ctx, `SELECT id FROM media_files WHERE id=$1 AND owner_id=$2 AND purpose='avatar' AND status='ready' AND deleted_at IS NULL FOR UPDATE`, *in.AvatarID, actor.ID).Scan(&mid)
+			err = tx.QueryRow(ctx, `SELECT m.id FROM avatar_library a JOIN media_files m ON m.id=a.media_id WHERE m.id=$1 AND a.enabled AND m.purpose='avatar' AND m.status='ready' AND m.deleted_at IS NULL FOR SHARE OF a,m`, *in.AvatarID).Scan(&mid)
 			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, fault.New(fault.Invalid, "INVALID_AVATAR", "请选择本人上传的头像")
+				return nil, fault.New(fault.Invalid, "INVALID_AVATAR", "请选择头像库中可用的头像")
 			}
 			if err != nil {
 				return nil, err

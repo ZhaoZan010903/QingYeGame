@@ -28,8 +28,12 @@ import { adminProductID } from "../lib/product-links";
 import { ChatPage } from "../components/ChatPage";
 import { useChat } from "../components/ChatNotifications";
 import { AdminHelp } from "../components/AdminGuide";
-import { AdminMediaSecurity } from '../components/AdminMediaSecurity';
+import { AdminMediaSecurity } from "../components/AdminMediaSecurity";
 import { DictionarySettings } from "../components/DictionarySettings";
+import {
+  AdminNicknameReviews,
+  AdminAvatarLibrary,
+} from "../components/AdminProfiles";
 import "../admin.css";
 const publicSite = String(import.meta.env.VITE_PUBLIC_SITE_URL ?? "").replace(
   /\/$/,
@@ -79,6 +83,8 @@ export function AdminPage() {
         ["categories", "区服与账号字典", ListFilter],
         ["pages", "说明与协议", FileText],
         ["users", "会员管理", Users],
+        ["nickname-reviews", "昵称审核", ClipboardCheck],
+        ["avatar-library", "头像库", Users],
         ["security/media-access", "图片访问保护", CircleHelp],
       ],
     },
@@ -135,6 +141,10 @@ export function AdminPage() {
             <AdminProducts key={tab} review={tab === "reviews"} />
           ) : tab === "users" ? (
             <AdminUsers />
+          ) : tab === "nickname-reviews" ? (
+            <AdminNicknameReviews />
+          ) : tab === "avatar-library" ? (
+            <AdminAvatarLibrary />
           ) : tab === "recommendations" ? (
             <AdminRecommendations />
           ) : tab === "categories" ? (

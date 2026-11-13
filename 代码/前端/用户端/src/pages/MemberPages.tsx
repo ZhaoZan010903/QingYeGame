@@ -1,7 +1,7 @@
 import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { canDeleteDraft } from '../lib/publish-dictionaries';
 import { publicationInterrupted } from '../../../共享/upload-progress';
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowUpRight,
@@ -19,7 +19,9 @@ import type { Product } from '../types';
 import { useSession, useUi } from '../context';
 import { RecommendationPreferences } from '../components/RecommendationPreferences';
 import { ProfileAvatar, ProfileAvatarEditor, useProfileAvatar } from '../components/ProfileAvatar';
+import { ProfileNickname } from '../components/ProfileNickname';
 import '../member.css';
+import '../profile-library.css';
 
 export const listingStatus: Record<Product['status'], string> = {
   draft: '草稿',
@@ -112,7 +114,6 @@ export function MemberPage() {
       : pathname.endsWith('/history')
         ? 'history'
         : 'profile';
-  const [nickname, setNickname] = useState(user?.nickname ?? '');
   const [items, setItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState('');
@@ -121,9 +122,6 @@ export function MemberPage() {
   const [status, setStatus] = useState('all');
   const [reload, setReload] = useState(0);
   const phone = user?.phone?.replace(/^(\d{3})\d{4}(\d{4})$/, '$1 ···· $2');
-  useEffect(() => {
-    setNickname(user?.nickname ?? '');
-  }, [user?.nickname]);
   const readHistory = useCallback(async () => {
     let ids: string[] = [];
     try {
@@ -169,24 +167,6 @@ export function MemberPage() {
       active = false;
     };
   }, [tab, status, reload, readHistory]);
-  async function saveProfile(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    if (!nickname.trim()) {
-      setError('请填写昵称。');
-      return;
-    }
-    setBusy('profile');
-    try {
-      await api.updateProfile(nickname.trim());
-      await refresh();
-      notify(isDemo ? '演示昵称已保存在此设备。' : '昵称已更新。');
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy('');
-    }
-  }
   async function logout() {
     setBusy('logout');
     setError('');
@@ -346,37 +326,14 @@ export function MemberPage() {
                   disabled={!!busy}
                   demo={isDemo}
                 />
-                <form className="member-form profile-form" onSubmit={saveProfile}>
-                  <label className="form-field">
-                    昵称
-                    <input
-                      value={nickname}
-                      onChange={(e) => setNickname(e.target.value)}
-                      maxLength={24}
-                      required
-                      placeholder="怎样称呼你"
-                    />
-                    <small>最多 24 个字符，用于个人中心展示。</small>
-                  </label>
-                  <label className="form-field">
-                    手机号
-                    <input
-                      value={isDemo ? '演示账户 · 未绑定手机号' : phone || '未绑定手机号'}
-                      disabled
-                    />
-                    <small>
-                      {isDemo
-                        ? '演示体验无需绑定真实手机号。'
-                        : '如需更换绑定手机号，请联系平台客服。'}
-                    </small>
-                  </label>
-                  <div className="profile-form-footer">
-                    <p>修改昵称后，记得保存。</p>
-                    <button type="submit" className="button-white" disabled={!!busy || avatar.busy}>
-                      {busy === 'profile' ? '正在保存…' : '保存修改'}
-                    </button>
-                  </div>
-                </form>
+                <ProfileNickname
+                  identity={user?.id || ''}
+                  name={user?.nickname || ''}
+                  phone={phone || ''}
+                  demo={isDemo}
+                  disabled={!!busy || avatar.busy}
+                  refreshSession={refresh}
+                />
               </section>
               {!isDemo && <RecommendationPreferences />}
               <div className="member-help-row">

@@ -44,6 +44,9 @@ func (a *CatalogStore) Categories(ctx context.Context) ([]map[string]any, error)
 	}
 	filters := []map[string]any{}
 	for _, g := range groups {
+		if g["key"] == "kind" {
+			continue // Account structure remains available to publication and existing product data.
+		}
 		filters = append(filters, map[string]any{"key": g["key"], "label": g["label"], "type": "select", "multiple": false, "required": g["key"] == "server" || g["key"] == "gender", "enabled": true, "options": g["options"]})
 	}
 	for _, row := range rows {

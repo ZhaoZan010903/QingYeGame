@@ -3,6 +3,7 @@ package catalog
 import (
 	"qingye/backend/internal/domain/fault"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -18,8 +19,21 @@ type DictionaryInput struct {
 }
 
 func DictionaryKey(key string) bool {
-	return key == "server" || key == "gender" || key == "level" || key == "kind"
+	return key == "server" || key == "gender" || key == "level" || key == "kind" || key == "keyword"
 }
+
+func validDictionaryText(value string) bool {
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) > 80 || strings.TrimSpace(value) == "" {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
 func ValidateDictionary(key string, in DictionaryInput) error {
 	if !DictionaryKey(key) || in.ExpectedVersion < 1 || len(in.Options) > 500 {
 		return fault.New(fault.Invalid, "INVALID_DICTIONARY", "请检查字典类型、版本和选项数量")
@@ -27,8 +41,8 @@ func ValidateDictionary(key string, in DictionaryInput) error {
 	seen := map[string]bool{}
 	enabled := 0
 	for _, o := range in.Options {
-		if strings.TrimSpace(o.Value) == "" || strings.TrimSpace(o.Label) == "" || strings.TrimSpace(o.Value) != o.Value || utf8.RuneCountInString(o.Value) > 80 || utf8.RuneCountInString(o.Label) > 80 || seen[o.Value] || o.SortOrder < 0 || o.SortOrder > 10000 {
-			return fault.New(fault.Invalid, "INVALID_DICTIONARY", "选项编码和名称须为1至80字，编码不能重复")
+		if !validDictionaryText(o.Value) || !validDictionaryText(o.Label) || strings.TrimSpace(o.Value) != o.Value || key == "keyword" && strings.TrimSpace(o.Label) != o.Label || seen[o.Value] || o.SortOrder < 0 || o.SortOrder > 10000 {
+			return fault.New(fault.Invalid, "INVALID_DICTIONARY", "选项编码和名称须为1至80个有效字符，不能含控制字符，编码不能重复")
 		}
 		seen[o.Value] = true
 		if o.Enabled {

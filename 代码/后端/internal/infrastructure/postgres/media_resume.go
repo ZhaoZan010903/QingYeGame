@@ -19,7 +19,7 @@ func (m mediaMutation) Cancel(ctx context.Context) error {
 	// The caller holds owner -> media; AppendImages must acquire the same media row.
 	if err := m.tx.QueryRow(ctx, `SELECT status,storage_key,
  EXISTS(SELECT 1 FROM product_images WHERE media_id=$1) OR EXISTS(SELECT 1 FROM contacts WHERE qr_media_id=$1)
- OR EXISTS(SELECT 1 FROM chat_message_images WHERE media_id=$1) OR EXISTS(SELECT 1 FROM users WHERE avatar_media_id=$1)
+ OR EXISTS(SELECT 1 FROM chat_message_images WHERE media_id=$1) OR EXISTS(SELECT 1 FROM users WHERE avatar_media_id=$1) OR EXISTS(SELECT 1 FROM avatar_library WHERE media_id=$1)
  OR EXISTS(SELECT 1 FROM product_reviews WHERE snapshot->'images' @> jsonb_build_array(jsonb_build_object('id',$1::text))),
  EXISTS(SELECT 1 FROM media_objects WHERE media_id=$1 AND store='oss' AND deleted_at IS NULL)
  FROM media_files WHERE id=$1`, m.id).Scan(&state, &key, &referenced, &published); err != nil {

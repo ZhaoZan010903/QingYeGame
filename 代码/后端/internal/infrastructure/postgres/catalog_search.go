@@ -65,6 +65,15 @@ func (a *CatalogStore) search(ctx context.Context, q catalog.SearchInput, countT
 	}
 	for key, values := range q.Filters {
 		if len(values) > 0 {
+			if key == "keyword" {
+				// Resolve the current label and enabled state in the search itself. strpos
+				// keeps admin-entered percent/underscore characters literal, not wildcards.
+				add(`EXISTS(SELECT 1 FROM product_dictionary_options keyword
+				 WHERE keyword.dictionary_key='keyword' AND keyword.enabled AND keyword.value=ANY($%[1]d::text[])
+				 AND strpos(lower(concat_ws(' ',p.title,p.description,p.product_code,p.attributes->>'server',
+				 p.attributes->>'tags',p.attributes->>'custom_tags')),lower(keyword.label))>0)`, values)
+				continue
+			}
 			args = append(args, key, values)
 			where += fmt.Sprintf(" AND ((p.attributes->>$%[1]d)=ANY($%[2]d::text[]) OR (jsonb_typeof(p.attributes->$%[1]d)='array' AND (p.attributes->$%[1]d) ?| $%[2]d::text[]))", len(args)-1, len(args))
 		}

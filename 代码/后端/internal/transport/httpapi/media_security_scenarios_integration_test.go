@@ -277,7 +277,7 @@ func TestR20SecurityConfirmedBanRevokesOnlyProductStaging(t *testing.T) {
 		t.Fatal("legacy file changed", err)
 	}
 	// Product-only restriction must not become a blanket login or attachment ban.
-	for _, item := range []struct{ actor, purpose, conversation string }{{f.member, "chat", conversation}, {f.member, "avatar", ""}, {f.first, "contact", ""}} {
+	for _, item := range []struct{ actor, purpose, conversation string }{{f.member, "chat", conversation}, {f.first, "avatar", ""}, {f.first, "contact", ""}} {
 		id := f.finish(t, item.actor, item.purpose, f.ticket(t, item.actor, item.purpose, item.conversation), false)
 		f.mediaCall(t, item.actor, "GET", "/api/v1/media/"+id+"/preview", nil, 200)
 		var managed bool
@@ -678,7 +678,7 @@ func TestR20SecurityProductCapacityDoesNotBlockOtherMediaPurposes(t *testing.T) 
 	conversation := f.start(t, f.member, f.product)
 	f.a.MediaFiles.(*mediaobject.Files).Staging = &r20ObjectFailureStore{lifecycleMemoryStore: f.stage, capacity: fault.New(fault.Unavailable, "STORAGE_FULL", "isolated product store full")}
 	f.mediaCall(t, f.member, "POST", "/api/v1/uploads", map[string]any{"filename": "small.png", "mime_type": "image/png", "byte_size": len(f.image), "purpose": "product", "resumable": true}, 503)
-	for _, item := range []struct{ actor, purpose, conversation string }{{f.member, "chat", conversation}, {f.member, "avatar", ""}, {f.first, "contact", ""}} {
+	for _, item := range []struct{ actor, purpose, conversation string }{{f.member, "chat", conversation}, {f.first, "avatar", ""}, {f.first, "contact", ""}} {
 		f.finish(t, item.actor, item.purpose, f.ticket(t, item.actor, item.purpose, item.conversation), false)
 	}
 	var products, other int
