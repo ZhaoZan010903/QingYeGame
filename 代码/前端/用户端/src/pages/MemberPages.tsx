@@ -18,6 +18,7 @@ import { api, isDemo, ApiError } from '../lib/api';
 import type { Product } from '../types';
 import { useSession, useUi } from '../context';
 import { RecommendationPreferences } from '../components/RecommendationPreferences';
+import { ProfileAvatar, ProfileAvatarEditor, useProfileAvatar } from '../components/ProfileAvatar';
 import '../member.css';
 
 export const listingStatus: Record<Product['status'], string> = {
@@ -115,6 +116,7 @@ export function MemberPage() {
   const [items, setItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState('');
+  const avatar = useProfileAvatar(user?.id || '', !isDemo);
   const [error, setError] = useState('');
   const [status, setStatus] = useState('all');
   const [reload, setReload] = useState(0);
@@ -265,9 +267,7 @@ export function MemberPage() {
       </div>
       <section className="member-identity" aria-label="账户信息">
         <div className="member-identity-person">
-          <div className="profile-avatar" aria-hidden="true">
-            {Array.from(user?.nickname || '清叶')[0]}
-          </div>
+          <ProfileAvatar src={avatar.url} name={user?.nickname || '清叶'} />
           <div>
             <h2>{user?.nickname || '清叶会员'}</h2>
             <p>{isDemo ? '演示账户 · 仅在当前设备保存' : phone || '未绑定手机号'}</p>
@@ -278,7 +278,7 @@ export function MemberPage() {
             <Plus size={16} aria-hidden="true" />
             发布账号
           </Link>
-          <button className="member-logout" onClick={logout} disabled={!!busy}>
+          <button className="member-logout" onClick={logout} disabled={!!busy || avatar.busy}>
             <LogOut size={16} aria-hidden="true" />
             {busy === 'logout' ? '正在退出…' : '退出登录'}
           </button>
@@ -340,6 +340,12 @@ export function MemberPage() {
                   </div>
                   <Settings2 size={20} aria-hidden="true" />
                 </div>
+                <ProfileAvatarEditor
+                  avatar={avatar}
+                  name={user?.nickname || '清叶'}
+                  disabled={!!busy}
+                  demo={isDemo}
+                />
                 <form className="member-form profile-form" onSubmit={saveProfile}>
                   <label className="form-field">
                     昵称
@@ -366,7 +372,7 @@ export function MemberPage() {
                   </label>
                   <div className="profile-form-footer">
                     <p>修改昵称后，记得保存。</p>
-                    <button type="submit" className="button-white" disabled={!!busy}>
+                    <button type="submit" className="button-white" disabled={!!busy || avatar.busy}>
                       {busy === 'profile' ? '正在保存…' : '保存修改'}
                     </button>
                   </div>

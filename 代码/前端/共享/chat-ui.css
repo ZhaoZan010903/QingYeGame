@@ -44,27 +44,11 @@
   outline: 2px solid var(--chat-accent);
   outline-offset: 3px;
 }
-.chat-page-heading {
+.chat-page-tools {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
-  gap: 20px;
-  margin-bottom: 24px;
-}
-.chat-eyebrow {
-  color: var(--chat-accent);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-}
-.chat-page-heading h1 {
-  font-size: 28px;
-  letter-spacing: -0.04em;
-  font-weight: 600;
-  margin: 8px 0;
-}
-.chat-page-heading p {
-  color: var(--chat-muted);
-  font-size: 13px;
+  margin-bottom: 12px;
 }
 .chat-notification-control {
   max-width: 260px;
@@ -161,33 +145,6 @@
   border-right: 1px solid var(--chat-line);
   scrollbar-width: thin;
 }
-.chat-profile {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 18px 16px;
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--chat-line);
-}
-.chat-profile > div {
-  min-width: 0;
-  flex: 1;
-}
-.chat-profile strong {
-  display: block;
-  font-size: 13px;
-  margin-bottom: 5px;
-}
-.chat-profile > div > span {
-  font-size: 9px;
-  color: var(--chat-muted);
-}
-.chat-profile p {
-  flex-basis: 100%;
-  color: var(--chat-muted);
-  font-size: 11px;
-  line-height: 1.7;
-}
 .chat-avatar {
   display: grid;
   place-items: center;
@@ -205,34 +162,6 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-.chat-avatar-edit {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  position: relative;
-}
-.chat-avatar-edit .chat-avatar {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-}
-.chat-avatar-edit > span:last-child {
-  position: absolute;
-  right: -3px;
-  bottom: -3px;
-  background: var(--chat-bg);
-  border: 1px solid var(--chat-line);
-  padding: 3px;
-  border-radius: 50%;
-  color: var(--chat-accent);
-}
-.chat-profile-reset {
-  font-size: 10px;
-  color: var(--chat-muted);
-  padding: 3px;
-  border: 0;
-  background: transparent;
 }
 .chat-list-heading {
   padding: 20px 18px 12px;
@@ -1002,15 +931,8 @@
   .chat-member {
     padding: 16px 12px 24px;
   }
-  .chat-page-heading {
-    margin-bottom: 18px;
-    gap: 12px;
-  }
-  .chat-page-heading h1 {
-    font-size: 24px;
-  }
-  .chat-page-heading p {
-    font-size: 11px;
+  .chat-page-tools {
+    margin-bottom: 12px;
   }
   .chat-notification-control .button-outline {
     font-size: 10px;
@@ -1056,7 +978,7 @@
     padding: 8px;
     overflow: hidden;
   }
-  .chat-member.has-selection .chat-page-heading {
+  .chat-member.has-selection .chat-page-tools {
     display: none;
   }
   .chat-member.has-selection .chat-workspace {
@@ -1068,7 +990,7 @@
     height: calc(var(--chat-visual-height, 100dvh) - 180px);
     min-height: 260px;
   }
-  .chat-admin.has-selection .chat-page-heading,
+  .chat-admin.has-selection .chat-page-tools,
   .chat-admin.has-selection .chat-presence > small,
   .chat-admin.has-selection .chat-presence > div > span:last-child {
     display: none;

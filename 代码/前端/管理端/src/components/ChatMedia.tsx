@@ -1,16 +1,13 @@
-import { ProtectedImage } from '../../../共享/MediaSecurity';
+import { ProtectedImage } from "../../../共享/MediaSecurity";
 import { useEffect, useRef, useState } from "react";
 import {
-  Camera,
   ChevronLeft,
   ChevronRight,
   ImagePlus,
-  LoaderCircle,
   RotateCcw,
   X,
 } from "lucide-react";
 import { request, createRequestId } from "../lib/api";
-import { chatApi } from "../lib/chat-api";
 import {
   CHAT_IMAGE_LIMIT,
   uploadChatImage,
@@ -36,122 +33,6 @@ export function ChatAvatar({
         <span>{Array.from(name || "清叶")[0]}</span>
       )}
     </span>
-  );
-}
-
-export function AvatarEditor({
-  identity,
-  onChange,
-}: {
-  identity: string;
-  onChange: (url: string) => void;
-}) {
-  const [profile, setProfile] = useState({ nickname: "我", avatar_url: "" });
-  const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const input = useRef<HTMLInputElement>(null),
-    controller = useRef<AbortController | null>(null);
-  const generation = useRef(0);
-  useEffect(() => {
-    const current = ++generation.current;
-    setProfile({ nickname: "我", avatar_url: "" });
-    setError("");
-    setBusy(false);
-    chatApi
-      .profile()
-      .then((p) => {
-        if (generation.current === current) {
-          setProfile(p);
-          onChange(p.avatar_url);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      generation.current++;
-      controller.current?.abort();
-    };
-  }, [identity]);
-  async function change(file?: File) {
-    if (busy) return;
-    if (file) {
-      const invalid = validateChatImage(file, true);
-      if (invalid) {
-        setError(invalid);
-        return;
-      }
-    }
-    const current = generation.current;
-    setBusy(true);
-    setError("");
-    controller.current = new AbortController();
-    try {
-      const id = file
-        ? await uploadChatImage(
-            request,
-            file,
-            { purpose: "avatar" },
-            controller.current.signal,
-            () => {},
-          )
-        : "";
-      if (generation.current !== current) return;
-      const updated = await chatApi.profile(id);
-      if (generation.current === current) {
-        setProfile(updated);
-        onChange(updated.avatar_url);
-      }
-    } catch (e) {
-      if (generation.current === current)
-        setError(e instanceof Error ? e.message : "头像更新失败，请重试。");
-    } finally {
-      if (generation.current === current) setBusy(false);
-    }
-  }
-  return (
-    <div className="chat-profile">
-      <button
-        type="button"
-        className="chat-avatar-edit"
-        onClick={() => input.current?.click()}
-        disabled={busy}
-        aria-label="更换我的头像"
-      >
-        <ChatAvatar src={profile.avatar_url} name={profile.nickname} />
-        <span>
-          {busy ? (
-            <LoaderCircle size={12} className="chat-spin" />
-          ) : (
-            <Camera size={12} />
-          )}
-        </span>
-      </button>
-      <div>
-        <strong>{profile.nickname}</strong>
-        <span>我的头像 · JPG / PNG / WebP · 2 MB</span>
-      </div>
-      {profile.avatar_url && (
-        <button
-          className="chat-profile-reset"
-          type="button"
-          disabled={busy}
-          onClick={() => void change()}
-        >
-          恢复默认
-        </button>
-      )}
-      <input
-        ref={input}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        hidden
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (file) void change(file);
-        }}
-      />
-      {error && <p role="alert">{error}</p>}
-    </div>
   );
 }
 

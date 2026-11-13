@@ -17,7 +17,6 @@ import {
 } from '../../../共享/chat-types';
 import '../chat.css';
 import {
-  AvatarEditor,
   ChatAvatar,
   ChatImageGrid,
   ChatLightbox,
@@ -77,7 +76,11 @@ function ProductCard({ product }: { product: ChatProduct }) {
     >
       <span className="chat-product-cover">
         {product.cover_url && !failed ? (
-          <ProtectedImage src={product.cover_url} onError={() => setFailed(true)} alt="咨询商品封面" />
+          <ProtectedImage
+            src={product.cover_url}
+            onError={() => setFailed(true)}
+            alt="咨询商品封面"
+          />
         ) : (
           <Package size={22} />
         )}
@@ -142,6 +145,21 @@ export function ChatPage() {
     [startRetry, setStartRetry] = useState(0);
   const images = useChatImages(user?.id || '', selected, setError);
   const [myAvatar, setMyAvatar] = useState('');
+  useEffect(() => {
+    let active = true;
+    setMyAvatar('');
+    if (user?.id) {
+      chatApi
+        .profile()
+        .then((profile) => {
+          if (active) setMyAvatar(profile.avatar_url);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
   const [gallery, setGallery] = useState<{ images: ChatImage[]; index: number } | null>(null);
   const sendLock = useRef(false);
   const [loading, setLoading] = useState(false),
@@ -452,20 +470,12 @@ export function ChatPage() {
   return (
     <section
       ref={pageElement}
+      aria-label={chatAdmin ? '在线咨询' : '我的消息'}
       className={`chat-page ${chatAdmin ? 'chat-admin' : 'chat-member'} ${selected ? 'has-selection' : ''}`}
     >
-      <header className="chat-page-heading">
-        <div>
-          <span className="chat-eyebrow">{chatAdmin ? '接待工作区' : '我的消息'}</span>
-          <h1>{chatAdmin ? '在线咨询' : '与清叶聊一聊'}</h1>
-          <p>
-            {chatAdmin
-              ? '查看商品资料，直接回复咨询用户。'
-              : '价格、租期、账号资料，在同一个对话中慢慢聊。'}
-          </p>
-        </div>
+      <div className="chat-page-tools" aria-label="消息通知设置">
         <DesktopNoticeButton />
-      </header>
+      </div>
       {!connected && <ChatConnectionNotice message={connectionError} />}
       {chatAdmin && (
         <div className="chat-presence">
@@ -512,7 +522,6 @@ export function ChatPage() {
       {gallery && <ChatLightbox gallery={gallery} close={() => setGallery(null)} />}
       <div className="chat-workspace">
         <aside className="chat-list">
-          <AvatarEditor identity={user?.id || ''} onChange={setMyAvatar} />
           <div className="chat-list-heading">
             <strong>
               全部咨询 <span>{list.total}</span>
