@@ -1,5 +1,11 @@
 # RELEASE -- 测试环境发布记录
 
+## 5178历史原型停用
+
+2026年11月13日17:01（北京时间），按用户“原型不再运行”的明确要求，停止并禁用`qingye-preview.service`；备份原单元后将其持久屏蔽，当前为`inactive / dead / masked`、`MainPID=0`。5178无TCP/UDP监听，本机和服务器公网IP的TCP连接失败，开发机器公网连接亦失败。服务器未发现针对5178的独立iptables/ip6tables允许规则，本轮未修改云安全组。
+
+用户端5179、管理端5181返回200，双API5180/5182健康且进程不变。未删除旧构建产物或日志；未改业务前端、API、数据库与现有部署版本。私有备份：`/root/qingye-private/prototype-retirement-20261113/170113`；回执：`/root/qingye-private/integration/20261113-prototype-retirement-receipt.json`。历史配置留档，未经用户再次明确授权不得恢复服务，见[停用说明](../../代码/部署/qingye-preview/README--历史原型部署说明.md)。
+
 ## R21个人中心头像与聊天页面整理
 
 2026年11月13日16:20（北京时间），用户端5179与管理端5181静态发布为`20261113-profile-avatar-r21`；代码提交`c45ad9c1f0bd47f2f3682137136a830492f76441`。头像修改入口移至“我的 → 基本资料”，双端聊天移除编辑区与顶部装饰文案。API保持`20261113-sms-login-r21`，进程和文件散列不变，双API健康，无数据库迁移和配置修改。

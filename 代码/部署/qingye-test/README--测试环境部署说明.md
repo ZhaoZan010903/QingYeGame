@@ -2,7 +2,7 @@
 
 > R7已获用户授权并部署；新增WebTransport聊天、独立管理重构、最新双主题和12张预览图集。可信IP/HTTPS已配置，公网UDP放行状态查最新R7验收记录。
 
-此目录部署 `0.8.0-test.1` 测试环境，不切换现有生产站，也不覆盖5178前端原型。主机上的其他数据库、Redis及网站继续使用原有配置。
+此目录部署 `0.8.0-test.1` 测试环境，不切换现有生产站；5178历史原型已停用，不得在业务部署时恢复。主机上的其他数据库、Redis及网站继续使用原有配置。
 
 | 组件 | 地址或路径 |
 | --- | --- |
@@ -24,7 +24,7 @@
 | 管理静态版本 | `/var/www/qingye-admin/releases/<release>`，`current`符号链接 |
 | 私有发布资料 | `/root/qingye-private/integration` |
 
-旧HTML、React原型代码已从当前仓库清理，Git历史查阅方式见[历史说明](../../../文档/原型代码/README--历史原型说明.md)。5178仍运行已部署原型。当前`代码/前端/用户端`与`代码/前端/管理端`是两个业务前端项目；原型的本机数据和模拟会话不导入业务环境。
+旧HTML、React原型代码已从当前仓库清理，Git历史查阅方式见[历史说明](../../../文档/原型代码/README--历史原型说明.md)。5178服务已停止并禁止启动，详情见[停用说明](../qingye-preview/README--历史原型部署说明.md)。当前`代码/前端/用户端`与`代码/前端/管理端`是两个业务前端项目；原型的本机数据和模拟会话不导入业务环境。
 
 ## 入口与配置隔离
 
@@ -125,7 +125,7 @@ journalctl -u qingye-media-migration -n 10
 - 使用专用测试会员，不迁移旧会员密码，不发送短信；短信未接入返回明确503。
 - 备份 `qingye_test` 数据库、完整媒体目录和私有导入清单；凭据单独加密保管。图片约数十GB，服务器磁盘内复制一份不适合作为完整异地备份。
 - 回退应用时分别将API、用户端和管理端`current`指向已验证的兼容版本，再重启对应测试服务。数据库结构变更需单独评审，不自动用旧库覆盖新数据。
-- 停止业务测试环境仅操作对应`qingye-test-*`及`qingye-media-migration`服务；停止验收只操作`qingye-acceptance@public`、`qingye-acceptance@admin`与`qingye-acceptance-redis`。不停止系统PostgreSQL、6379 Redis、5178原型或其他站点。
+- 停止业务测试环境仅操作对应`qingye-test-*`及`qingye-media-migration`服务；停止验收只操作`qingye-acceptance@public`、`qingye-acceptance@admin`与`qingye-acceptance-redis`。不停止系统PostgreSQL、6379 Redis或其他站点，也不恢复已停用的5178原型。
 
 当前为HTTP测试环境。正式业务切换仍需域名HTTPS、短信服务、经营规则确认、备份恢复演练和生产验收。
 

@@ -1,3 +1,4 @@
+# Retired 2026-11-13: historical reference only; port 5178 must remain stopped and masked.
 [Unit]
 Description=QingYeGame HTML preview on port 5178
 After=network.target
