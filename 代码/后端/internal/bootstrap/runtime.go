@@ -10,6 +10,7 @@ import (
 	chatapp "qingye/backend/internal/application/chat"
 	mediaapp "qingye/backend/internal/application/medialifecycle"
 	recommendationapp "qingye/backend/internal/application/recommendation"
+	securityapp "qingye/backend/internal/application/security"
 	"qingye/backend/internal/config"
 	"qingye/backend/internal/infrastructure/cache"
 	"qingye/backend/internal/infrastructure/mediafiles"
@@ -64,6 +65,11 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 		return nil, errors.New("Redis unavailable at startup")
 	}
 	r := &Runtime{HTTP: &httpapi.App{DB: db, Redis: client, Config: c}, Maintenance: &maintenance.Service{DB: db, MediaDir: c.MediaDir}, db: db, redis: client}
+	if c.MediaSafety.Enabled {
+		store := &cache.MediaReadStore{Client: client, Policy: c.MediaSafety.Policy}
+		r.HTTP.ReadSafety = &securityapp.ReadService{Store: store, Audit: postgres.MediaReadAudit{DB: db}, NewID: security.NewID}
+		r.HTTP.HumanSafety = &securityapp.HumanService{Store: store, Verifier: security.NewTurnstile(c.MediaSafety.Secret), NewID: security.NewID}
+	}
 	r.Chat = chatapp.New(&postgres.ChatStore{DB: db}, cache.Limiter{Client: client}, cache.ChatNotifier{Client: client}, c.Surface, security.NewID)
 	r.Recommendations = recommendationapp.New(&postgres.RecommendationStore{DB: db}, security.NewID, func(ctx context.Context, batch string) {
 		_ = client.Set(ctx, "qingye:recommendations:batch", batch, time.Hour).Err()
@@ -81,7 +87,7 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 			r.Close()
 			return nil, err
 		}
-		r.HTTP.MediaFiles = &mediaobject.Files{Local: &mediafiles.Store{Root: c.MediaDir, MinFreeBytes: mc.MinFreeBytes}, Staging: stage, Published: published, Repository: &postgres.MediaLifecycleStore{DB: db, NewID: security.NewID}, Environment: mc.Environment, TempDir: temp, NewID: security.NewID}
+		r.HTTP.MediaFiles = &mediaobject.Files{ProtectedReads: c.MediaSafety.Enabled, Local: &mediafiles.Store{Root: c.MediaDir, MinFreeBytes: mc.MinFreeBytes}, Staging: stage, Published: published, Repository: &postgres.MediaLifecycleStore{DB: db, NewID: security.NewID}, Environment: mc.Environment, TempDir: temp, NewID: security.NewID}
 		if c.Surface == "public" {
 			workerConfig := poolConfig.Copy()
 			workerConfig.MaxConns = 2

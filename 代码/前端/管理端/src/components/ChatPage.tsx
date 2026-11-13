@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import {
   useCallback,
   useEffect,
@@ -89,7 +90,7 @@ function ProductCard({ product }: { product: ChatProduct }) {
     >
       <span className="chat-product-cover">
         {product.cover_url && !failed ? (
-          <img
+          <ProtectedImage
             src={product.cover_url}
             onError={() => setFailed(true)}
             alt="咨询商品封面"

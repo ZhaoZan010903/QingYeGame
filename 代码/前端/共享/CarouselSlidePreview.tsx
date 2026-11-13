@@ -1,3 +1,4 @@
+import { ProtectedImage } from './MediaSecurity';
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import type { HomeSlide } from "./home-content";
 import "./carousel-slide.css";
@@ -58,7 +59,7 @@ export function CarouselSlidePreview({
     >
       <div className="curated-image">
         {imageUrl ? (
-          <img
+          <ProtectedImage
             src={imageUrl}
             alt={slide.title}
             loading="lazy"

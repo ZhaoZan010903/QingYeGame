@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { publicationInterrupted } from "../../../共享/upload-progress";
 import { Link, useSearchParams } from "react-router-dom";
@@ -71,7 +72,7 @@ export function ProductListRow({
         <div className="product-summary">
           <div className="product-cover">
             {cover && !failed && (cover.thumbnailUrl || cover.url) ? (
-              <img
+              <ProtectedImage
                 src={cover.thumbnailUrl || cover.url}
                 alt=""
                 loading="lazy"

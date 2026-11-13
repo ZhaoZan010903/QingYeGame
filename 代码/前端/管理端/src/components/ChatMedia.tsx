@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { useEffect, useRef, useState } from "react";
 import {
   Camera,
@@ -30,7 +31,7 @@ export function ChatAvatar({
   return (
     <span className={`chat-avatar ${className}`} aria-label={name}>
       {src && failed !== src ? (
-        <img src={src} alt="" onError={() => setFailed(src)} />
+        <ProtectedImage src={src} alt="" onError={() => setFailed(src)} />
       ) : (
         <span>{Array.from(name || "清叶")[0]}</span>
       )}
@@ -333,7 +334,7 @@ export function ImageDrafts({
     <div className="chat-draft-images" aria-label="待发送图片">
       {images.items.map((item) => (
         <div className="chat-draft-image" key={item.key}>
-          <img src={item.preview} alt={item.file.name} />
+          <ProtectedImage src={item.preview} alt={item.file.name} />
           <button
             type="button"
             disabled={disabled}
@@ -385,7 +386,7 @@ export function ChatImageGrid({
           aria-label={`查看第 ${index + 1} 张聊天图片`}
           onClick={() => open(images, index)}
         >
-          <img
+          <ProtectedImage
             src={image.thumbnail_url}
             alt={`聊天图片 ${index + 1}`}
             loading="lazy"
@@ -465,7 +466,7 @@ export function ChatLightbox({
             图片读取失败，点击重试
           </button>
         ) : (
-          <img
+          <ProtectedImage
             key={`${image.id}:${retry}`}
             src={image.url + (retry ? `?retry=${retry}` : "")}
             alt={`聊天图片 ${index + 1}`}

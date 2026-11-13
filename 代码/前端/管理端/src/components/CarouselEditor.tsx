@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import {
   useEffect,
   useLayoutEffect,
@@ -449,7 +450,7 @@ export function CarouselEditor({
               </div>
               {product && (
                 <div className="carousel-selected-product">
-                  <img
+                  <ProtectedImage
                     src={
                       product.images[0]?.thumbnailUrl || product.images[0]?.url
                     }
@@ -519,7 +520,7 @@ export function CarouselEditor({
                             setPicker(false);
                           }}
                         >
-                          <img
+                          <ProtectedImage
                             src={
                               value.images[0]?.thumbnailUrl ||
                               value.images[0]?.url
@@ -755,7 +756,7 @@ export function CarouselEditor({
                       }
                       onClick={() => patch({ imageId: value.id })}
                     >
-                      <img
+                      <ProtectedImage
                         src={value.thumbnailUrl || value.url}
                         alt=""
                         loading="lazy"

@@ -2,6 +2,7 @@ import React, { lazy, type ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
 import { Providers, useSession } from './context';
+import { MediaVerificationDialog } from '../../共享/MediaSecurity';
 import { Layout } from './components/Layout';
 import { StateView } from './components/shared';
 import { HomePage } from './pages/HomePage';
@@ -48,6 +49,11 @@ function Protected({ children }: { children: ReactNode }) {
     />
   );
 }
+function MediaSafetyHost() {
+  const { user, loading } = useSession();
+  const location = useLocation();
+  return <MediaVerificationDialog identity={loading ? 'loading' : user?.id ?? 'anonymous'} routeKey={location.key} />;
+}
 class ErrorBoundary extends React.Component<{ children: ReactNode }, { error: boolean }> {
   state = { error: false };
   static getDerivedStateFromError() {
@@ -72,6 +78,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <ErrorBoundary>
       <BrowserRouter>
         <Providers>
+          <MediaSafetyHost />
           <ChatProvider>
             <Routes>
               <Route element={<Layout />}>

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	mediaapp "qingye/backend/internal/application/media"
+	securityapp "qingye/backend/internal/application/security"
 	configuration "qingye/backend/internal/config"
 	"qingye/backend/internal/infrastructure/security"
 	"strings"
@@ -19,6 +20,8 @@ import (
 
 type Config = configuration.Config
 type App struct {
+	ReadSafety   *securityapp.ReadService
+	HumanSafety  *securityapp.HumanService
 	MediaFiles   mediaapp.Files
 	DB           *pgxpool.Pool
 	Redis        *redis.Client
@@ -47,6 +50,7 @@ func (a *App) Routes() http.Handler {
 		a.registerPublic(mux)
 	}
 	a.registerAuthMember(mux)
+	a.registerMediaSafety(mux)
 	a.registerChat(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)

@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { canDeleteDraft } from '../lib/publish-dictionaries';
 import { publicationInterrupted } from '../../../共享/upload-progress';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
@@ -61,7 +62,7 @@ function MemberArt({ product }: { product: Product }) {
       className={`member-item-art ${!first?.url && isDemo ? `asset-art art-${first?.art ?? product.art}` : ''}`}
     >
       {first?.url && !failed ? (
-        <img
+        <ProtectedImage
           src={first.thumbnailUrl ?? first.url}
           alt={first.alt || product.title}
           loading="lazy"

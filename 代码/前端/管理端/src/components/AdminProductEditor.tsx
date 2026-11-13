@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { MediaSyncPanel } from "./MediaSyncPanel";
 import { publicationInterrupted } from "../../../共享/upload-progress";
 import {
@@ -548,7 +549,7 @@ export function AdminProductEditor({
             >
               <span className="eyebrow">当前编辑内容预览 · 尚未发布</span>
               {product?.images[0]?.url && (
-                <img src={product.images[0].url} alt="商品封面预览" />
+                <ProtectedImage src={product.images[0].url} alt="商品封面预览" />
               )}
               <div>
                 <small>
@@ -1071,7 +1072,7 @@ export function AdminProductEditor({
             <div className="product-review-card">
               <div className="review-cover">
                 {product?.images[0]?.url ? (
-                  <img
+                  <ProtectedImage
                     src={
                       product.images[0].thumbnailUrl || product.images[0].url
                     }

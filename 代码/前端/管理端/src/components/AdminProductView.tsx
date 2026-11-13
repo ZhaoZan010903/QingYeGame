@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, ChevronLeft, ChevronRight, X } from "lucide-react";
@@ -113,7 +114,7 @@ export function AdminProductView({ id }: { id: string }) {
               onClick={() => dialog.current?.showModal()}
               aria-label="放大当前商品图片"
             >
-              <img src={current.url} alt={current.alt || product.title} />
+              <ProtectedImage src={current.url} alt={current.alt || product.title} />
             </button>
           ) : (
             <p>此商品暂无可用图片</p>
@@ -147,7 +148,7 @@ export function AdminProductView({ id }: { id: string }) {
                 aria-pressed={index === active}
               >
                 {image.url && (
-                  <img
+                  <ProtectedImage
                     src={image.thumbnailUrl || image.url}
                     loading="lazy"
                     alt=""
@@ -253,7 +254,7 @@ export function AdminProductView({ id }: { id: string }) {
           <X />
         </button>
         {current?.url && (
-          <img src={current.url} alt={current.alt || "商品原图"} />
+          <ProtectedImage src={current.url} alt={current.alt || "商品原图"} />
         )}
         <div className="admin-product-image-tools">
           <button

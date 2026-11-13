@@ -26,6 +26,7 @@ var privateReads = newReadSlots(4, 64, 5*time.Second)
 
 // Files keeps chat/avatar/contact and historical media on their existing path.
 type Files struct {
+	ProtectedReads       bool
 	Local                *mediafiles.Store
 	Staging, Published   medialifecycle.ObjectStore
 	Repository           ObjectRepository
@@ -124,14 +125,14 @@ func (s *Files) Open(ctx context.Context, key, id string, thumbnail bool) (*medi
 	if err != nil {
 		return nil, fault.New(fault.NotFound, "MEDIA_FILE_MISSING", "图片暂不可用")
 	}
-	if o.Store == "oss" {
+	if o.Store == "oss" && !s.ProtectedReads {
 		target, e := s.Published.SignedURL(ctx, o.Key, time.Minute)
 		if e != nil {
 			return nil, fault.New(fault.Unavailable, "MEDIA_UNAVAILABLE", "图片暂不可用")
 		}
 		return &media.File{MIME: o.MIME, RedirectURL: target}, nil
 	}
-	if o.Store != "staging" {
+	if o.Store != "staging" && o.Store != "oss" {
 		return nil, fault.New(fault.NotFound, "MEDIA_FILE_MISSING", "图片暂不可用")
 	}
 	release, err := privateReads.acquire(ctx)
@@ -144,7 +145,11 @@ func (s *Files) Open(ctx context.Context, key, id string, thumbnail bool) (*medi
 			release()
 		}
 	}()
-	r, err := s.Staging.Open(ctx, o.Key)
+	store := s.Staging
+	if o.Store == "oss" {
+		store = s.Published
+	}
+	r, err := store.Open(ctx, o.Key)
 	if err != nil {
 		return nil, fault.New(fault.Unavailable, "MEDIA_UNAVAILABLE", "图片暂不可用")
 	}

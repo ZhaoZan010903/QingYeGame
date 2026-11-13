@@ -8,8 +8,10 @@ import {
   Navigate,
   Link,
   useNavigate,
+  useLocation,
 } from "react-router-dom";
 import { Providers, useSession } from "./context";
+import { MediaVerificationDialog } from '../../共享/MediaSecurity';
 import { api } from "./lib/api";
 import { StateView } from "./components/shared";
 import { LoginPage } from "./pages/LoginPage";
@@ -33,6 +35,7 @@ function Protected({ children }: { children: ReactNode }) {
 function Shell() {
   const { user, refresh } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   async function logout() {
@@ -56,6 +59,7 @@ function Shell() {
   }
   return (
     <>
+      <MediaVerificationDialog identity={user?.id ?? 'anonymous'} routeKey={location.key} />
       <header className="admin-topbar">
         <Link className="admin-brand" to="/">
           <svg viewBox="0 0 33 32" fill="none" aria-hidden="true">

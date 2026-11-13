@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
@@ -63,7 +64,7 @@ export function PublishPreview({
         <section className="preview-media" aria-label="预览商品图片">
           <div className="preview-stage">
             {active?.url && !failed ? (
-              <img
+              <ProtectedImage
                 key={`${active.id}:${imageAttempt}`}
                 src={active.url}
                 onError={() => setFailed(true)}
@@ -132,7 +133,7 @@ export function PublishPreview({
                     aria-label={`预览第${index + 1}张图片`}
                     onClick={() => setSelected(index)}
                   >
-                    <img src={image.thumbnailUrl ?? image.url} alt="" loading="lazy" />
+                    <ProtectedImage src={image.thumbnailUrl ?? image.url} alt="" loading="lazy" />
                   </button>
                 );
               })}

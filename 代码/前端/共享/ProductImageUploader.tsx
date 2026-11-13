@@ -1,3 +1,4 @@
+import { ProtectedImage } from './MediaSecurity';
 import {
   useCallback,
   useEffect,
@@ -608,7 +609,7 @@ export function ProductImageUploader({
             <div className="upload-tile" key={image.id}>
               <div className="upload-preview">
                 {image.url ? (
-                  <img
+                  <ProtectedImage
                     src={image.thumbnailUrl ?? image.url}
                     alt={image.alt}
                     loading="lazy"
@@ -716,7 +717,7 @@ export function ProductImageUploader({
             {pending.slice(0, queueVisible).map((item, index) => (
               <div className="upload-tile" key={item.key}>
                 <div className="upload-preview">
-                  <img
+                  <ProtectedImage
                     src={item.preview}
                     alt={item.file.name}
                     loading="lazy"

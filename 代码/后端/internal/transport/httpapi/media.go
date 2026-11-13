@@ -2,16 +2,19 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	service "qingye/backend/internal/application/media"
 	domain "qingye/backend/internal/domain/media"
+	securitydomain "qingye/backend/internal/domain/security"
 	"qingye/backend/internal/infrastructure/cache"
 	"qingye/backend/internal/infrastructure/mediafiles"
 	"qingye/backend/internal/infrastructure/postgres"
 	"strings"
+	"time"
 )
 
 const maxImagePixels = domain.MaxImagePixels
@@ -109,29 +112,108 @@ func (a *App) completeUpload(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) serveMedia(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	file, err := a.mediaService().Open(r.Context(), id, r.URL.Query().Get("variant") == "thumb" || strings.HasSuffix(r.URL.Path, "/preview"), func(ctx context.Context) (domain.Actor, error) {
-		u, err := a.currentUserBySession(ctx, a.requestSessionHash(r))
+	var before func(domain.Upload) error
+	var expand func(int64) (securitydomain.ReadDecision, error)
+	var decision securitydomain.ReadDecision
+	denied := errors.New("media access denied")
+	measured := &measuredMediaWriter{ResponseWriter: w, Context: r.Context()}
+	if a.Config.MediaSafety.Enabled {
+		if !a.safetyReady(w) {
+			return
+		}
+		who, e := a.mediaSubject(w, r)
+		if e != nil {
+			a.mediaSafetyError(w, e)
+			return
+		}
+		lease := newID()
+		acquired := false
+		defer func() {
+			if acquired {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				_ = a.ReadSafety.Store.Finish(ctx, who, lease, measured.Bytes)
+			}
+		}()
+		before = func(m domain.Upload) error {
+			var e error
+			decision, e = a.ReadSafety.Store.Begin(r.Context(), who, lease, m.Size)
+			if e != nil {
+				return e
+			}
+			if decision.State != "allowed" {
+				return denied
+			}
+			acquired = true
+			reserved := m.Size
+			if reserved == 0 {
+				reserved = 64 << 20
+			}
+			expand = func(actual int64) (securitydomain.ReadDecision, error) {
+				return a.ReadSafety.Store.Expand(r.Context(), who, actual-reserved)
+			}
+			return nil
+		}
+	}
+	file, err := a.mediaService().OpenChecked(r.Context(), id, r.URL.Query().Get("variant") == "thumb" || strings.HasSuffix(r.URL.Path, "/preview"), func(ctx context.Context) (domain.Actor, error) {
+		u, err := a.currentUser(r)
 		if err != nil {
 			return domain.Actor{}, err
 		}
 		return a.mediaActor(u), nil
-	})
+	}, before)
 	if err != nil {
+		if errors.Is(err, denied) {
+			writeReadDecision(w, decision)
+			return
+		}
+		if errors.Is(err, securitydomain.ErrUnavailable) {
+			a.mediaSafetyError(w, err)
+			return
+		}
 		writeAppError(w, err)
 		return
 	}
 	if file.RedirectURL != "" {
+		if a.Config.MediaSafety.Enabled {
+			a.mediaSafetyError(w, securitydomain.ErrUnavailable)
+			return
+		}
 		w.Header().Set("Cache-Control", "private, no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		http.Redirect(w, r, file.RedirectURL, http.StatusFound)
 		return
 	}
 	defer file.Reader.Close()
+	if expand != nil {
+		size, e := file.Reader.Seek(0, io.SeekEnd)
+		if e != nil || size < 0 || size > 64<<20 {
+			a.mediaSafetyError(w, securitydomain.ErrUnavailable)
+			return
+		}
+		if _, e = file.Reader.Seek(0, io.SeekStart); e != nil {
+			a.mediaSafetyError(w, securitydomain.ErrUnavailable)
+			return
+		}
+		d, e := expand(size)
+		if e != nil {
+			a.mediaSafetyError(w, e)
+			return
+		}
+		if d.State != "allowed" {
+			writeReadDecision(w, d)
+			return
+		}
+	}
+	if a.Config.MediaSafety.Enabled && strings.Contains(r.Header.Get("Range"), ",") {
+		fail(w, http.StatusRequestedRangeNotSatisfiable, "SINGLE_RANGE_REQUIRED", "请按单一范围读取图片")
+		return
+	}
 	w.Header().Set("Content-Type", file.MIME)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", id))
-	http.ServeContent(w, r, id, file.Modified, file.Reader)
+	http.ServeContent(measured, r, id, file.Modified, file.Reader)
 }
 
 func (a *App) uploadStatus(w http.ResponseWriter, r *http.Request) {

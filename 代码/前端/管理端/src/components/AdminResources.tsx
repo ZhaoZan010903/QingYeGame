@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adminApi, type AdminRecord } from "../lib/admin-api";
 import { api, uploadConfig } from "../lib/api";
@@ -424,7 +425,7 @@ export function AdminResources({
                       </small>
                     </label>
                     {form.qr_url && (
-                      <img
+                      <ProtectedImage
                         className="admin-qr-preview"
                         src={form.qr_url}
                         alt="客服二维码预览"

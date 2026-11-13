@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowDown, Check, MessageSquare, Send, Package, Smile } from 'lucide-react';
@@ -76,7 +77,7 @@ function ProductCard({ product }: { product: ChatProduct }) {
     >
       <span className="chat-product-cover">
         {product.cover_url && !failed ? (
-          <img src={product.cover_url} onError={() => setFailed(true)} alt="咨询商品封面" />
+          <ProtectedImage src={product.cover_url} onError={() => setFailed(true)} alt="咨询商品封面" />
         ) : (
           <Package size={22} />
         )}

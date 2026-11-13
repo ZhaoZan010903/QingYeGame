@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { useState } from 'react';
 import { Copy, QrCode, RefreshCw } from 'lucide-react';
 import type { Contact } from '../types';
@@ -26,7 +27,7 @@ export function ContactDetails({
       </header>
       <div className="contact-qr-frame">
         {contact.qrUrl && !failed ? (
-          <img
+          <ProtectedImage
             key={revision}
             src={contact.qrUrl}
             alt={`${contact.name} ${channel}联系二维码`}

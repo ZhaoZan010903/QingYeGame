@@ -28,6 +28,7 @@ import { adminProductID } from "../lib/product-links";
 import { ChatPage } from "../components/ChatPage";
 import { useChat } from "../components/ChatNotifications";
 import { AdminHelp } from "../components/AdminGuide";
+import { AdminMediaSecurity } from '../components/AdminMediaSecurity';
 import { DictionarySettings } from "../components/DictionarySettings";
 import "../admin.css";
 const publicSite = String(import.meta.env.VITE_PUBLIC_SITE_URL ?? "").replace(
@@ -78,6 +79,7 @@ export function AdminPage() {
         ["categories", "区服与账号字典", ListFilter],
         ["pages", "说明与协议", FileText],
         ["users", "会员管理", Users],
+        ["security/media-access", "图片访问保护", CircleHelp],
       ],
     },
     { label: "使用帮助", items: [["help", "操作演示", CircleHelp]] },
@@ -125,6 +127,8 @@ export function AdminPage() {
             <ChatPage />
           ) : detailID ? (
             <AdminProductView key={detailID} id={detailID} />
+          ) : tab === "security/media-access" ? (
+            <AdminMediaSecurity />
           ) : tab === "help" ? (
             <AdminHelp />
           ) : tab === "products" || tab === "reviews" ? (

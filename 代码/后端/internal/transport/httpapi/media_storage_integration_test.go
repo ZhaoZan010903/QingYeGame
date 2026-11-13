@@ -240,6 +240,16 @@ func TestR20RealStorageUploadPublishReturnAndDelete(t *testing.T) {
 			t.Fatal("signed image response invalid")
 		}
 	}
+	// R20-1启用后，相同真实OSS对象改走受保护正文，兼容地址不得继续签发裸链接。
+	files.ProtectedReads = true
+	enableReadProtection(t, a, "test:r201-real-oss:"+newID()+":")
+	for _, variant := range []string{"file", "preview"} {
+		w := surfaceRequest(t, f.pub, "GET", "/api/v1/media/"+ids[0]+"/"+variant, "", nil)
+		statusIs(t, w, 200)
+		if w.Header().Get("Location") != "" || !strings.HasPrefix(w.Header().Get("Content-Type"), "image/") || w.Body.Len() == 0 {
+			t.Fatal("protected OSS path bypassed or lost body")
+		}
+	}
 	if _, err = f.admin.managementService().TransitionProduct(ctx, admin, product, "status", management.TransitionInput{ExpectedVersion: version(), Action: "offline", Reason: "isolated retention test"}); err != nil {
 		t.Fatal(err)
 	}

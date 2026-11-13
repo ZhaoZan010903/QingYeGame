@@ -324,6 +324,11 @@ func (s *Service) completeLocal(ctx context.Context, actor domain.Actor, id stri
 	return readyUploadResult(id), nil
 }
 func (s *Service) Open(ctx context.Context, id string, thumbnail bool, resolve func(context.Context) (domain.Actor, error)) (*domain.File, error) {
+	return s.OpenChecked(ctx, id, thumbnail, resolve, nil)
+}
+
+// 先确认原有用途和资源权限，再申请下载预算；远端读取也不得先于准入。
+func (s *Service) OpenChecked(ctx context.Context, id string, thumbnail bool, resolve func(context.Context) (domain.Actor, error), before func(domain.Upload) error) (*domain.File, error) {
 	if err := validID(id); err != nil {
 		return nil, err
 	}
@@ -362,5 +367,10 @@ func (s *Service) Open(ctx context.Context, id string, thumbnail bool, resolve f
 		}
 	}
 	// 缩略图命中缓存也必须先通过相同权限检查。
+	if before != nil {
+		if err := before(upload); err != nil {
+			return nil, err
+		}
+	}
 	return s.files.Open(ctx, upload.Key, id, thumbnail)
 }

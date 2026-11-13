@@ -1,3 +1,4 @@
+import { ProtectedImage } from '../../../共享/MediaSecurity';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, X, Search, ShieldCheck, RefreshCw } from 'lucide-react';
@@ -63,7 +64,7 @@ export function Artwork({
       aria-label={`${p.title}${src ? '' : isDemo ? ' · 概念展示图' : ' · 图片暂不可用'}`}
     >
       {src && !failed ? (
-        <img
+        <ProtectedImage
           src={src}
           alt={p.title}
           loading="lazy"

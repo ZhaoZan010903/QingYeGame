@@ -182,10 +182,10 @@ func (s *MediaStore) WithUpload(ctx context.Context, id, surface, owner string, 
 func (s *MediaStore) Lookup(ctx context.Context, id string) (media.Upload, error) {
 	var u media.Upload
 	u.ID = id
-	err := s.DB.QueryRow(ctx, `SELECT COALESCE(m.owner_id,''),m.storage_key,m.mime_type,m.status,m.purpose,
+	err := s.DB.QueryRow(ctx, `SELECT COALESCE(m.owner_id,''),m.storage_key,m.mime_type,m.status,m.purpose,m.byte_size,
  (m.purpose='product' AND EXISTS(SELECT 1 FROM product_images pi JOIN products p ON p.id=pi.product_id JOIN categories c ON c.id=p.category_id WHERE pi.media_id=m.id AND p.status='published' AND p.approved_version=p.version AND c.enabled))
  OR (m.purpose IN ('product','contact') AND EXISTS(SELECT 1 FROM contacts c WHERE c.qr_media_id=m.id AND c.enabled))
- FROM media_files m WHERE m.id=$1 AND m.deleted_at IS NULL`, id).Scan(&u.Owner, &u.Key, &u.MIME, &u.State, &u.Purpose, &u.Public)
+	 FROM media_files m WHERE m.id=$1 AND m.deleted_at IS NULL`, id).Scan(&u.Owner, &u.Key, &u.MIME, &u.State, &u.Purpose, &u.Size, &u.Public)
 	return u, mediaDBError(err)
 }
 func (s *MediaStore) ScopedAccess(ctx context.Context, id string, actor media.Actor) (bool, error) {
