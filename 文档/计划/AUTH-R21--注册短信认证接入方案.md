@@ -1,72 +1,104 @@
-# R21 注册短信认证接入方案
+# R21 注册短信认证
 
-日期：2026年11月13日。状态：已核对官方资料、现有代码与现有RAM凭据，尚未接通真实短信。用户已开通短信认证，随后表示已添加权限，并指定AccessKey与当前OSS所用一致；签名与模板待补充。
+日期：2026年11月13日。范围：获取注册短信、校验验证码、创建普通会员并建立用户端会话。短信登录、重置密码、换绑手机号未开放；个人中心本轮不新增业务。
 
-14:21（北京时间）从152服务器现有OSS私有配置取凭据进行非发送检查：STS返回RAMUser，证明该组凭据有效；CheckSmsVerifyCode使用无效号码和未发送的测试码，返回isv.ValidateFail（验证失败），未遇到权限拒绝。此结果只证明凭据身份与该次核验请求响应，不能当作验证码校验成功、完整RAM策略审计或发送权限验收。没有调用SendSmsVerifyCode，没有发送短信；私有证据保存在`/root/qingye-private/r21-sms-20261113/credential-probe.json`，凭据未输出或提交仓库。
+## 服务与配置
 
-## 本阶段范围
+使用阿里云号码认证服务 PNVS 的短信认证，官方 Go SDK dypnsapi-20170525/v3 v3.0.0。调用 SendSmsVerifyCode 与 CheckSmsVerifyCode，固定 HTTPS 地址 dypnsapi.aliyuncs.com。这是号码认证产品，不是短信服务 SMS 的发送接口，两者套餐不能混用。[官方选型说明](https://help.aliyun.com/zh/sms/product-overview/selection-guide-for-short-message-service-and-sms-verification-service)
 
-R21先处理注册短信获取与校验，形成手机号验证到注册的闭环。个人管理仅调整页面，不自行新增换绑、销户或其他账户业务；页面调整稍后开展。短信登录、找回密码分别安排，不因注册开通而一并启用。先前R20-2内容未定，本次按用户最新指示优先进入R21。
+用户确认复用现有 OSS 所属 RAM 用户的 AccessKey，已添加短信权限。部署时从服务器私有配置读取，显式写入独立的 SMS_ACCESS_KEY_ID / SMS_ACCESS_KEY_SECRET；程序不会静默借用 OSS 配置。密钥、测试号码、验证码和密码不提交 GitHub。
 
-## 选用的阿里云产品
+选用用户提供的已审核签名 **恒创联众**，注册模板 **100001**：
 
-采用号码认证服务PNVS下的短信认证，服务端使用官方Go SDK，接口为SendSmsVerifyCode和CheckSmsVerifyCode，服务地址dypnsapi.aliyuncs.com。该服务托管验证码生成与核验；它与短信服务SMS的API、套餐包不同，额度不能混用。见[官方选型指南](https://help.aliyun.com/zh/sms/product-overview/selection-guide-for-short-message-service-and-sms-verification-service)。
+> 您的验证码为${code}。尊敬的客户，以上验证码${min}分钟内有效，请注意保密，切勿告知他人。
 
-首阶段使用控制台提供的赠送签名及登录/注册模板，签名与模板必须配套。官方当前列出的登录/注册模板编号为100001，接入时核对该账号控制台实际配置。短信显示所选平台签名，不能假定可自定义为“清叶”。快速测试需绑定测试手机号，测试短信也收费。见[短信认证配置说明](https://help.aliyun.com/zh/pnvs/user-guide/sms-authentication-service)。
+TemplateParam 固定为 {"code":"##code##","min":"5"}，验证码由阿里云生成，ReturnVerifyCode=false。100002—100005保留为后续业务资料，本次不调用。[发送接口](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-sendsmsverifycode)
 
-## 当前项目差距
+## 用户流程
 
-- AuthPage已有手机号、验证码、密码、协议确认和重发倒计时；只有全局VITE_SMS_ENABLED开关，需要改为按注册/登录/找回密码分别展示能力。
-- 后端/auth/sms、/auth/register、/auth/password-reset当前固定返回SMS_NOT_CONFIGURED；短信登录也未实现。不能只修改前端开关便宣布接通。
-- 数据库预留sms_challenges，但尚无调用逻辑，code_hash为非空的自建验证码设计。若改为云端核验，需新增有序迁移保存供应商流水、绑定和消费状态，不能用伪造验证码散列填补结构。
-- 可复用Turnstile底层核验适配。现有HumanService及Redis完成动作只支持media_read，需要独立sms_send挑战与一次发送许可，不能复用图片通过状态。
+1. 注册页读取后台能力及已发布的协议版本，协议未就绪时显示原因和重试入口，不先发送无从完成注册的短信。
+2. 输入手机号，申请与手机号、当前浏览器和注册用途绑定的挑战。
+3. 完成 Turnstile 验证。服务端检查 sms_send、hostname、cData、时间和验证结果；图片验证通过状态不能替代短信验证。
+4. 原子预留发送额度，记录发送意图，再调用阿里云。提交成功后显示60秒倒计时。提交成功不等于手机已经送达。
+5. 用户填写6位验证码、密码，勾选服务协议和隐私说明。后端要求 Model.VerifyResult=PASS，并核对协议版本。
+6. 一个数据库事务内创建普通会员、保存协议版本、消费注册凭据并创建 public 会话，完成后按原返回地址规则跳转。
 
-代码依据：`代码/前端/用户端/src/pages/AuthPage.tsx`、`代码/后端/internal/transport/httpapi/auth.go`、`代码/后端/internal/application/identity/service.go`、`代码/后端/internal/maintenance/schema.sql`、`代码/后端/internal/application/security/human.go`。
+手机号改变会清除旧验证码及挑战，旧请求返回也不会回填。演示模式不发送短信。协议版本来自页面实际加载的数据，不用提交瞬间的新版本替代用户所见版本。协议缺失时不可勾选，并明确提示；重新加载协议后可继续填写。
 
-## 拟定流程与初始参数
+## 初始限制
 
-输入手机号 → 获取验证码 → Turnstile核验与本地限频 → Go调用阿里云发送 → 显示倒计时 → 用户填写短信验证码 → Go调用阿里云核验 → 消费注册凭据并创建会员。
-
-验证码由阿里云动态生成，TemplateParam使用code占位符，明确ReturnVerifyCode=false；验证码不返回前端、不记录明文日志。短信提交成功与手机实际送达分开处理；核验必须检查Model.VerifyResult=PASS，不能把HTTP成功或Code=OK当成验证码正确。发送与核验使用一致的SchemeName，测试/正式环境及注册/登录用途分别隔离。依据：[发送接口](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-sendsmsverifycode)、[核验接口](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-checksmsverifycode)。
-
-以下为初始实施建议，不是用户逐项指定或已上线配置：
-
-| 项目 | 建议 |
+| 项目 | 实现规则 |
 | --- | --- |
-| 手机号 | 中国大陆手机号，国家码86 |
-| 验证码 | 6位纯数字，5分钟有效 |
-| 重发 | 60秒间隔；成功发送新验证码后旧验证码失效 |
-| 单号码发送 | 每小时5次、每天10次，服务端计数 |
-| 错误核验 | 每次挑战最多5次，另有号码及IP累计限制 |
-| 费用防护 | 独立IP、浏览器及全站发送预算；测试初期只开放明确指定的测试号码 |
+| 号码 | 中国大陆11位手机号，国家码86 |
+| 验证码 | 6位数字，300秒有效 |
+| 发送间隔 | 同号码60秒 |
+| 号码额度 | 每小时5次、24小时10次 |
+| IP / 浏览器发送 | 每小时20次 / 10次 |
+| 全站额度 | 默认滚动24小时20次，SMS_DAILY_LIMIT可配置 |
+| 创建挑战 | 全站每小时600次，IP每10分钟20次，号码及浏览器每10分钟10次 |
+| 核验尝试 | 每个挑战最多5次；号码及浏览器每15分钟20次，IP每15分钟60次 |
+| 外部调用 | 每进程最多4个短信调用，8秒总期限，连接2秒，HTTP总超时7秒，禁止自动重试 |
+| 密码 | bcrypt成本12，注册散列并行最多2个；8个字符以上、最多72字节 |
+| 测试范围 | 必须配置1—10个明确的测试号码，其他号码不能发送 |
 
-每次发送先通过独立短信场景的人机核验与原子额度预留。手机号改变时清除旧挑战；并发点击、刷新与重试不能重复扣费发送。供应商超时属于结果不确定，不能自动重发或简单退还额度；OutId仅作为业务关联，不假定阿里云承诺发送幂等。供应商短信验证码核验与本地注册凭据消费分别管理，注册重试不得重复建号。保留手机号唯一约束、既有密码散列与public会话边界，不能借验证码注册管理员或恢复停用账号。
+以上为本轮实现的初始限制，不是生产容量承诺。Redis Lua一次检查全部额度后一起扣减，拒绝请求不会部分消耗额度；供应商失败不自动返还已经预留的预算。调用外部服务时不占用数据库长事务。
 
-Redis保存有时效的频控、人机挑战与执行锁；PostgreSQL保存会员、必要的短信挑战元数据、消费状态和协议版本。不新增数据库种类或独立安全服务。供应商调用不占数据库长事务；脱敏记录RequestId、BizId、结果与耗时，不记录验证码、密钥、完整请求体。全球发送上限数值在真实联调前落实。
+阿里云 DuplicatePolicy=1 使后续成功发送的新验证码覆盖旧验证码。OutId只作业务关联，不视为供应商幂等保证。超时、进程中断或发送结果不明时不会自动再发；用户须稍后重新申请。核验仅HTTP成功或Code=OK不能通过注册。[核验接口](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-checksmsverifycode)
 
-## 需要准备的控制台配置
+## 数据与一致性
 
-1. 用户最新决定使用现有OSS所属RAM用户的AccessKey，并为其追加短信权限；本轮按此准备，不要求重新创建密钥。短信运行配置将单独声明，不由程序静默回退读取OSS配置。独立RAM用户与临时凭据仍是后续收敛权限的建议，不作为当前接入前置条件。
-2. 在号码认证服务的短信认证参数配置中选择赠送签名与登录/注册模板，记录签名名称、模板编号。
-3. 绑定用于验收的测试手机号；接口凭据存服务器私有配置或仓库外本机私有文件，再提供文件路径，凭据不进聊天和GitHub。
+新增0013_registration_sms.sql，不改写0012。sms_challenges.code_hash允许为空，PNVS记录不存验证码；新增供应商标识、浏览器绑定散列、hostname、执行阶段、执行ID、请求指纹、供应商流水和注册会员ID。历史记录仍为legacy/unavailable，不会变成可用验证码。
 
-下列RAM策略仅允许发送与核验；这两个API的官方授权表均使用全部资源星号，不支持资源级细分。[发送权限说明](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-sendsmsverifycode)、[核验权限说明](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-checksmsverifycode)、[AccessKey创建说明](https://help.aliyun.com/zh/ram/user-guide/create-an-accesskey-pair)。
+阶段：challenge → verifying → sending → sent → checking → verified → registered。失败进入failed或unknown；错误验证码在剩余次数内返回sent。执行ID与行锁防止并发重复发送和核验。进程中断时拒绝猜测性恢复，需要重新申请。
 
-```json
-{
-  "Version": "1",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["dypns:SendSmsVerifyCode", "dypns:CheckSmsVerifyCode"],
-      "Resource": "*"
+registration_consents保存会员ID、协议版本和时间。账号、同意记录和会话同事务提交；手机号唯一约束保证不能覆盖已有会员、管理员或停用账号。注册响应丢失后，仅原浏览器、原有效期、完全相同请求指纹可恢复会话；更换密码、验证码或协议版本的重放会被拒绝。
+
+```mermaid
+erDiagram
+    users ||--o| registration_consents : "注册同意记录"
+    users ||--o{ sessions : "用户会话"
+    users o|--o{ sms_challenges : "成功注册后关联"
+    registration_consents {
+        text user_id PK,FK
+        integer terms_version
+        integer privacy_version
+        timestamptz accepted_at
     }
-  ]
-}
+    sms_challenges {
+        text id PK
+        text phone
+        text purpose
+        text provider
+        text binding_hash
+        text stage
+        integer attempts
+        text request_hash
+        text registered_user_id FK
+        timestamptz expires_at
+    }
 ```
 
-## 开发与验收顺序
+请求指纹使用带密钥的HMAC，不保存正文。Redis只保留带过期时间的计数，号码及IP使用HMAC键。创建挑战时有界清理过期超过24小时的PNVS挑战，每次最多100条；用户协议记录独立保留。不保存短信正文、验证码、完整供应商错误或完整请求体。
 
-先实现供应商适配、注册场景、挑战消费与防刷测试，再接前端获取/重发/校验反馈，最后在隔离环境使用指定号码验证真实收信及注册。覆盖错误/过期/重放验证码、改手机号、重复点击、断网重试、额度耗尽、注册并发和供应商异常；收到短信及核验通过才计真实链路验收完成。之后按项目流程部署测试环境并核对实际版本，不在业务库跑注册批量写测试。
+## 接口
 
-目前完成调研、方案记录与不发送短信的凭据探测；没有创建RAM凭据、发送真实短信、修改业务代码或部署。独立检查脚本使用服务器私有目录内的官方SDK，不改变业务进程依赖。官方SDK入口：[Go SDK](https://github.com/alibabacloud-go/dypnsapi-20170525)。
+前缀均为 /api/v1，响应数据位于data内。
+
+| 方法与路径 | 请求 / 返回 |
+| --- | --- |
+| GET /auth/capabilities | registration_sms、sms_login、password_reset，分别反映开关状态 |
+| POST /auth/sms/challenges | phone,purpose=register；返回challenge_id,site_key,action,expires_in，并设置HttpOnly绑定Cookie |
+| POST /auth/sms | phone,purpose=register,challenge_id,token；成功返回challenge_id,retry_after=60,expires_in=300 |
+| POST /auth/register | phone,code,challenge_id,password,agreement:{accepted,terms_version,privacy_version}；返回脱敏会员资料并设置用户会话Cookie |
+
+写接口要求精确匹配允许的Origin。管理员入口不提供注册路由。配置与迁移完成前默认关闭；VITE_SMS_ENABLED不再作为注册能力来源。
+
+## 验收和发布边界
+
+真实收信由用户确认，后端已记录供应商发送流水。完整结果见[R21验收记录](../业务验收与审查记录/AUTH-R21--注册短信验收.md)。隔离环境使用qingye_acceptance、Redis6382、API5184/5185；不能把隔离部署当作业务测试站已上线。
+
+隔离库原先没有协议，造成首次真实验收时勾选框不可用。已补充明确标注的隔离测试说明，并补上前端加载失败提示与重试。业务测试库的服务协议与隐私说明仍为未发布草稿，不用隔离测试说明覆盖，也不自动发布为正式协议。
+
+发布前备份数据库、环境和current链接，执行0013后核对原业务表。回退旧程序时保留新增结构，不删除已注册会员与协议记录。正式放开注册前需发布适用的协议，并另行决定测试白名单和额度。
+
+权限包含dypns:SendSmsVerifyCode、dypns:CheckSmsVerifyCode，官方资源范围为*。14:21非发送探测仅确认STS为RAMUser和核验接口返回isv.ValidateFail，不作为正确验证码验收。服务器私有证据目录：/root/qingye-private/r21-sms-20261113/。

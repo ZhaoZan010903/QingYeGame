@@ -190,7 +190,7 @@ declare global {
   }
 }
 let scriptReady: Promise<WidgetAPI> | undefined;
-function loadWidget(): Promise<WidgetAPI> {
+export function loadWidget(): Promise<WidgetAPI> {
   if (window.turnstile) return Promise.resolve(window.turnstile);
   if (!scriptReady)
     scriptReady = new Promise<WidgetAPI>((resolve, reject) => {

@@ -34,3 +34,20 @@ func (v *PasswordVerifier) Compare(ctx context.Context, hash, password string) e
 	}
 	return err
 }
+
+func (v *PasswordVerifier) Hash(ctx context.Context, password string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	select {
+	case v.slots <- struct{}{}:
+		defer func() { <-v.slots }()
+	default:
+		return "", ErrPasswordBusy
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	if e := ctx.Err(); e != nil {
+		return "", e
+	}
+	return string(hash), err
+}

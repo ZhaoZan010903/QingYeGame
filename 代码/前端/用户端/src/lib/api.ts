@@ -661,12 +661,28 @@ export const api = {
     writeState(state);
     return state.user;
   },
+  async authCapabilities(): Promise<{
+    registration_sms: boolean;
+    sms_login: boolean;
+    password_reset: boolean;
+  }> {
+    if (isDemo) return { registration_sms: false, sms_login: false, password_reset: false };
+    return unwrap(await request('/auth/capabilities'));
+  },
+  async smsChallenge(
+    phone: string,
+  ): Promise<{ challenge_id: string; site_key: string; action: string }> {
+    if (isDemo) return demoUnsupported();
+    return unwrap(await request('/auth/sms/challenges', 'POST', { phone, purpose: 'register' }));
+  },
   async sms(
     phone: string,
     purpose: string,
+    challenge_id?: string,
+    token?: string,
   ): Promise<{ challenge_id: string; retry_after: number }> {
     if (isDemo) return demoUnsupported();
-    return unwrap(await request('/auth/sms', 'POST', { phone, purpose }));
+    return unwrap(await request('/auth/sms', 'POST', { phone, purpose, challenge_id, token }));
   },
   async login(payload: RecordData): Promise<User> {
     productUploader.reset();

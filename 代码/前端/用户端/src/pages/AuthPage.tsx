@@ -1,12 +1,15 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, isDemo } from '../lib/api';
 import { useSession, useUi } from '../context';
 import '../member.css';
+import {
+  RegistrationVerification,
+  type SmsChallenge,
+} from '../components/RegistrationVerification';
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : '操作未完成，请稍后重试。';
-const smsEnabled = isDemo || import.meta.env.VITE_SMS_ENABLED === 'true';
 export function safeReturnTo(value: string | null) {
   if (
     !value ||
@@ -41,15 +44,75 @@ export function AuthPage() {
   const [sending, setSending] = useState(false);
   const [remaining, setRemaining] = useState(0);
   const [error, setError] = useState('');
+  const [capabilities, setCapabilities] = useState({
+    registration_sms: false,
+    sms_login: false,
+    password_reset: false,
+  });
+  const [verification, setVerification] = useState<SmsChallenge | null>(null);
+  const [agreementVersions, setAgreementVersions] = useState<{
+    terms: number;
+    privacy: number;
+  } | null>(null);
+  const [agreementError, setAgreementError] = useState('');
+  const [agreementRetry, setAgreementRetry] = useState(0);
+  const generation = useRef(0);
+  const smsEnabled = register
+    ? capabilities.registration_sms
+    : reset
+      ? capabilities.password_reset
+      : capabilities.sms_login;
   const needsSms = register || reset || method === 'sms';
   useEffect(() => {
+    let active = true;
+    void api
+      .authCapabilities()
+      .then((result) => {
+        if (active) setCapabilities(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      generation.current++;
+    };
+  }, []);
+  useEffect(() => {
+    generation.current++;
+    setVerification(null);
+    setSending(false);
     setError('');
     setPassword('');
     setCode('');
     setChallenge('');
     setAgreed(false);
     setRemaining(0);
+    setAgreementVersions(null);
   }, [location.pathname]);
+  useEffect(() => {
+    if (!register) return;
+    let active = true;
+    setAgreementError('');
+    setAgreementVersions(null);
+    setAgreed(false);
+    void Promise.all([api.page('terms'), api.page('privacy')])
+      .then(([terms, privacy]) => {
+        if (!active) return;
+        const versions = { terms: Number(terms.version), privacy: Number(privacy.version) };
+        if (
+          !terms.published ||
+          !privacy.published ||
+          !Object.values(versions).every((v) => Number.isInteger(v) && v > 0)
+        )
+          throw new Error('协议尚未发布');
+        setAgreementVersions(versions);
+      })
+      .catch(() => {
+        if (active) setAgreementError('服务协议或隐私说明暂不可用，暂时无法注册。请稍后重试。');
+      });
+    return () => {
+      active = false;
+    };
+  }, [register, agreementRetry]);
   useEffect(() => {
     if (user && !reset) navigate(returnTo, { replace: true });
   }, [user, reset, returnTo, navigate]);
@@ -59,6 +122,10 @@ export function AuthPage() {
     return () => window.clearTimeout(timer);
   }, [remaining]);
   async function sendSms() {
+    if (register && !agreementVersions) {
+      setError('服务协议与隐私说明尚未就绪，请先重新加载协议。');
+      return;
+    }
     if (!smsEnabled) {
       setError('短信服务暂未配置，请使用已开通账户的密码登录。');
       return;
@@ -69,19 +136,40 @@ export function AuthPage() {
     }
     setSending(true);
     setError('');
+    const version = ++generation.current;
+    setChallenge('');
+    setCode('');
     try {
-      const result = await api.sms(
-        phone,
-        register ? 'register' : reset ? 'reset_password' : 'login',
-      );
+      const result = await api.smsChallenge(phone);
+      if (version !== generation.current) return;
       if (!result.challenge_id) throw new Error('短信服务未返回有效凭据，请稍后重试。');
-      setChallenge(result.challenge_id);
-      setRemaining(Math.max(0, Number(result.retry_after) || 0));
-      notify('验证码已发送，请查看手机短信。');
+      setVerification(result);
     } catch (e) {
-      setError(errorText(e));
+      if (version === generation.current) setError(errorText(e));
     } finally {
-      setSending(false);
+      if (version === generation.current) setSending(false);
+    }
+  }
+  async function verifyAndSend(token: string) {
+    if (!verification || sending) return;
+    const version = generation.current;
+    setSending(true);
+    try {
+      const result = await api.sms(phone, 'register', verification.challenge_id, token);
+      if (version !== generation.current) return;
+      setChallenge(result.challenge_id);
+      setRemaining(Math.max(60, Number(result.retry_after) || 60));
+      notify('验证码已提交发送，请查看手机短信。');
+    } catch (e) {
+      if (version === generation.current) {
+        setError(errorText(e));
+        setRemaining(60);
+      }
+    } finally {
+      if (version === generation.current) {
+        setSending(false);
+        setVerification(null);
+      }
     }
   }
   async function submit(event: FormEvent) {
@@ -103,12 +191,15 @@ export function AuthPage() {
       );
       return;
     }
-    if (needsSms && !/^\d{4,8}$/.test(code)) {
+    if (needsSms && !/^\d{6}$/.test(code)) {
       setError('请输入短信中的验证码。');
       return;
     }
-    if ((!needsSms || register || reset) && password.length < 8) {
-      setError('密码至少需要 8 位。');
+    if (
+      (!needsSms || register || reset) &&
+      (Array.from(password).length < 8 || new TextEncoder().encode(password).length > 72)
+    ) {
+      setError('密码至少需要 8 位，且不超过 72 字节。');
       return;
     }
     if (register && !agreed) {
@@ -124,8 +215,7 @@ export function AuthPage() {
         navigate('/login' + suffix, { replace: true });
       } else {
         if (register) {
-          const [terms, privacy] = await Promise.all([api.page('terms'), api.page('privacy')]);
-          if (!terms.published || !privacy.published || !terms.version || !privacy.version)
+          if (!agreementVersions)
             throw new Error('服务协议与隐私说明尚未配置正式版本，暂时无法注册。');
           await api.register({
             phone,
@@ -134,8 +224,8 @@ export function AuthPage() {
             password,
             agreement: {
               accepted: true,
-              terms_version: terms.version,
-              privacy_version: privacy.version,
+              terms_version: agreementVersions.terms,
+              privacy_version: agreementVersions.privacy,
             },
           });
         } else
@@ -207,6 +297,7 @@ export function AuthPage() {
                 type="button"
                 role="tab"
                 aria-selected={method === value}
+                disabled={value === 'sms' && !capabilities.sms_login}
                 className={method === value ? 'active' : ''}
                 onClick={() => {
                   setMethod(value);
@@ -218,9 +309,9 @@ export function AuthPage() {
             ))}
           </div>
         )}
-        {!smsEnabled && (
+        {needsSms && !smsEnabled && (
           <p className="auth-service-note" role="note">
-            当前测试环境使用已开通账户的密码登录。短信登录、注册与找回密码暂未启用。
+            {register ? '注册短信暂未启用，请稍后再试。' : '此短信功能暂未启用，请使用密码登录。'}
           </p>
         )}
         <form onSubmit={submit} className="member-form">
@@ -236,6 +327,11 @@ export function AuthPage() {
                 onChange={(e) => {
                   setPhone(e.target.value.replace(/\D/g, '').slice(0, 11));
                   setChallenge('');
+                  generation.current++;
+                  setCode('');
+                  setVerification(null);
+                  setSending(false);
+                  setError('');
                 }}
                 placeholder="请输入手机号"
                 required
@@ -252,7 +348,7 @@ export function AuthPage() {
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                   placeholder="输入验证码"
                   required
                   disabled={busy}
@@ -261,12 +357,34 @@ export function AuthPage() {
                   type="button"
                   className="text-button"
                   onClick={sendSms}
-                  disabled={!smsEnabled || sending || busy || remaining > 0}
+                  disabled={
+                    !smsEnabled ||
+                    sending ||
+                    busy ||
+                    remaining > 0 ||
+                    verification !== null ||
+                    (register && !agreementVersions)
+                  }
                 >
                   {sending ? '正在发送…' : remaining > 0 ? `${remaining}s 后重发` : '获取验证码'}
                 </button>
               </div>
             </label>
+          )}
+          {verification && (
+            <RegistrationVerification
+              challenge={verification}
+              sending={sending}
+              onToken={verifyAndSend}
+              onError={(message) => {
+                setError(message);
+                setVerification(null);
+              }}
+              onCancel={() => {
+                generation.current++;
+                setVerification(null);
+              }}
+            />
           )}
           {(!needsSms || register || reset) && (
             <label className="form-field">
@@ -300,6 +418,7 @@ export function AuthPage() {
                 type="checkbox"
                 checked={agreed}
                 onChange={(e) => setAgreed(e.target.checked)}
+                disabled={!agreementVersions || busy}
               />{' '}
               <span>
                 我已阅读并同意{' '}
@@ -313,6 +432,20 @@ export function AuthPage() {
               </span>
             </label>
           )}
+          {register && !agreementVersions && (
+            <div className="auth-service-note" role="status">
+              {agreementError || '正在加载服务协议与隐私说明…'}
+              {agreementError && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setAgreementRetry((v) => v + 1)}
+                >
+                  重新加载协议
+                </button>
+              )}
+            </div>
+          )}
           {error && (
             <p className="form-error" role="alert">
               {error}
@@ -320,7 +453,13 @@ export function AuthPage() {
           )}
           <button
             className="button-white full-width"
-            disabled={busy || (needsSms && !smsEnabled)}
+            disabled={
+              busy ||
+              sending ||
+              verification !== null ||
+              (needsSms && !smsEnabled) ||
+              (register && !agreementVersions)
+            }
             type="submit"
           >
             {busy ? '正在处理…' : register ? '注册账户' : reset ? '确认重置密码' : '登录'}

@@ -162,9 +162,11 @@ func (a *App) registerAuthMember(mux routeRegistrar) {
 		unavailable := func(w http.ResponseWriter, r *http.Request) {
 			fail(w, 503, "SMS_NOT_CONFIGURED", "短信服务尚未配置，请使用已创建账户的密码登录")
 		}
-		for _, path := range []string{"sms", "register", "password-reset"} {
-			mux.HandleFunc("POST /api/v1/auth/"+path, a.memberMutation(unavailable))
-		}
+		mux.HandleFunc("GET /api/v1/auth/capabilities", a.registrationCapabilities)
+		mux.HandleFunc("POST /api/v1/auth/sms/challenges", a.memberMutation(a.registrationChallenge))
+		mux.HandleFunc("POST /api/v1/auth/sms", a.memberMutation(a.registrationSend))
+		mux.HandleFunc("POST /api/v1/auth/register", a.memberMutation(a.registrationComplete))
+		mux.HandleFunc("POST /api/v1/auth/password-reset", a.memberMutation(unavailable))
 	}
 	mux.HandleFunc("GET /api/v1/me", func(w http.ResponseWriter, r *http.Request) {
 		if u, ok := a.requireUser(w, r); ok {

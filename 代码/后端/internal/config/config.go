@@ -13,6 +13,7 @@ import (
 )
 
 type Config struct {
+	Registration                                                        RegistrationConfig
 	MediaSafety                                                         MediaSafetyConfig
 	MediaR20                                                            MediaR20Config
 	Addr, DatabaseURL, RedisURL, MediaDir, PublicBaseURL, SessionSecret string
@@ -44,6 +45,11 @@ func Load() (Config, error) {
 	}
 	c := Config{Surface: surface, Addr: env("QINGYE_ADDR", env("HTTP_ADDR", addr)), DatabaseURL: os.Getenv("DATABASE_URL"), RedisURL: env("REDIS_URL", "redis://127.0.0.1:6381/0"), MediaDir: env("MEDIA_DIR", "./data/media"), PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), SessionSecret: os.Getenv("SESSION_SECRET"), AllowedOrigins: strings.Split(env("ALLOWED_ORIGINS", origin), ",")}
 	c.ProductCredentialKey = os.Getenv("PRODUCT_CREDENTIAL_KEY")
+	var registrationErr error
+	c.Registration, registrationErr = loadRegistration()
+	if registrationErr != nil {
+		return c, registrationErr
+	}
 	var safetyErr error
 	c.MediaSafety, safetyErr = loadMediaSafety()
 	if safetyErr != nil {
@@ -117,6 +123,9 @@ func (c Config) Defaults() Config {
 }
 
 func (c Config) Validate() error {
+	if err := c.Registration.validate(c.MediaSafety); err != nil {
+		return err
+	}
 	if err := c.MediaSafety.validate(); err != nil {
 		return err
 	}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	mediaapp "qingye/backend/internal/application/media"
+	registrationapp "qingye/backend/internal/application/registration"
 	securityapp "qingye/backend/internal/application/security"
 	configuration "qingye/backend/internal/config"
 	"qingye/backend/internal/infrastructure/security"
@@ -20,6 +21,7 @@ import (
 
 type Config = configuration.Config
 type App struct {
+	Registration *registrationapp.Service
 	ReadSafety   *securityapp.ReadService
 	HumanSafety  *securityapp.HumanService
 	MediaFiles   mediaapp.Files
