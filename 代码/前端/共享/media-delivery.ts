@@ -167,7 +167,13 @@ export async function resolveMediaImage(
     url.pathname !== `/api/v1/media/${reference.id}/file`
   )
     throw new ResponseCryptoError();
-  return goImage(url.pathname + url.search, signal, item.mime_type);
+  // A server-generated thumbnail may use JPEG even when its source is PNG/WebP.
+  // Its authenticated response MIME still must be an allowed raster image type.
+  return goImage(
+    url.pathname + url.search,
+    signal,
+    reference.variant === "original" ? item.mime_type : undefined,
+  );
 }
 
 let active = 0;

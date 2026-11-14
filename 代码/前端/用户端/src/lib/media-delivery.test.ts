@@ -121,6 +121,59 @@ describe('R24 图片访问计划', () => {
     result.dispose();
     expect(revoke).toHaveBeenCalledTimes(1);
   });
+  it.each(['local', 'encrypted'])('PNG原图的JPEG缩略图接受鉴权后的派生MIME：%s', async (mode) => {
+    const bytes = new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70, 73, 70]);
+    vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
+      if (input.includes('/response-crypto/init')) return fixtureInit();
+      if (input.includes('/access-plan'))
+        return fixtureEncrypted(input, init, {
+          data: {
+            server_time: '2026-11-15T00:00:00Z',
+            items: [source('go', { variant: 'thumb', expires_at: '2026-11-15T00:00:30Z' })],
+          },
+        });
+      return mode === 'local'
+        ? new Response(bytes, { headers: fixtureLocalImage(init, 'image/jpeg').headers })
+        : fixtureEncrypted(input, init, null, { contentType: 'image/jpeg', bytes });
+    });
+    const create = vi.spyOn(URL, 'createObjectURL');
+    const image = await resolveMediaImage(
+      '/api/v1/media/image-1/preview',
+      new AbortController().signal,
+    );
+    const blob = create.mock.calls[0][0] as Blob;
+    expect(blob.type).toBe('image/jpeg');
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(bytes);
+    image.dispose();
+  });
+  it.each([
+    { variant: 'original', mime: 'image/jpeg' },
+    { variant: 'thumb', mime: 'image/svg+xml' },
+    { variant: 'thumb', mime: 'text/html' },
+  ])('原图仍须匹配计划MIME，缩略图仍拒绝非允许图片：%j', async ({ variant, mime }) => {
+    vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
+      if (input.includes('/response-crypto/init')) return fixtureInit();
+      if (input.includes('/access-plan'))
+        return fixtureEncrypted(input, init, {
+          data: {
+            server_time: '2026-11-15T00:00:00Z',
+            items: [source('go', { variant, expires_at: '2026-11-15T00:00:30Z' })],
+          },
+        });
+      return fixtureEncrypted(input, init, null, {
+        contentType: mime,
+        bytes: new Uint8Array([1, 2, 3]),
+      });
+    });
+    const create = vi.spyOn(URL, 'createObjectURL');
+    await expect(
+      resolveMediaImage(
+        `/api/v1/media/image-1/file?variant=${variant}`,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow();
+    expect(create).not.toHaveBeenCalled();
+  });
   it('商品展示使用所见版本，不为冲突补取最新版本或自动重发', async () => {
     const fetcher = vi.fn(async (input: string, init: RequestInit = {}) =>
       input.includes('/response-crypto/init')
