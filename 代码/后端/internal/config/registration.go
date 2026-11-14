@@ -13,13 +13,14 @@ type RegistrationConfig struct {
 	Enabled                                                  bool
 	LoginEnabled                                             bool
 	LoginScheme                                              string
+	AccessMode                                               string
 	AccessKeyID, AccessKeySecret, SignName, Template, Scheme string
 	AllowedPhones                                            []string
 	DailyLimit                                               int
 }
 
 func loadRegistration() (RegistrationConfig, error) {
-	c := RegistrationConfig{AccessKeyID: os.Getenv("SMS_ACCESS_KEY_ID"), AccessKeySecret: os.Getenv("SMS_ACCESS_KEY_SECRET"), SignName: os.Getenv("SMS_SIGN_NAME"), Template: env("SMS_REGISTER_TEMPLATE", "100001"), Scheme: env("SMS_REGISTER_SCHEME", "qingye-test-register"), DailyLimit: 20}
+	c := RegistrationConfig{AccessMode: env("SMS_ACCESS_MODE", "allowlist"), AccessKeyID: os.Getenv("SMS_ACCESS_KEY_ID"), AccessKeySecret: os.Getenv("SMS_ACCESS_KEY_SECRET"), SignName: os.Getenv("SMS_SIGN_NAME"), Template: env("SMS_REGISTER_TEMPLATE", "100001"), Scheme: env("SMS_REGISTER_SCHEME", "qingye-test-register"), DailyLimit: 20}
 	var err error
 	c.Enabled, err = strconv.ParseBool(env("SMS_REGISTER_ENABLED", "false"))
 	if err != nil {
@@ -41,7 +42,22 @@ func loadRegistration() (RegistrationConfig, error) {
 	}
 	return c, nil
 }
-func (c RegistrationConfig) validate(s MediaSafetyConfig) error {
+func (c RegistrationConfig) validate(s MediaSafetyConfig, environment string) error {
+	mode := c.AccessMode
+	if mode == "" {
+		mode = "allowlist"
+	}
+	if mode != "allowlist" && mode != "public" {
+		return errors.New("SMS_ACCESS_MODE must be allowlist or public")
+	}
+	if mode == "public" {
+		if environment != "production" {
+			return errors.New("public SMS access requires APP_ENV=production")
+		}
+		if len(c.AllowedPhones) != 0 {
+			return errors.New("public SMS access requires empty SMS_ALLOWED_PHONES")
+		}
+	}
 	if !c.Enabled && !c.LoginEnabled {
 		return nil
 	}
@@ -57,8 +73,8 @@ func (c RegistrationConfig) validate(s MediaSafetyConfig) error {
 	if c.DailyLimit < 1 || c.DailyLimit > 1000 {
 		return errors.New("SMS_DAILY_LIMIT must be 1..1000")
 	}
-	if len(c.AllowedPhones) == 0 || len(c.AllowedPhones) > 10 {
-		return errors.New("test registration requires 1..10 explicit SMS_ALLOWED_PHONES")
+	if mode == "allowlist" && (len(c.AllowedPhones) == 0 || len(c.AllowedPhones) > 10) {
+		return errors.New("allowlist SMS access requires 1..10 explicit SMS_ALLOWED_PHONES")
 	}
 	for _, p := range c.AllowedPhones {
 		if !domain.ValidPhone(p) {

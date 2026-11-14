@@ -69,7 +69,7 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 		return nil, errors.New("Redis unavailable at startup")
 	}
 	r := &Runtime{HTTP: &httpapi.App{DB: db, Redis: client, Config: c}, Maintenance: &maintenance.Service{DB: db, MediaDir: c.MediaDir}, db: db, redis: client}
-	if c.Surface == "public" {
+	if c.Surface == "public" && c.MediaWorkersEnabled {
 		r.Purge = &purgeapp.Worker{Repository: &postgres.MediaPermanentStore{DB: db, NewID: security.NewID}, Local: &mediafiles.Store{Root: c.MediaDir}}
 	}
 	if c.MediaSafety.Enabled {
@@ -79,7 +79,7 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 	}
 	if (c.Registration.Enabled || c.Registration.LoginEnabled) && c.Surface == "public" {
 		provider := sms.NewAliyun(c.Registration)
-		r.HTTP.Registration = &registrationapp.Service{Store: postgres.RegistrationStore{DB: db}, Provider: provider, LoginProvider: provider.WithScheme(c.Registration.LoginScheme), Human: security.NewTurnstile(c.MediaSafety.Secret), Limits: cache.RegistrationLimiter{Client: client, DailyLimit: c.Registration.DailyLimit}, NewID: security.NewID, NewToken: security.RandomToken, Hash: security.TokenHash, MAC: security.RegistrationMAC(c.SessionSecret), PasswordHash: security.NewPasswordVerifier(2).Hash, AllowedPhones: c.Registration.AllowedPhones}
+		r.HTTP.Registration = &registrationapp.Service{Store: postgres.RegistrationStore{DB: db}, Provider: provider, LoginProvider: provider.WithScheme(c.Registration.LoginScheme), Human: security.NewTurnstile(c.MediaSafety.Secret), Limits: cache.RegistrationLimiter{Client: client, DailyLimit: c.Registration.DailyLimit}, NewID: security.NewID, NewToken: security.RandomToken, Hash: security.TokenHash, MAC: security.RegistrationMAC(c.SessionSecret), PasswordHash: security.NewPasswordVerifier(2).Hash, AllowedPhones: c.Registration.AllowedPhones, PublicAccess: c.Environment == "production" && c.Registration.AccessMode == "public"}
 	}
 	r.Chat = chatapp.New(&postgres.ChatStore{DB: db}, cache.Limiter{Client: client}, cache.ChatNotifier{Client: client}, c.Surface, security.NewID)
 	r.Recommendations = recommendationapp.New(&postgres.RecommendationStore{DB: db}, security.NewID, func(ctx context.Context, batch string) {
@@ -98,13 +98,18 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 			r.Close()
 			return nil, err
 		}
-		legacy, err := mediaobject.NewLegacyOSS(mediaobject.Config{Environment: mc.Environment, Endpoint: mc.OSSEndpoint, Bucket: mc.OSSBucket, AccessKeyID: mc.OSSAccessKeyID, AccessKeySecret: mc.OSSAccessKeySecret, TempDir: temp})
-		if err != nil {
-			r.Close()
-			return nil, err
+		legacyConfig := mediaobject.Config{Environment: mc.Environment, Endpoint: mc.OSSEndpoint, Bucket: mc.OSSBucket, AccessKeyID: mc.OSSAccessKeyID, AccessKeySecret: mc.OSSAccessKeySecret, TempDir: temp, LegacyObjectPrefix: mc.LegacyObjectPrefix}
+		files := &mediaobject.Files{ProtectedReads: c.MediaSafety.Enabled, Local: &mediafiles.Store{Root: c.MediaDir, MinFreeBytes: mc.MinFreeBytes, ThumbnailCommit: (&postgres.MediaPermanentStore{DB: db}).CommitThumbnail}, Staging: stage, Published: published, Repository: &postgres.MediaLifecycleStore{DB: db, NewID: security.NewID}, Environment: mc.Environment, TempDir: temp, NewID: security.NewID}
+		if mc.LegacyReadsEnabled {
+			reader, err := mediaobject.NewLegacyReader(legacyConfig)
+			if err != nil {
+				r.Close()
+				return nil, err
+			}
+			files.Legacy = &mediaobject.LegacyFiles{Repository: &postgres.MediaLifecycleStore{DB: db}, Store: reader, TempDir: temp}
 		}
-		r.HTTP.MediaFiles = &mediaobject.Files{ProtectedReads: c.MediaSafety.Enabled, Local: &mediafiles.Store{Root: c.MediaDir, MinFreeBytes: mc.MinFreeBytes, ThumbnailCommit: (&postgres.MediaPermanentStore{DB: db}).CommitThumbnail}, Staging: stage, Published: published, Repository: &postgres.MediaLifecycleStore{DB: db, NewID: security.NewID}, Environment: mc.Environment, TempDir: temp, NewID: security.NewID}
-		if c.Surface == "public" {
+		r.HTTP.MediaFiles = files
+		if c.Surface == "public" && c.MediaWorkersEnabled {
 			workerConfig := poolConfig.Copy()
 			workerConfig.MaxConns = 2
 			r.mediaDB, err = pgxpool.NewWithConfig(ctx, workerConfig)
@@ -114,7 +119,14 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 			}
 			r.Media = &mediaapp.Worker{Repository: &postgres.MediaLifecycleStore{DB: r.mediaDB, NewID: security.NewID}, Staging: stage, Published: published}
 			r.Purge.Repository = &postgres.MediaPermanentStore{DB: r.mediaDB, NewID: security.NewID}
-			r.Purge.Legacy = legacy
+			if mc.LegacyDeleteEnabled {
+				legacy, err := mediaobject.NewLegacyOSS(legacyConfig)
+				if err != nil {
+					r.Close()
+					return nil, err
+				}
+				r.Purge.Legacy = legacy
+			}
 		}
 	}
 	return r, nil

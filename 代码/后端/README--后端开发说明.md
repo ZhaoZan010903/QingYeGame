@@ -2,9 +2,9 @@
 
 这是与 React 前端联调的业务后端，采用 Gin 1.12.0、PostgreSQL、pgx 和 go-redis。PostgreSQL 保存商品、会话、审核及推荐事实；Redis 承担限流、短期聊天票据与租约、通知和可重建的推荐批次标识。用户与管理 API 独立运行，共用业务数据，分别校验会话身份范围。
 
-152 测试服务器的用户入口为 `https://152.136.252.204:5179`，管理入口为 `https://152.136.252.204:5181`；API 分别只监听回环地址5180、5182。HTTPS 已启用，Cookie 使用 Secure。原型5178继续保留，未切换8.140生产站。分层决策、权限及资源边界见 [Gin分层与安全性能设计](../../文档/开发产出文档/ADR-GIN-LAYERS--Gin分层与安全性能设计.md)。
+152 测试服务器的用户入口为 `https://152.136.252.204:5179`，管理入口为 `https://152.136.252.204:5181`；API 分别只监听回环地址5180、5182。HTTPS 已启用，Cookie 使用 Secure；原型5178已停用并屏蔽。实际部署状态与生产授权以[协作约定](../../文档/计划/AGENTS--AI协作约定.md)及[发布记录](../../文档/计划/RELEASE--测试环境发布记录.md)为准。分层决策、权限及资源边界见 [Gin分层与安全性能设计](../../文档/开发产出文档/ADR-GIN-LAYERS--Gin分层与安全性能设计.md)。
 
-当前不包含订单、支付、余额、自动租期或短信供应商。短信相关接口明确返回不可用，使用受控创建的测试账号验证密码登录、收藏、发布及审核。用户2026年11月11日确认：账号出售按元、时日租号按元/日、周月租号按元/月；业务单位对应 `account/day/month`。原始报价、分类和载荷继续保留，R5按确认规则回填有效报价；无法建立有效报价的异常条目不参与预算和价格排序，不擅自造价。
+当前不包含订单、支付、余额或自动租期。短信已接入阿里云PNVS，注册与登录分别配置，默认关闭；测试环境仅对白名单开放。用户2026年11月11日确认：账号出售按元、时日租号按元/日、周月租号按元/月；业务单位对应 `account/day/month`。原始报价、分类和载荷继续保留，R5按确认规则回填有效报价；无法建立有效报价的异常条目不参与预算和价格排序，不擅自造价。后续多租期报价以R21-2设计及实际接口为准。
 
 ## 构建与启动
 
@@ -35,6 +35,11 @@ go build -tags=nomsgpack -trimpath -ldflags="-s -w" -o qingye ./cmd/qingye
 | 字段 | 作用与默认值 |
 | --- | --- |
 | `APP_SURFACE` | `public`（默认）或 `admin`；决定路由、会话身份范围及后台任务归属。 |
+| `APP_ENV` | `test`（默认）、`acceptance` 或 `production`；生产环境启用更严格的安全配置校验。 |
+| `SMS_ACCESS_MODE` | `allowlist`（默认）或 `public`；公开模式必须同时设置 `APP_ENV=production`，且 `SMS_ALLOWED_PHONES` 留空。 |
+| `SMS_REGISTER_ENABLED` / `SMS_LOGIN_ENABLED` | 分别控制注册、登录短信能力，默认均为 `false`；设置公开模式不会自动启用发送。 |
+| `SMS_ALLOWED_PHONES` | 白名单模式启用短信时必须设置1—10个有效手机号；不设置不会自动开放。 |
+| `SMS_DAILY_LIMIT` | 注册与登录共享的滚动24小时全站发送预算，默认20，范围1—1000；人机验证、每手机/IP/浏览器限制及并发预算另外保留。 |
 | `QINGYE_ADDR` | 用户API默认 `127.0.0.1:5180`，管理API默认 `127.0.0.1:5182`，由同机反向代理提供HTTPS入口。 |
 | `DATABASE_URL` | 专用 PostgreSQL 连接地址，必填。 |
 | `DB_MAX_CONNS` | 每进程数据库连接池上限，默认5，范围1—50。两个API进程的连接预算分别计算。 |
@@ -43,6 +48,10 @@ go build -tags=nomsgpack -trimpath -ldflags="-s -w" -o qingye ./cmd/qingye
 | `MAX_CONCURRENT_REQUESTS` | 每进程普通HTTP请求容量，默认128，范围1—2048；满载返回503及重试提示。 |
 | `REQUEST_TIMEOUT` | 普通API上下文期限，默认 `15s`，范围 `1s`—`60s`；数据库等待也受取消信号约束。 |
 | `MEDIA_DIR` | 受控图片存储根目录，由服务账号读写，不直接映射为公开静态目录。 |
+| `MEDIA_WORKERS_ENABLED` | 环境读取默认 `true`；生产导入核验期间可明确设为 `false` 暂停媒体清理与生命周期任务，不影响聊天或推荐任务。 |
+| `MEDIA_LEGACY_OSS_READ_ENABLED` | 默认 `false`；历史图使用已验证的OSS副本读取，要求同时开启R20存储和图片下载保护。不能替代副本登记和完整性校验。 |
+| `MEDIA_LEGACY_OBJECT_PREFIX` | 默认空；仅当APP_ENV与R20均为production时允许精确填写`qingye-test/media/`，接管已核验的`legacy/<64hex>`商品原图；不覆盖旧`images/`文件，不改变新R20生产路径。 |
+| `MEDIA_LEGACY_OSS_DELETE_ENABLED` | 默认`true`；生产接管后测试站显式设`false`并配合OSS测试来源删除Deny。禁用时清理任务保留待重试，不把原图标为物理删除；生产沿用引用检查及精确键清理。 |
 | `PUBLIC_BASE_URL` | 对外前端地址；用户端使用HTTPS 5179，管理端使用HTTPS 5181。媒体仍使用相对API路径。 |
 | `ALLOWED_ORIGINS` | 逗号分隔的完整HTTP(S)来源，不能使用通配符、路径、查询串或用户信息；管理端仅配置管理来源。 |
 | `SESSION_SECRET` | 至少32字符的随机密钥，用于访客签名。登录会话使用独立随机令牌，数据库只存令牌散列。 |
@@ -52,7 +61,9 @@ go build -tags=nomsgpack -trimpath -ldflags="-s -w" -o qingye ./cmd/qingye
 | `CHAT_WT_CERT` / `CHAT_WT_KEY` | WebTransport证书及私钥文件路径，仅服务账号可读取。 |
 | `CHAT_WT_PIN_CERTIFICATE` | 当前可信IP证书部署为 `false`；自签证书的隔离验证另按部署说明配置。 |
 
-配置在建立监听前验证，非法范围直接阻止启动。`SMS_MODE` 仅为部署示例中的禁用说明，本版没有可通过此变量启用短信的实现。
+配置在建立监听前验证，非法范围直接阻止启动。`APP_ENV=production` 要求 `SECURE_COOKIES=true`、非空且全部为HTTPS的精确来源、`MEDIA_SAFETY_ENABLED=true`，并禁止 `CHAT_WT_PIN_CERTIFICATE=true`；启用R20存储时还必须设置 `MEDIA_R20_ENVIRONMENT=production`，不能操作测试存储前缀。这些约束不改变测试/验收环境的本机HTTP能力。`SMS_MODE` 不是有效的短信启用开关。
+
+公开短信需明确配置 `APP_ENV=production` 与 `SMS_ACCESS_MODE=public`，删除白名单配置，再独立开启需要的注册/登录能力；也可以先配置公开模式并保持两项能力关闭。注册和登录使用各自已配置的供应商方案，模板仍为100001、方案须互不相同。必须配置真实Turnstile密钥与精确主机名，现有共享预算、并发认领和结果不明时不自动重发的规则保持。生产注册前需发布正式 `terms` / `privacy`；后端在事务内核对并记录用户同意的版本，测试环境说明不能代替正式协议。
 
 普通请求、健康检查和聊天连接采用不同容量约束：健康检查固定2个并发槽，满载返回 `HEALTH_BUSY`；密码比较固定2个并发槽，满载返回 `LOGIN_BUSY`；聊天长连接由票据和租约限制。媒体及上传请求仍占普通HTTP容量，使用独立60秒上下文期限。HTTP服务器另设请求头5秒、读取30秒、写入60秒、空闲60秒超时和16 KiB请求头限制，文件上下文期限不会取消这些网络层限制。
 

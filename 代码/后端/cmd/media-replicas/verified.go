@@ -20,6 +20,7 @@ type importOptions struct {
 	Manifest, Hashes, Receipt, Success, Bucket, Prefix string
 	Count                                              int
 	Apply                                              bool
+	ProductionTakeover                                 bool
 }
 type replicaRecord struct {
 	MediaID               string    `json:"media_id"`
@@ -37,28 +38,43 @@ type replicaRecord struct {
 	VerifiedAt            time.Time `json:"verified_at"`
 	DatabaseSHA           string    `json:"database_sha256"`
 	DatabaseHashAvailable bool      `json:"database_hash_available"`
+	SourceObjectKey       string    `json:"source_object_key,omitempty"`
+	SourceETag            string    `json:"source_etag,omitempty"`
+	CopySourceIfMatch     string    `json:"copy_source_if_match,omitempty"`
+	TargetETag            string    `json:"target_etag,omitempty"`
+	CopiedCRC64           string    `json:"copied_crc64,omitempty"`
 }
 type completionReceipt struct {
-	CompletedAt      time.Time `json:"completed_at"`
-	Status           string    `json:"status"`
-	Bucket           string    `json:"bucket"`
-	Prefix           string    `json:"prefix"`
-	Region           string    `json:"region"`
-	VerifiedFiles    int       `json:"verified_files"`
-	VerifiedBytes    int64     `json:"verified_bytes"`
-	ACL              string    `json:"all_object_acls"`
-	SourcePreserved  bool      `json:"source_files_preserved"`
-	SourceChecks     int       `json:"source_stat_checks"`
-	CodeModified     bool      `json:"business_code_modified"`
-	DatabaseModified bool      `json:"business_database_modified"`
-	ThumbnailsCopied bool      `json:"derived_thumbnail_cache_copied"`
-	Verification     []string  `json:"verification"`
+	CompletedAt          time.Time `json:"completed_at"`
+	Status               string    `json:"status"`
+	Bucket               string    `json:"bucket"`
+	Prefix               string    `json:"prefix"`
+	Region               string    `json:"region"`
+	VerifiedFiles        int       `json:"verified_files"`
+	VerifiedBytes        int64     `json:"verified_bytes"`
+	ACL                  string    `json:"all_object_acls"`
+	SourcePreserved      bool      `json:"source_files_preserved"`
+	SourceChecks         int       `json:"source_stat_checks"`
+	SourceHeadChecks     int       `json:"source_head_checks,omitempty"`
+	SourceManifestSHA    string    `json:"source_manifest_sha256,omitempty"`
+	SourcePrefix         string    `json:"source_prefix,omitempty"`
+	ReferenceEnvironment string    `json:"reference_environment,omitempty"`
+	StorageMutations     int       `json:"storage_mutations"`
+	ProductImageOrderSHA string    `json:"product_image_order_sha256,omitempty"`
+	CodeModified         bool      `json:"business_code_modified"`
+	DatabaseModified     bool      `json:"business_database_modified"`
+	ThumbnailsCopied     bool      `json:"derived_thumbnail_cache_copied"`
+	Verification         []string  `json:"verification"`
 }
 type verifiedManifest struct {
-	Records        []replicaRecord
-	SHA256         string
-	Bytes          int64
-	Legacy, Images int
+	Records            []replicaRecord
+	SHA256             string
+	Bytes              int64
+	Legacy, Images     int
+	ProductionTakeover bool
+	SourceRecords      int
+	SourceBytes        int64
+	Order              map[string]productImageOrder
 }
 
 var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -124,10 +140,10 @@ func decodeObject(data []byte, target any) error {
 func loadVerified(options importOptions) (verifiedManifest, error) {
 	out := verifiedManifest{}
 	if !bucketNamePattern.MatchString(options.Bucket) || options.Count < 1 || options.Count > 100000 ||
-		(options.Prefix != "qingye-test/media/" && options.Prefix != "qingye-acceptance/media/") {
+		(options.Prefix != "qingye-test/media/" && options.Prefix != "qingye-acceptance/media/" && options.Prefix != "qingye-production/media/") {
 		return out, errors.New("invalid explicit import scope")
 	}
-	if options.Prefix == "qingye-test/media/" && options.Count != 48345 {
+	if options.Prefix == "qingye-test/media/" && !options.ProductionTakeover && options.Count != 48345 {
 		return out, errors.New("test copy requires the complete bound snapshot")
 	}
 	// All four files are a single completed private evidence bundle. No symlink,
@@ -180,7 +196,7 @@ func loadVerified(options importOptions) (verifiedManifest, error) {
 	if err = decodeObject(rawReceipt, &receiptFields); err != nil {
 		return out, errors.New("invalid completion receipt")
 	}
-	for _, key := range []string{"completed_at", "status", "bucket", "prefix", "region", "verified_files", "verified_bytes", "all_object_acls", "source_files_preserved", "source_stat_checks", "business_code_modified", "business_database_modified", "derived_thumbnail_cache_copied", "verification"} {
+	for _, key := range []string{"completed_at", "status", "bucket", "prefix", "region", "verified_files", "verified_bytes", "all_object_acls", "source_files_preserved", "business_code_modified", "business_database_modified", "derived_thumbnail_cache_copied", "verification"} {
 		value, exists := receiptFields[key]
 		if !exists || string(value) == "null" {
 			return out, errors.New("incomplete completion receipt")
@@ -189,6 +205,23 @@ func loadVerified(options importOptions) (verifiedManifest, error) {
 	var receipt completionReceipt
 	if err = json.Unmarshal(rawReceipt, &receipt); err != nil {
 		return out, errors.New("invalid completion receipt")
+	}
+	serverCopy := receipt.Status == "server_side_copy_complete"
+	takeover := receipt.Status == "production_takeover_verified"
+	if takeover != options.ProductionTakeover {
+		return out, errors.New("production takeover requires an explicit matching mode")
+	}
+	modeFields := []string{"source_stat_checks"}
+	if serverCopy || takeover {
+		modeFields = []string{"source_head_checks", "source_manifest_sha256", "source_prefix"}
+	}
+	if takeover {
+		modeFields = append(modeFields, "reference_environment", "storage_mutations", "product_image_order_sha256")
+	}
+	for _, key := range modeFields {
+		if value, ok := receiptFields[key]; !ok || string(value) == "null" {
+			return out, errors.New("incomplete copy verification scope")
+		}
 	}
 	marker, err := readBounded(options.Success, 4096)
 	if err != nil {
@@ -199,7 +232,25 @@ func loadVerified(options importOptions) (verifiedManifest, error) {
 		return out, errors.New("completion marker is not bound to the receipt")
 	}
 	required := map[string]bool{"source_sha256": false, "upload_content_md5": false, "put_crc64": false, "head_length_crc64_sha256_metadata": false, "get_object_acl": false, "source_preservation": false, "product_image_order_mapping": false}
+	if serverCopy {
+		if options.Prefix != "qingye-production/media/" || receipt.SourcePrefix != "qingye-test/media/" ||
+			!digestPattern.MatchString(receipt.SourceManifestSHA) || receipt.SourceHeadChecks != options.Count || receipt.SourceChecks != 0 {
+			return out, errors.New("invalid production server-side copy scope")
+		}
+		required = map[string]bool{"source_manifest_sha256": false, "source_head_size_crc64_sha256_metadata": false, "copy_source_etag": false, "target_head_size_crc64_sha256_metadata": false, "get_object_acl": false, "source_preservation": false, "product_image_order_mapping": false}
+	}
+	if takeover {
+		if options.Prefix != "qingye-test/media/" || receipt.SourcePrefix != options.Prefix || receipt.ReferenceEnvironment != "production" ||
+			!digestPattern.MatchString(receipt.SourceManifestSHA) || !digestPattern.MatchString(receipt.ProductImageOrderSHA) ||
+			receipt.SourceHeadChecks != options.Count || receipt.SourceChecks != 0 || receipt.StorageMutations != 0 {
+			return out, errors.New("invalid production takeover scope")
+		}
+		required = map[string]bool{"source_manifest_sha256": false, "source_head_size_crc64_sha256_metadata": false, "get_object_acl": false, "source_preservation": false, "product_image_order_mapping": false}
+	}
 	for _, value := range receipt.Verification {
+		if (serverCopy || takeover) && (value == "upload_content_md5" || value == "put_crc64" || (takeover && (value == "copy_source_etag" || value == "target_head_size_crc64_sha256_metadata"))) {
+			return out, errors.New("server-side copy cannot claim a re-upload verification")
+		}
 		if _, ok := required[value]; ok {
 			required[value] = true
 		}
@@ -209,13 +260,31 @@ func loadVerified(options importOptions) (verifiedManifest, error) {
 			return out, errors.New("copy verification is incomplete")
 		}
 	}
-	if receipt.Status != "snapshot_copy_complete" || receipt.Bucket != options.Bucket || receipt.Prefix != options.Prefix || receipt.Region != "cn-beijing" ||
-		receipt.VerifiedFiles != options.Count || receipt.VerifiedBytes < 1 || receipt.SourceChecks != options.Count || receipt.ACL != "private" ||
+	if (!serverCopy && !takeover && (receipt.Status != "snapshot_copy_complete" || receipt.SourceChecks != options.Count)) || receipt.Bucket != options.Bucket || receipt.Prefix != options.Prefix || receipt.Region != "cn-beijing" ||
+		receipt.VerifiedFiles != options.Count || receipt.VerifiedBytes < 1 || receipt.ACL != "private" ||
 		!receipt.SourcePreserved || receipt.CodeModified || receipt.DatabaseModified || receipt.ThumbnailsCopied {
 		return out, errors.New("copy completion scope mismatch")
 	}
-	if options.Prefix == "qingye-test/media/" && receipt.VerifiedBytes != 26845180398 {
+	if options.Prefix == "qingye-test/media/" && !takeover && receipt.VerifiedBytes != 26845180398 {
 		return out, errors.New("test copy byte total mismatch")
+	}
+	var sources map[string]replicaRecord
+	if serverCopy || takeover {
+		sources, err = loadCopySources(parent, receipt, hashes)
+		if err != nil {
+			return out, err
+		}
+		out.SourceRecords = len(sources)
+		for _, source := range sources {
+			out.SourceBytes += source.Size
+		}
+	}
+	if takeover {
+		out.Order, err = loadTakeoverOrder(parent, receipt, hashes, options.Count)
+		if err != nil {
+			return out, err
+		}
+		out.ProductionTakeover = true
 	}
 	info, err := os.Lstat(options.Manifest)
 	if err != nil {
@@ -244,6 +313,16 @@ func loadVerified(options importOptions) (verifiedManifest, error) {
 		if err = validateRecord(record, options, receipt.CompletedAt); err != nil {
 			return out, err
 		}
+		if serverCopy {
+			if err = validateCopiedRecord(record, sources); err != nil {
+				return out, err
+			}
+		}
+		if takeover {
+			if err = validateTakeoverRecord(record, sources, out.Order); err != nil {
+				return out, err
+			}
+		}
 		if ids[record.MediaID] || keys[record.StorageKey] {
 			return out, errors.New("duplicate verified identity")
 		}
@@ -264,7 +343,7 @@ func loadVerified(options importOptions) (verifiedManifest, error) {
 	if out.SHA256 != hashes[names[0]] || len(out.Records) != options.Count || out.Bytes != receipt.VerifiedBytes {
 		return out, errors.New("manifest content does not match completed copy")
 	}
-	if options.Prefix == "qingye-test/media/" && (out.Legacy != 48332 || out.Images != 13) {
+	if options.Prefix == "qingye-test/media/" && !takeover && (out.Legacy != 48332 || out.Images != 13) {
 		return out, errors.New("test copy source counts mismatch")
 	}
 	return out, nil

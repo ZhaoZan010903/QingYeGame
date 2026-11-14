@@ -39,7 +39,7 @@ func (r *Runtime) Serve(parent context.Context) error {
 	start := func(fn func()) { jobs.Add(1); go func() { defer jobs.Done(); fn() }() }
 	// 双进程共用数据库，只有public进程运行周期任务，避免重复重算。
 	if r.HTTP.Config.Surface == "public" {
-		if r.Purge != nil {
+		if r.HTTP.Config.MediaWorkersEnabled && r.Purge != nil {
 			start(func() {
 				for ctx.Err() == nil {
 					done, err := r.Purge.RunOnce(ctx)
@@ -56,7 +56,7 @@ func (r *Runtime) Serve(parent context.Context) error {
 				}
 			})
 		}
-		if r.Media != nil {
+		if r.HTTP.Config.MediaWorkersEnabled && r.Media != nil {
 			start(func() {
 				runJob(ctx, 5*time.Minute, time.Minute, true, func(job context.Context) error {
 					_, err := mediaobject.CleanupSpool(filepath.Join(r.HTTP.Config.MediaDir, "r20-tmp"), time.Now())
@@ -84,15 +84,17 @@ func (r *Runtime) Serve(parent context.Context) error {
 				}
 			})
 		}
-		start(func() {
-			runJob(ctx, 5*time.Minute, 45*time.Second, true, func(job context.Context) error {
-				result, err := r.Maintenance.CleanupDrafts(job, 100)
-				if result.Expired > 0 || result.Removed > 0 {
-					slog.Info("draft cleanup completed", "expired", result.Expired, "removed_uploads", result.Removed)
-				}
-				return err
+		if r.HTTP.Config.MediaWorkersEnabled {
+			start(func() {
+				runJob(ctx, 5*time.Minute, 45*time.Second, true, func(job context.Context) error {
+					result, err := r.Maintenance.CleanupDrafts(job, 100)
+					if result.Expired > 0 || result.Removed > 0 {
+						slog.Info("draft cleanup completed", "expired", result.Expired, "removed_uploads", result.Removed)
+					}
+					return err
+				})
 			})
-		})
+		}
 		start(func() { r.Recommendations.RunItemCF(ctx) })
 		start(func() {
 			runJob(ctx, 15*time.Second, 8*time.Second, false, func(job context.Context) error { return r.Chat.Dispatch(job) })

@@ -18,9 +18,10 @@ type Config struct {
 	MediaR20                                                            MediaR20Config
 	Addr, DatabaseURL, RedisURL, MediaDir, PublicBaseURL, SessionSecret string
 	ProductCredentialKey                                                string
-	Surface                                                             string
+	Surface, Environment                                                string
 	AllowedOrigins                                                      []string
 	SecureCookies                                                       bool
+	MediaWorkersEnabled                                                 bool
 	MaxUploadBytes                                                      int64
 	ChatWTAddr, ChatWTURL, ChatWTCert, ChatWTKey                        string
 	ChatWTPinCertificate                                                bool
@@ -43,7 +44,7 @@ func Load() (Config, error) {
 	if surface == "admin" {
 		addr, origin = "127.0.0.1:5182", "http://127.0.0.1:5181"
 	}
-	c := Config{Surface: surface, Addr: env("QINGYE_ADDR", env("HTTP_ADDR", addr)), DatabaseURL: os.Getenv("DATABASE_URL"), RedisURL: env("REDIS_URL", "redis://127.0.0.1:6381/0"), MediaDir: env("MEDIA_DIR", "./data/media"), PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), SessionSecret: os.Getenv("SESSION_SECRET"), AllowedOrigins: strings.Split(env("ALLOWED_ORIGINS", origin), ",")}
+	c := Config{Surface: surface, Environment: env("APP_ENV", "test"), Addr: env("QINGYE_ADDR", env("HTTP_ADDR", addr)), DatabaseURL: os.Getenv("DATABASE_URL"), RedisURL: env("REDIS_URL", "redis://127.0.0.1:6381/0"), MediaDir: env("MEDIA_DIR", "./data/media"), PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), SessionSecret: os.Getenv("SESSION_SECRET"), AllowedOrigins: strings.Split(env("ALLOWED_ORIGINS", origin), ",")}
 	c.ProductCredentialKey = os.Getenv("PRODUCT_CREDENTIAL_KEY")
 	var registrationErr error
 	c.Registration, registrationErr = loadRegistration()
@@ -65,7 +66,7 @@ func Load() (Config, error) {
 	for _, item := range []struct {
 		key, value string
 		target     *bool
-	}{{"SECURE_COOKIES", env("SECURE_COOKIES", env("COOKIE_SECURE", "false")), &c.SecureCookies}, {"CHAT_WT_PIN_CERTIFICATE", env("CHAT_WT_PIN_CERTIFICATE", "false"), &c.ChatWTPinCertificate}} {
+	}{{"SECURE_COOKIES", env("SECURE_COOKIES", env("COOKIE_SECURE", "false")), &c.SecureCookies}, {"CHAT_WT_PIN_CERTIFICATE", env("CHAT_WT_PIN_CERTIFICATE", "false"), &c.ChatWTPinCertificate}, {"MEDIA_WORKERS_ENABLED", env("MEDIA_WORKERS_ENABLED", "true"), &c.MediaWorkersEnabled}} {
 		value, err := strconv.ParseBool(item.value)
 		if err != nil {
 			return c, fmt.Errorf("%s must be a boolean", item.key)
@@ -96,6 +97,12 @@ func Load() (Config, error) {
 }
 
 func (c Config) Defaults() Config {
+	if c.Environment == "" {
+		c.Environment = "test"
+	}
+	if c.Registration.AccessMode == "" {
+		c.Registration.AccessMode = "allowlist"
+	}
 	if c.Surface == "" {
 		c.Surface = "public"
 	}
@@ -123,7 +130,10 @@ func (c Config) Defaults() Config {
 }
 
 func (c Config) Validate() error {
-	if err := c.Registration.validate(c.MediaSafety); err != nil {
+	if c.Environment != "test" && c.Environment != "acceptance" && c.Environment != "production" {
+		return errors.New("APP_ENV must be test, acceptance or production")
+	}
+	if err := c.Registration.validate(c.MediaSafety, c.Environment); err != nil {
 		return err
 	}
 	if err := c.MediaSafety.validate(); err != nil {
@@ -131,6 +141,12 @@ func (c Config) Validate() error {
 	}
 	if err := c.MediaR20.validate(); err != nil {
 		return err
+	}
+	if c.MediaR20.LegacyReadsEnabled && !c.MediaSafety.Enabled {
+		return errors.New("MEDIA_LEGACY_OSS_READ_ENABLED requires MEDIA_SAFETY_ENABLED")
+	}
+	if c.MediaR20.LegacyObjectPrefix != "" && c.Environment != "production" {
+		return errors.New("MEDIA_LEGACY_OBJECT_PREFIX requires APP_ENV=production")
 	}
 	if c.ProductCredentialKey != "" {
 		key, err := base64.StdEncoding.DecodeString(c.ProductCredentialKey)
@@ -166,6 +182,23 @@ func (c Config) Validate() error {
 		u, err := url.Parse(strings.TrimSpace(origin))
 		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || strings.Contains(u.Host, "*") {
 			return errors.New("ALLOWED_ORIGINS must contain exact HTTP(S) origins")
+		}
+		if c.Environment == "production" && u.Scheme != "https" {
+			return errors.New("production ALLOWED_ORIGINS must use HTTPS")
+		}
+	}
+	if c.Environment == "production" {
+		if c.MediaR20.Enabled && c.MediaR20.Environment != "production" {
+			return errors.New("production requires MEDIA_R20_ENVIRONMENT=production when media storage is enabled")
+		}
+		if !c.SecureCookies || len(c.AllowedOrigins) == 0 {
+			return errors.New("production requires SECURE_COOKIES and exact HTTPS origins")
+		}
+		if !c.MediaSafety.Enabled {
+			return errors.New("production requires MEDIA_SAFETY_ENABLED")
+		}
+		if c.ChatWTPinCertificate {
+			return errors.New("production requires trusted TLS certificates without CHAT_WT_PIN_CERTIFICATE")
 		}
 	}
 	return nil

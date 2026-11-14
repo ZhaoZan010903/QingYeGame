@@ -1360,6 +1360,12 @@ button:disabled {
   line-height: 1.8;
   margin: 14px 0;
 }
+.auth-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
 .registration-complete {
   width: min(460px, calc(100vw - 32px));
 }

@@ -24,12 +24,14 @@ type ObjectRepository interface {
 
 var privateReads = newReadSlots(4, 64, 5*time.Second)
 
-// Files keeps chat/avatar/contact and historical media on their existing path.
+// Files keeps chat/avatar/contact local and optionally reads verified historical
+// product replicas. It retains the upload-capacity and resumable interfaces.
 type Files struct {
 	ProtectedReads       bool
 	Local                *mediafiles.Store
 	Staging, Published   medialifecycle.ObjectStore
 	Repository           ObjectRepository
+	Legacy               *LegacyFiles
 	Environment, TempDir string
 	NewID                func() string
 }
@@ -118,6 +120,12 @@ func (s *Files) RemoveRaw(key string) {
 }
 func (s *Files) Open(ctx context.Context, key, id string, thumbnail bool) (*media.File, error) {
 	if !strings.HasPrefix(key, "r20/") {
+		if s.Legacy != nil {
+			file, found, err := s.Legacy.Open(ctx, key, id)
+			if found || err != nil {
+				return file, err
+			}
+		}
 		return s.Local.Open(ctx, key, id, thumbnail)
 	}
 	// R20 stores one display image. The compatibility preview route reads the same object.
@@ -135,6 +143,19 @@ func (s *Files) Open(ctx context.Context, key, id string, thumbnail bool) (*medi
 	if o.Store != "staging" && o.Store != "oss" {
 		return nil, fault.New(fault.NotFound, "MEDIA_FILE_MISSING", "图片暂不可用")
 	}
+	store := s.Staging
+	if o.Store == "oss" {
+		store = s.Published
+	}
+	return privateRead(ctx, s.TempDir, o.Size, o.SHA256, o.MIME, func() (io.ReadCloser, error) { return store.Open(ctx, o.Key) })
+}
+
+// The shared bound covers both R20 and historical reads. The slot remains held
+// until the HTTP reader closes, so downloaded temporary files are bounded too.
+func privateRead(ctx context.Context, temp string, size int64, sha, mime string, open func() (io.ReadCloser, error)) (*media.File, error) {
+	if !validDigest(size, sha) {
+		return nil, ErrIntegrity
+	}
 	release, err := privateReads.acquire(ctx)
 	if err != nil {
 		return nil, err
@@ -145,26 +166,22 @@ func (s *Files) Open(ctx context.Context, key, id string, thumbnail bool) (*medi
 			release()
 		}
 	}()
-	store := s.Staging
-	if o.Store == "oss" {
-		store = s.Published
-	}
-	r, err := store.Open(ctx, o.Key)
+	r, err := open()
 	if err != nil {
 		return nil, fault.New(fault.Unavailable, "MEDIA_UNAVAILABLE", "图片暂不可用")
 	}
 	defer r.Close()
-	if err = os.MkdirAll(s.TempDir, 0700); err != nil {
+	if err = os.MkdirAll(temp, 0700); err != nil {
 		return nil, ErrStorage
 	}
-	f, err := os.CreateTemp(s.TempDir, "private-preview-*")
+	f, err := os.CreateTemp(temp, "private-preview-*")
 	if err != nil {
 		return nil, ErrStorage
 	}
 	closeFile := func() { f.Close(); os.Remove(f.Name()) }
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(r, o.Size+1))
-	if err != nil || n != o.Size || hex.EncodeToString(h.Sum(nil)) != o.SHA256 {
+	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(contextReader{ctx, r}, size+1))
+	if err != nil || n != size || hex.EncodeToString(h.Sum(nil)) != sha {
 		closeFile()
 		return nil, ErrIntegrity
 	}
@@ -173,7 +190,7 @@ func (s *Files) Open(ctx context.Context, key, id string, thumbnail bool) (*medi
 		return nil, ErrStorage
 	}
 	transferred = true
-	return &media.File{Reader: &temporaryReadFile{File: f, release: release}, MIME: o.MIME, Modified: time.Now()}, nil
+	return &media.File{Reader: &temporaryReadFile{File: f, release: release}, MIME: mime, Modified: time.Now()}, nil
 }
 
 type temporaryReadFile struct {

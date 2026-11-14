@@ -661,13 +661,13 @@ export const api = {
     writeState(state);
     return state.user;
   },
-  async authCapabilities(): Promise<{
+  async authCapabilities(signal?: AbortSignal): Promise<{
     registration_sms: boolean;
     sms_login: boolean;
     password_reset: boolean;
   }> {
     if (isDemo) return { registration_sms: false, sms_login: false, password_reset: false };
-    return unwrap(await request('/auth/capabilities'));
+    return unwrap(await request('/auth/capabilities', 'GET', undefined, signal));
   },
   async smsChallenge(
     phone: string,

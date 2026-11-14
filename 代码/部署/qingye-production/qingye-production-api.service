@@ -1,0 +1,28 @@
+[Unit]
+Description=QingYe production public API
+After=network.target qingye-production-postgres.service qingye-production-redis.service qingye-production-storage.service
+Requires=qingye-production-postgres.service qingye-production-redis.service qingye-production-storage.service
+
+[Service]
+Type=simple
+User=qingye-production
+Group=qingye-production
+WorkingDirectory=/opt/qingye-production/current
+EnvironmentFile=/etc/qingye-production/app.env
+Environment=GOMEMLIMIT=192MiB
+Environment=GOGC=75
+ExecStart=/opt/qingye-production/current/qingye-api serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=45
+MemoryHigh=224M
+MemoryMax=320M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/qingye-production/media
+PrivateTmp=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

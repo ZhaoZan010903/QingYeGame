@@ -40,6 +40,8 @@ type Service struct {
 	Hash, MAC       func(string) string
 	PasswordHash    func(context.Context, string) (string, error)
 	AllowedPhones   []string
+	// PublicAccess is only set after production configuration validation.
+	PublicAccess bool
 }
 type Session struct {
 	User    identity.User
@@ -57,7 +59,7 @@ func (s *Service) CreatePurpose(ctx context.Context, who domain.Subject, phone, 
 	if !domain.ValidPhone(phone) {
 		return domain.Challenge{}, fault.New(fault.Invalid, "INVALID_PHONE", "请输入有效的11位手机号")
 	}
-	allowed := false
+	allowed := s.PublicAccess
 	for _, p := range s.AllowedPhones {
 		if p == phone {
 			allowed = true

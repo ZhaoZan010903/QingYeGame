@@ -12,6 +12,9 @@ import (
 // MediaR20Config only enrolls new product uploads; legacy migration is separate.
 type MediaR20Config struct {
 	Enabled                                                            bool
+	LegacyReadsEnabled                                                 bool
+	LegacyDeleteEnabled                                                bool
+	LegacyObjectPrefix                                                 string
 	Environment                                                        string
 	MinFreeBytes                                                       int64
 	StageCapacityPath                                                  string
@@ -31,9 +34,24 @@ func loadMediaR20() (MediaR20Config, error) {
 	if err != nil {
 		return c, errors.New("MEDIA_R20_ENABLED must be boolean")
 	}
+	c.LegacyReadsEnabled, err = strconv.ParseBool(env("MEDIA_LEGACY_OSS_READ_ENABLED", "false"))
+	if err != nil {
+		return c, errors.New("MEDIA_LEGACY_OSS_READ_ENABLED must be boolean")
+	}
+	c.LegacyDeleteEnabled, err = strconv.ParseBool(env("MEDIA_LEGACY_OSS_DELETE_ENABLED", "true"))
+	if err != nil {
+		return c, errors.New("MEDIA_LEGACY_OSS_DELETE_ENABLED must be boolean")
+	}
+	c.LegacyObjectPrefix = os.Getenv("MEDIA_LEGACY_OBJECT_PREFIX")
 	return c, c.validate()
 }
 func (c MediaR20Config) validate() error {
+	if c.LegacyObjectPrefix != "" && (!c.Enabled || c.Environment != "production" || c.LegacyObjectPrefix != "qingye-test/media/") {
+		return errors.New("historical prefix takeover requires production R20 and exact historical prefix")
+	}
+	if c.LegacyReadsEnabled && !c.Enabled {
+		return errors.New("MEDIA_LEGACY_OSS_READ_ENABLED requires MEDIA_R20_ENABLED")
+	}
 	if !c.Enabled {
 		return nil
 	}

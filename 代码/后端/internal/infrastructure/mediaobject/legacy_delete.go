@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"qingye/backend/internal/application/mediapurge"
 	"regexp"
+	"strings"
 
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 )
@@ -13,8 +14,9 @@ import (
 var legacyReplicaKey = regexp.MustCompile(`^(legacy/[0-9a-f]{64}|images/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|webp))$`)
 
 type LegacyDeleter struct {
-	backend *ossBackend
-	prefix  string
+	backend    *ossBackend
+	prefix     string
+	legacyOnly bool
 }
 
 func LegacyPrefix(environment string) string {
@@ -29,18 +31,32 @@ func LegacyPrefix(environment string) string {
 	return ""
 }
 func NewLegacyOSS(c Config) (*LegacyDeleter, error) {
-	prefix := LegacyPrefix(c.Environment)
-	if prefix == "" {
-		return nil, errors.New("invalid legacy cleanup environment")
+	prefix, legacyOnly, err := legacyScope(c)
+	if err != nil {
+		return nil, err
 	}
 	store, err := NewOSS(c)
 	if err != nil {
 		return nil, err
 	}
-	return &LegacyDeleter{backend: store.backend.(*ossBackend), prefix: prefix}, nil
+	return &LegacyDeleter{backend: store.backend.(*ossBackend), prefix: prefix, legacyOnly: legacyOnly}, nil
 }
+
+// Only production may take ownership of the existing hash-addressed originals.
+// This scope is independent from new R20 uploads and excludes old images/ files.
+func legacyScope(c Config) (string, bool, error) {
+	prefix := LegacyPrefix(c.Environment)
+	if prefix == "" || (c.LegacyObjectPrefix != "" && (c.Environment != "production" || c.LegacyObjectPrefix != LegacyPrefix("test"))) {
+		return "", false, errors.New("invalid historical object scope")
+	}
+	if c.LegacyObjectPrefix != "" {
+		return c.LegacyObjectPrefix, true, nil
+	}
+	return prefix, false, nil
+}
+
 func (d *LegacyDeleter) DeleteReplica(ctx context.Context, o mediapurge.Object) error {
-	if !legacyReplicaKey.MatchString(o.StorageKey) || o.ObjectKey != d.prefix+o.StorageKey || o.Bucket != d.backend.bucket || o.MediaID == "" || !validDigest(o.Size, o.SHA256) || o.CRC64 == "" {
+	if !legacyReplicaKey.MatchString(o.StorageKey) || (d.legacyOnly && !strings.HasPrefix(o.StorageKey, "legacy/")) || o.ObjectKey != d.prefix+o.StorageKey || o.Bucket != d.backend.bucket || o.MediaID == "" || !validDigest(o.Size, o.SHA256) || o.CRC64 == "" {
 		return ErrIntegrity
 	}
 	// The final verified manifest is authoritative. HEAD metadata is checked again

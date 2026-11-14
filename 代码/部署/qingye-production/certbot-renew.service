@@ -1,0 +1,20 @@
+[Unit]
+Description=Renew QingYe production short-lived IP certificate
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 首次签发使用相同专用目录和webroot；renew沿用该lineage的签发配置。
+ExecStart=/opt/qingye-production/certbot/bin/certbot renew --config-dir /etc/qingye-production/letsencrypt --work-dir /var/lib/qingye-production/letsencrypt --logs-dir /var/log/qingye-production/letsencrypt --cert-name qingye-production-ip --quiet --no-random-sleep-on-renew --deploy-hook "/usr/bin/python3.11 /usr/local/lib/qingye-production/deploy-certificate.py"
+# 上次签发成功但部署失败时，即使本次尚未到续期窗口，也重试部署；证书未变化则不操作服务。
+ExecStartPost=/usr/bin/python3.11 /usr/local/lib/qingye-production/deploy-certificate.py
+TimeoutStartSec=10min
+StateDirectory=qingye-production/letsencrypt
+LogsDirectory=qingye-production/letsencrypt
+PrivateTmp=true
+UMask=0077
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/qingye-production /var/lib/qingye-production /var/log/qingye-production /run/qingye-production
+NoNewPrivileges=true

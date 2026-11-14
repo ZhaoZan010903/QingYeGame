@@ -20,6 +20,7 @@ import (
 
 type Config struct {
 	Environment, Endpoint, Bucket, AccessKeyID, AccessKeySecret, TempDir, CapacityPath string
+	LegacyObjectPrefix                                                                 string
 	MinFreeBytes                                                                       int64
 }
 

@@ -752,7 +752,7 @@ export function AdminDashboard() {
       )}
       <DashboardActions />
       <div className="dashboard-foot">
-        <span>当前数据来自测试站。</span>
+        <span>当前数据来自本站。</span>
         {publicSite && (
           <a href={publicSite} target="_blank" rel="noreferrer">
             打开用户网站 ↗

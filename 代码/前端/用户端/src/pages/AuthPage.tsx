@@ -28,7 +28,7 @@ export function AuthPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const { user, refresh } = useSession();
-  const { notify } = useUi();
+  const { notify, contact } = useUi();
   const register = location.pathname === '/register';
   const reset = location.pathname === '/forgot-password';
   const title = register ? '开启你的旅程' : reset ? '找回账户密码' : '欢迎回来';
@@ -52,6 +52,10 @@ export function AuthPage() {
     sms_login: false,
     password_reset: false,
   });
+  const [capabilitiesStatus, setCapabilitiesStatus] = useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
+  const [capabilitiesRetry, setCapabilitiesRetry] = useState(0);
   const [verification, setVerification] = useState<SmsChallenge | null>(null);
   const [agreementVersions, setAgreementVersions] = useState<{
     terms: number;
@@ -66,19 +70,38 @@ export function AuthPage() {
       ? capabilities.password_reset
       : capabilities.sms_login;
   const needsSms = register || reset || method === 'sms';
+  const resetUnavailable = reset && capabilitiesStatus === 'ready' && !capabilities.password_reset;
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
+    setCapabilitiesStatus('loading');
     void api
-      .authCapabilities()
+      .authCapabilities(AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]))
       .then((result) => {
-        if (active) setCapabilities(result);
+        if (active) {
+          setCapabilities(result);
+          setCapabilitiesStatus('ready');
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) setCapabilitiesStatus('error');
+      });
     return () => {
       active = false;
+      controller.abort();
       generation.current++;
     };
-  }, []);
+  }, [capabilitiesRetry]);
+  useEffect(() => {
+    if (
+      !register &&
+      !reset &&
+      params.get('method') === 'sms' &&
+      capabilitiesStatus === 'ready' &&
+      capabilities.sms_login
+    )
+      setMethod('sms');
+  }, [register, reset, params, capabilitiesStatus, capabilities.sms_login]);
   useEffect(() => {
     generation.current++;
     setVerification(null);
@@ -128,6 +151,10 @@ export function AuthPage() {
     return () => window.clearTimeout(timer);
   }, [remaining]);
   async function sendSms() {
+    if (capabilitiesStatus !== 'ready') {
+      setError('请先重新读取登录方式，再获取验证码。');
+      return;
+    }
     if (register && !agreementVersions) {
       setError('服务协议与隐私说明尚未就绪，请先重新加载协议。');
       return;
@@ -186,6 +213,10 @@ export function AuthPage() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError('');
+    if (needsSms && capabilitiesStatus !== 'ready') {
+      setError('请先重新读取登录方式，再继续操作。');
+      return;
+    }
     if (needsSms && !smsEnabled) {
       setError('短信服务暂未配置，请使用已开通账户的密码登录。');
       return;
@@ -304,7 +335,9 @@ export function AuthPage() {
         </header>
         <p className="muted">
           {reset
-            ? '验证手机号后设置新密码。'
+            ? resetUnavailable
+              ? '选择可用的登录方式，或联系平台客服协助。'
+              : '查看可用的账户找回方式。'
             : register
               ? '注册后即可收藏和提交账号资料。'
               : '登录后，继续你的收藏与发布。'}
@@ -317,7 +350,11 @@ export function AuthPage() {
                 type="button"
                 role="tab"
                 aria-selected={method === value}
-                disabled={busy || sending || (value === 'sms' && !capabilities.sms_login)}
+                disabled={
+                  busy ||
+                  sending ||
+                  (value === 'sms' && (capabilitiesStatus !== 'ready' || !capabilities.sms_login))
+                }
                 className={method === value ? 'active' : ''}
                 onClick={() => {
                   setMethod(value);
@@ -337,179 +374,224 @@ export function AuthPage() {
         {!register && !reset && method === 'sms' && (
           <p className="auth-sms-hint">已有账户验证后直接登录；新手机号验证后可继续注册。</p>
         )}
-        {needsSms && !smsEnabled && (
+        {capabilitiesStatus === 'loading' && (
+          <p className="auth-service-note" role="status">
+            正在读取登录方式…
+          </p>
+        )}
+        {capabilitiesStatus === 'error' && (
+          <div className="auth-service-note" role="alert">
+            <p>暂时无法读取登录方式，请重试。密码登录仍可使用。</p>
+            <button
+              type="button"
+              className="text-button"
+              disabled={busy || sending || verification !== null}
+              onClick={() => {
+                setError('');
+                setCapabilitiesRetry((value) => value + 1);
+              }}
+            >
+              重新读取登录方式
+            </button>
+          </div>
+        )}
+        {resetUnavailable && (
+          <div className="auth-service-note">
+            <p>自助找回密码暂未开放。</p>
+            <p>
+              {capabilities.sms_login
+                ? '已有账户可通过手机验证码登录；如需处理密码问题，请联系平台客服。'
+                : '如需找回账户，请联系平台客服协助。'}
+            </p>
+            <div className="auth-recovery-actions">
+              {capabilities.sms_login && (
+                <Link className="button-white" to={'/login' + suffix + '&method=sms'}>
+                  使用短信登录
+                </Link>
+              )}
+              <button type="button" className="button-outline" onClick={() => contact()}>
+                联系平台客服
+              </button>
+            </div>
+          </div>
+        )}
+        {!reset && capabilitiesStatus === 'ready' && needsSms && !smsEnabled && (
           <p className="auth-service-note" role="note">
             {register ? '注册短信暂未启用，请稍后再试。' : '此短信功能暂未启用，请使用密码登录。'}
           </p>
         )}
-        <form onSubmit={submit} className="member-form">
-          <label className="form-field">
-            手机号
-            <div className="phone-input">
-              <span>+86</span>
-              <input
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                value={phone}
-                onChange={(e) => {
-                  setPhone(e.target.value.replace(/\D/g, '').slice(0, 11));
-                  setChallenge('');
-                  generation.current++;
-                  setCode('');
-                  setVerification(null);
-                  setSending(false);
-                  setError('');
-                }}
-                placeholder="请输入手机号"
-                required
-                maxLength={11}
-                disabled={busy}
-              />
-            </div>
-          </label>
-          {needsSms && (
+        {(!reset || (capabilitiesStatus === 'ready' && capabilities.password_reset)) && (
+          <form onSubmit={submit} className="member-form">
             <label className="form-field">
-              短信验证码
-              <div className="input-action">
+              手机号
+              <div className="phone-input">
+                <span>+86</span>
                 <input
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="输入验证码"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={phone}
+                  onChange={(e) => {
+                    setPhone(e.target.value.replace(/\D/g, '').slice(0, 11));
+                    setChallenge('');
+                    generation.current++;
+                    setCode('');
+                    setVerification(null);
+                    setSending(false);
+                    setError('');
+                  }}
+                  placeholder="请输入手机号"
                   required
+                  maxLength={11}
                   disabled={busy}
                 />
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={sendSms}
-                  disabled={
-                    !smsEnabled ||
-                    sending ||
-                    busy ||
-                    remaining > 0 ||
-                    verification !== null ||
-                    (register && !agreementVersions)
-                  }
-                >
-                  {sending ? '正在发送…' : remaining > 0 ? `${remaining}s 后重发` : '获取验证码'}
-                </button>
               </div>
             </label>
-          )}
-          {verification && (
-            <RegistrationVerification
-              challenge={verification}
-              sending={sending}
-              onToken={verifyAndSend}
-              onError={(message) => {
-                setError(message);
-                setVerification(null);
-              }}
-              onCancel={() => {
-                generation.current++;
-                setVerification(null);
-              }}
-            />
-          )}
-          {(!needsSms || register || reset) && (
-            <label className="form-field">
-              {reset ? '新密码' : '密码'}
-              <div className="input-action">
+            {needsSms && (
+              <label className="form-field">
+                短信验证码
+                <div className="input-action">
+                  <input
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="输入验证码"
+                    required
+                    disabled={busy}
+                  />
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={sendSms}
+                    disabled={
+                      !smsEnabled ||
+                      capabilitiesStatus !== 'ready' ||
+                      sending ||
+                      busy ||
+                      remaining > 0 ||
+                      verification !== null ||
+                      (register && !agreementVersions)
+                    }
+                  >
+                    {sending ? '正在发送…' : remaining > 0 ? `${remaining}s 后重发` : '获取验证码'}
+                  </button>
+                </div>
+              </label>
+            )}
+            {verification && (
+              <RegistrationVerification
+                challenge={verification}
+                sending={sending}
+                onToken={verifyAndSend}
+                onError={(message) => {
+                  setError(message);
+                  setVerification(null);
+                }}
+                onCancel={() => {
+                  generation.current++;
+                  setVerification(null);
+                }}
+              />
+            )}
+            {(!needsSms || register || reset) && (
+              <label className="form-field">
+                {reset ? '新密码' : '密码'}
+                <div className="input-action">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete={register || reset ? 'new-password' : 'current-password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="至少 8 位密码"
+                    required
+                    minLength={8}
+                    maxLength={128}
+                    disabled={busy}
+                  />
+                  <button
+                    className="text-button"
+                    type="button"
+                    aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                    onClick={() => setShowPassword((v) => !v)}
+                  >
+                    {showPassword ? '隐藏' : '显示'}
+                  </button>
+                </div>
+              </label>
+            )}
+            {register && (
+              <label className="form-field">
+                确认密码
                 <input
                   type={showPassword ? 'text' : 'password'}
-                  autoComplete={register || reset ? 'new-password' : 'current-password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="至少 8 位密码"
-                  required
+                  autoComplete="new-password"
+                  value={passwordConfirm}
+                  onChange={(e) => setPasswordConfirm(e.target.value)}
+                  placeholder="再次输入密码"
                   minLength={8}
                   maxLength={128}
+                  required
                   disabled={busy}
                 />
-                <button
-                  className="text-button"
-                  type="button"
-                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
-                  onClick={() => setShowPassword((v) => !v)}
-                >
-                  {showPassword ? '隐藏' : '显示'}
-                </button>
+              </label>
+            )}
+            {register && (
+              <label className="agreement-check">
+                <input
+                  type="checkbox"
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  disabled={!agreementVersions || busy}
+                />{' '}
+                <span>
+                  我已阅读并同意{' '}
+                  <Link to="/help/terms" target="_blank">
+                    服务协议
+                  </Link>{' '}
+                  与{' '}
+                  <Link to="/help/privacy" target="_blank">
+                    隐私说明
+                  </Link>
+                </span>
+              </label>
+            )}
+            {register && !agreementVersions && (
+              <div className="auth-service-note" role="status">
+                {agreementError || '正在加载服务协议与隐私说明…'}
+                {agreementError && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setAgreementRetry((v) => v + 1)}
+                  >
+                    重新加载协议
+                  </button>
+                )}
               </div>
-            </label>
-          )}
-          {register && (
-            <label className="form-field">
-              确认密码
-              <input
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="new-password"
-                value={passwordConfirm}
-                onChange={(e) => setPasswordConfirm(e.target.value)}
-                placeholder="再次输入密码"
-                minLength={8}
-                maxLength={128}
-                required
-                disabled={busy}
-              />
-            </label>
-          )}
-          {register && (
-            <label className="agreement-check">
-              <input
-                type="checkbox"
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-                disabled={!agreementVersions || busy}
-              />{' '}
-              <span>
-                我已阅读并同意{' '}
-                <Link to="/help/terms" target="_blank">
-                  服务协议
-                </Link>{' '}
-                与{' '}
-                <Link to="/help/privacy" target="_blank">
-                  隐私说明
-                </Link>
-              </span>
-            </label>
-          )}
-          {register && !agreementVersions && (
-            <div className="auth-service-note" role="status">
-              {agreementError || '正在加载服务协议与隐私说明…'}
-              {agreementError && (
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={() => setAgreementRetry((v) => v + 1)}
-                >
-                  重新加载协议
-                </button>
-              )}
-            </div>
-          )}
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          <button
-            className="button-white full-width"
-            disabled={
-              busy ||
-              sending ||
-              verification !== null ||
-              (needsSms && !smsEnabled) ||
-              (register && !agreementVersions)
-            }
-            type="submit"
-          >
-            {busy ? '正在处理…' : register ? '注册账户' : reset ? '确认重置密码' : '登录'}
-            <span aria-hidden="true">↗</span>
-          </button>
-        </form>
+            )}
+            {error && (
+              <p className="form-error" role="alert">
+                {error}
+              </p>
+            )}
+            <button
+              className="button-white full-width"
+              disabled={
+                busy ||
+                sending ||
+                verification !== null ||
+                (needsSms && !smsEnabled) ||
+                (needsSms && capabilitiesStatus !== 'ready') ||
+                (register && !agreementVersions)
+              }
+              type="submit"
+            >
+              {busy ? '正在处理…' : register ? '注册账户' : reset ? '确认重置密码' : '登录'}
+              <span aria-hidden="true">↗</span>
+            </button>
+          </form>
+        )}
         {pendingRegistration && (
           <CompleteRegistration
             proof={pendingRegistration}

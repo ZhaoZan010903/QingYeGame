@@ -6,7 +6,6 @@ afterEach(() => {
 });
 it('注册能力由服务端返回，未启用的短信场景保持关闭', async () => {
   vi.stubEnv('VITE_DATA_MODE', 'api');
-  vi.stubEnv('VITE_SMS_ENABLED', 'true');
   const fetch = vi.fn().mockResolvedValue(
     new Response(
       JSON.stringify({
@@ -21,6 +20,26 @@ it('注册能力由服务端返回，未启用的短信场景保持关闭', asyn
     sms_login: false,
     password_reset: false,
   });
+});
+it('读取登录能力失败时保留错误，不把服务异常当作功能关闭', async () => {
+  vi.stubEnv('VITE_DATA_MODE', 'api');
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        code: 'SERVICE_UNAVAILABLE',
+        message: '登录服务暂时不可用',
+      }),
+      { status: 503 },
+    ),
+  );
+  vi.stubGlobal('fetch', fetch);
+  const { api } = await import('./api');
+  await expect(api.authCapabilities()).rejects.toMatchObject({
+    status: 503,
+    code: 'SERVICE_UNAVAILABLE',
+    message: '登录服务暂时不可用',
+  });
+  expect(fetch).toHaveBeenCalledTimes(1);
 });
 it('短信发送结果未知时不自动重试，也不返回伪成功凭据', async () => {
   vi.stubEnv('VITE_DATA_MODE', 'api');
@@ -74,18 +93,16 @@ it('短信登录使用独立用途，新手机号返回待注册状态', async (
 });
 it('短信登录成功才转换会员信息，不能把待注册响应当作会员', async () => {
   vi.stubEnv('VITE_DATA_MODE', 'api');
-  const fetch = vi
-    .fn()
-    .mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: {
-            status: 'authenticated',
-            user: { id: 'member', nickname: '清叶会员', role: 'member', enabled: true },
-          },
-        }),
-      ),
-    );
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        data: {
+          status: 'authenticated',
+          user: { id: 'member', nickname: '清叶会员', role: 'member', enabled: true },
+        },
+      }),
+    ),
+  );
   vi.stubGlobal('fetch', fetch);
   const { api } = await import('./api');
   const result = await api.smsLogin({

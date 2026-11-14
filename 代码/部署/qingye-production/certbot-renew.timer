@@ -1,0 +1,12 @@
+[Unit]
+Description=Check QingYe production six-day IP certificate twice daily
+
+[Timer]
+OnCalendar=*-*-* 00,12:00:00
+RandomizedDelaySec=30m
+Persistent=true
+# 两个续期模板安装为qingye-production-certbot-renew.service/.timer，避免覆盖系统Certbot任务。
+Unit=qingye-production-certbot-renew.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,26 @@
+[Unit]
+Description=QingYe production admin frontend on port 5181
+After=network.target qingye-production-admin-api.service
+
+[Service]
+Type=simple
+RuntimeDirectory=qingye-production/admin
+RuntimeDirectoryMode=0755
+StateDirectory=qingye-production/nginx/admin
+StateDirectoryMode=0755
+LogsDirectory=qingye-production/admin
+LogsDirectoryMode=0755
+ExecStartPre=/www/server/nginx/sbin/nginx -t -p /var/lib/qingye-production/nginx/admin/ -c /etc/qingye-production/admin-nginx.conf
+ExecStart=/www/server/nginx/sbin/nginx -p /var/lib/qingye-production/nginx/admin/ -c /etc/qingye-production/admin-nginx.conf -g "daemon off;"
+ExecReload=/www/server/nginx/sbin/nginx -t -p /var/lib/qingye-production/nginx/admin/ -c /etc/qingye-production/admin-nginx.conf
+ExecReload=/www/server/nginx/sbin/nginx -p /var/lib/qingye-production/nginx/admin/ -c /etc/qingye-production/admin-nginx.conf -s reload
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/qingye-production/admin /var/lib/qingye-production/nginx/admin /var/log/qingye-production/admin
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

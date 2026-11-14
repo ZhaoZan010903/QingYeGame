@@ -64,6 +64,25 @@ func TestVerifiedImportChecksCompleteBoundBundle(t *testing.T) {
 		t.Fatal("fixture must preserve preview default")
 	}
 }
+
+func TestProductionReplicaImportRequiresIndependentBoundPrefix(t *testing.T) {
+	o, records, receipt := fixture(t)
+	o.Bucket, o.Prefix = "qingye-production-bucket", "qingye-production/media/"
+	receipt.Bucket, receipt.Prefix = o.Bucket, o.Prefix
+	for i := range records {
+		records[i].Bucket = o.Bucket
+		records[i].ObjectKey = o.Prefix + records[i].StorageKey
+	}
+	writeFixture(t, o, records, receipt)
+	if _, err := loadVerified(o); err != nil {
+		t.Fatal("verified production scope rejected", err)
+	}
+	records[0].ObjectKey = "qingye-test/media/" + records[0].StorageKey
+	writeFixture(t, o, records, receipt)
+	if _, err := loadVerified(o); err == nil {
+		t.Fatal("production import accepted a test object")
+	}
+}
 func TestVerifiedJSONRejectsAmbiguousDuplicateFields(t *testing.T) {
 	for _, raw := range []string{`{"media_id":"one","media_id":"two"}`, `{"media_id":"one","MEDIA_ID":"two"}`, `{} {}`, `null`, `[]`} {
 		var record replicaRecord
