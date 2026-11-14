@@ -68,7 +68,7 @@ export function AdminPage() {
     {
       label: "日常工作",
       items: [
-        ["", "工作台", LayoutDashboard],
+        ["", "数据看板", LayoutDashboard],
         ["products", "商品管理", Package],
         ["reviews", "待审核", ClipboardCheck],
         ["chat", "在线咨询", MessageSquare],
@@ -155,7 +155,7 @@ export function AdminPage() {
             <div className="state-view">
               <h1>没有找到这个管理页面</h1>
               <Link className="button-white" to="/">
-                返回工作台
+                返回数据看板
               </Link>
             </div>
           )}

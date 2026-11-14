@@ -8,6 +8,7 @@ import (
 )
 
 type Repository interface {
+	Dashboard(context.Context, management.DashboardQuery) (map[string]any, error)
 	Products(context.Context, management.ProductQuery) (map[string]any, error)
 	Product(context.Context, string) (map[string]any, error)
 	SaveProduct(ctx context.Context, actor management.Actor, id string, in catalog.ProductInput) (map[string]any, error)
@@ -29,6 +30,16 @@ type Service struct {
 	store                  Repository
 	validateRecommendation func([]byte) error
 	defaultRecommendation  func() any
+}
+
+func (s *Service) Dashboard(ctx context.Context, actor management.Actor, in management.DashboardQuery) (map[string]any, error) {
+	if err := management.ValidateActor(actor); err != nil {
+		return nil, err
+	}
+	if err := management.ValidateDashboardQuery(in); err != nil {
+		return nil, err
+	}
+	return s.store.Dashboard(ctx, in)
 }
 
 func New(store Repository, validate func([]byte) error, defaults func() any) *Service {

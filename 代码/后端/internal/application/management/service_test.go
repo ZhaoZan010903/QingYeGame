@@ -12,6 +12,10 @@ func TestManagementServiceRechecksRoleBeforeRepository(t *testing.T) {
 	actor := management.Actor{ID: "m", Role: "member"}
 	actions := []func() error{
 		func() error {
+			_, e := service.Dashboard(context.Background(), actor, management.DashboardQuery{Days: 7, RankBy: "views"})
+			return e
+		},
+		func() error {
 			_, e := service.Products(context.Background(), actor, management.ProductQuery{Limit: 20})
 			return e
 		},
@@ -44,6 +48,10 @@ func TestManagementServicePreservesSelfProtection(t *testing.T) {
 func TestManagementValidationRunsBeforePersistence(t *testing.T) {
 	service := New(nil, nil, nil)
 	actor := management.Actor{ID: "admin", Role: "admin"}
+	_, dashboardErr := service.Dashboard(context.Background(), actor, management.DashboardQuery{Days: 365, RankBy: "views"})
+	if f, ok := fault.As(dashboardErr); !ok || f.Code != "INVALID_DASHBOARD_QUERY" {
+		t.Fatalf("dashboard validation did not run before repository: %v", dashboardErr)
+	}
 	_, err := service.SaveContact(context.Background(), actor, "", management.ContactInput{Name: "test", Channel: "url", Value: "javascript:alert(1)"})
 	f, ok := fault.As(err)
 	if !ok || f.Code != "INVALID_CONTACT" {

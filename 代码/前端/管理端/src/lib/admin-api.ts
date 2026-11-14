@@ -1,6 +1,11 @@
 import { idempotentRequest, imagePageFrom, productFrom, request } from "./api";
 import type { Product, ProductPage, User } from "../types";
 import type { DictionaryGroup, DictionaryKey } from "./dictionaries";
+import {
+  readDashboard,
+  type DashboardDays,
+  type RankingMetric,
+} from "./dashboard";
 
 export type AdminRecord = Record<string, any>;
 const unwrap = (response: AdminRecord): AdminRecord =>
@@ -15,11 +20,27 @@ export const canManage = (user: User | null | undefined) =>
 
 /** Admin requests always reach the server; there is no local or fixture-backed admin mode. */
 export const adminApi = {
+  async dashboard(
+    days: DashboardDays = 7,
+    rankBy: RankingMetric = "views",
+    signal?: AbortSignal,
+  ) {
+    const params = new URLSearchParams({ days: String(days), rank_by: rankBy });
+    return readDashboard(
+      unwrap(
+        await request(`/admin/dashboard?${params}`, "GET", undefined, signal),
+      ),
+      days,
+      rankBy,
+    );
+  },
   async mediaSync(id: string): Promise<AdminRecord> {
     return unwrap(await request(`${path(id)}/media-sync`));
   },
   async retryMediaSync(id: string, version: number): Promise<void> {
-    await request(`${path(id)}/media-sync/retry`, "POST", { expected_version: version });
+    await request(`${path(id)}/media-sync/retry`, "POST", {
+      expected_version: version,
+    });
   },
   async uploadRestriction(id: string): Promise<AdminRecord> {
     return unwrap(

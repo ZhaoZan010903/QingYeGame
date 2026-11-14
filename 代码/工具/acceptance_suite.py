@@ -361,7 +361,100 @@ class Suite:
         self.call("other", "POST", "/api/v1/auth/logout")
         self.call("other", "GET", "/api/v1/me", status=401)
         self.login("other")
+        self.dashboard_functional()
         self.state["functional_complete"] = True
+
+    def dashboard_contract(self, reply, days=7, rank_by="views"):
+        """Check one snapshot without logging titles, user details or raw bodies."""
+        data = reply.data
+        tag = f"dashboard {days}d {rank_by}"
+        statuses = {"draft", "pending", "publishing", "published", "rejected", "rejected_final", "offline", "sold", "rented"}
+        metrics = {"views", "favorites", "consultations"}
+        nonnegative = lambda values: all(type(value) is int and value >= 0 for value in values)
+        self.check(tag + " has only the approved aggregate sections", isinstance(data, dict) and set(data) == {
+            "generated_at", "timezone", "range", "products", "members", "todos", "engagement", "trend", "ranking"})
+        shapes = {
+            "range": {"days", "start_date", "end_date", "start_at", "end_at"},
+            "products": {"total", "visible", "sale", "rent", "trash", "statuses"},
+            "members": {"total", "enabled", "disabled", "new_in_period"},
+            "todos": {"pending_products", "publishing_products", "pending_nicknames", "waiting_conversations"},
+            "engagement": metrics, "ranking": {"by", "limit", "items"},
+        }
+        self.check(tag + " has strictly scoped fields", all(isinstance(data[key], dict) and set(data[key]) == keys for key, keys in shapes.items())
+                   and isinstance(data["products"]["statuses"], dict) and set(data["products"]["statuses"]) == statuses)
+        window, products, members, todos = (data[key] for key in ("range", "products", "members", "todos"))
+        start, end = (dt.date.fromisoformat(window[key]) for key in ("start_date", "end_date"))
+        generated = dt.datetime.fromisoformat(data["generated_at"].replace("Z", "+00:00"))
+        start_at, end_at = (dt.datetime.fromisoformat(window[key].replace("Z", "+00:00")) for key in ("start_at", "end_at"))
+        beijing = dt.timezone(dt.timedelta(hours=8))
+        self.check(tag + " uses inclusive Beijing calendar dates and one snapshot clock", data["timezone"] == "Asia/Shanghai"
+                   and window["days"] == days and (end - start).days == days - 1
+                   and all(value.tzinfo is not None for value in (generated, start_at, end_at))
+                   and start_at == dt.datetime.combine(start, dt.time.min, beijing)
+                   and end_at == generated and generated.astimezone(beijing).date() == end)
+        self.check(tag + " counts are nonnegative integers", nonnegative([value for key, value in products.items() if key != "statuses"])
+                   and all(nonnegative(values.values()) for values in (products["statuses"], members, todos, data["engagement"])))
+        self.check(tag + " inventory membership and todo counts reconcile", products["sale"] + products["rent"] == products["total"]
+                   and sum(products["statuses"].values()) == products["total"] and products["visible"] <= products["statuses"]["published"]
+                   and members["enabled"] + members["disabled"] == members["total"] and members["new_in_period"] <= members["total"]
+                   and todos["pending_products"] == products["statuses"]["pending"] and todos["publishing_products"] == products["statuses"]["publishing"])
+        trend = data["trend"]
+        self.check(tag + " contains every ordered day including zero buckets", isinstance(trend, list) and len(trend) == days
+                   and all(isinstance(row, dict) and set(row) == metrics | {"date", "new_members"}
+                           and row["date"] == (start + dt.timedelta(days=index)).isoformat()
+                           and nonnegative(row[key] for key in metrics | {"new_members"}) for index, row in enumerate(trend)))
+        self.check(tag + " daily series sum to the selected-period totals", all(sum(row[key] for row in trend) == data["engagement"][key] for key in metrics)
+                   and sum(row["new_members"] for row in trend) == members["new_in_period"])
+        ranking, items = data["ranking"], data["ranking"]["items"]
+        self.check(tag + " ranking is bounded and contains no private product fields", ranking["by"] == rank_by and ranking["limit"] == 10
+                   and isinstance(items, list) and len(items) <= 10
+                   and all(isinstance(row, dict) and set(row) == metrics | {"id", "product_code", "title", "trade_type", "rental_category", "status"}
+                           and all(isinstance(row[key], str) and bool(row[key]) for key in ("id", "product_code", "title"))
+                           and row["trade_type"] in ("sale", "rent") and row["status"] in statuses
+                           and nonnegative(row[key] for key in metrics) and row[rank_by] > 0 for row in items))
+        self.check(tag + " ranking is unique ordered and bounded by its aggregate", len({row["id"] for row in items}) == len(items)
+                   and items == sorted(items, key=lambda row: (-row[rank_by], row["product_code"], row["id"]))
+                   and all(sum(row[key] for row in items) <= data["engagement"][key] for key in metrics)
+                   and (len(items) == 10 or sum(row[rank_by] for row in items) == data["engagement"][rank_by]))
+        self.check(tag + " response cannot be cached", "no-store" in reply.headers.get("Cache-Control", "").lower())
+        return data
+
+    def dashboard_functional(self):
+        path = "/api/v1/admin/dashboard"
+        default = self.dashboard_contract(self.call("admin", "GET", path))
+        snapshots = {}
+        for days in (7, 30):
+            for rank_by in ("views", "favorites", "consultations"):
+                snapshots[days, rank_by] = self.dashboard_contract(self.call("admin", "GET", f"{path}?days={days}&rank_by={rank_by}"), days, rank_by)
+        current = snapshots[7, "views"]
+        self.check("dashboard defaults select seven days and views", default["range"]["days"] == 7 and default["ranking"]["by"] == "views")
+        self.check("dashboard ranking selection does not change its aggregate scope", all(
+            all(value[key] == snapshots[days, "views"][key] for key in ("products", "members", "todos", "engagement", "trend"))
+            for (days, _), value in snapshots.items()))
+        self.check("dashboard thirty-day totals include the seven-day window", all(
+            snapshots[30, "views"]["engagement"][key] >= current["engagement"][key] for key in current["engagement"])
+            and snapshots[30, "views"]["members"]["new_in_period"] >= current["members"]["new_in_period"])
+        for suffix, expected in (("", current["products"]["total"]), ("&trash=1", current["products"]["trash"]),
+                                 ("&trade_type=sale", current["products"]["sale"]), ("&trade_type=rent", current["products"]["rent"]),
+                                 ("&status=pending", current["todos"]["pending_products"]), ("&status=publishing", current["todos"]["publishing_products"])):
+            listed = self.call("admin", "GET", "/api/v1/admin/products?limit=20" + suffix)
+            self.check("dashboard inventory and queue counts match filtered resource lists" + (suffix or " all"), listed.json.get("total") == expected)
+        nicknames = self.call("admin", "GET", "/api/v1/admin/nickname-requests?status=pending&page=1&limit=20")
+        self.check("dashboard nickname todo matches the pending review queue", nicknames.json.get("pagination", {}).get("total") == current["todos"]["pending_nicknames"])
+
+    def dashboard_security(self):
+        path = "/api/v1/admin/dashboard"
+        admin = self.clients["admin"]
+        self.call("anonymous", "GET", path, status=404, name="dashboard is absent from anonymous public API")
+        self.call("member", "GET", path, status=404, name="dashboard is absent from authenticated public API")
+        self.expect("dashboard rejects anonymous admin-surface access", admin.request("GET", path, cookie=""), 401)
+        self.expect("dashboard rejects public session cookie", admin.request("GET", path, cookie=self.clients["member"].cookie_header()), 401)
+        self.expect("dashboard rejects renamed member session", admin.request("GET", path, cookie="qingye_admin_session=" + self.clients["member"].cookies.get("qingye_session", "")), 401)
+        for query in ("days=0", "days=1", "days=8", "days=365", "days=-7", "days=07", "days=7.0", "days=", "rank_by=", "rank_by=price",
+                      "days=7&days=30", "rank_by=views&rank_by=favorites", "unknown=value", "days=%zz", "days=7;rank_by=views",
+                      "days=7%3BDROP%20TABLE%20products", "rank_by=views%27%20OR%201%3D1--"):
+            reply = self.call("admin", "GET", path + "?" + query, status=400, name="dashboard rejects unsupported duplicate empty or injected query")
+            self.check("dashboard invalid query has a stable public error code", reply.json.get("code") == "INVALID_DASHBOARD_QUERY")
 
     def concurrency(self):
         self.state["concurrency_complete"] = False
@@ -376,6 +469,18 @@ class Suite:
             failures = [r for r in responses if r.status != 200]
             self.report["metrics"][f"read_{workers}_concurrent"] = {"concurrency": workers, "requests": count, "elapsed_seconds": round(time.perf_counter() - start, 3), "p50_ms": percentile(durations, 50), "p95_ms": percentile(durations, 95), "p99_ms": percentile(durations, 99), "errors": len(failures), "error_statuses": sorted(set(r.status for r in failures))}
             self.check(f"{workers} concurrent reads complete without errors", not failures, requests=count)
+        start = time.perf_counter()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            responses = list(executor.map(lambda _: self.clients["admin"].request("GET", "/api/v1/admin/dashboard?days=30&rank_by=views"), range(32)))
+        durations = [reply.elapsed for reply in responses]
+        failures = [reply for reply in responses if reply.status != 200]
+        self.report["metrics"]["dashboard_read_8_concurrent"] = {"concurrency": 8, "requests": 32, "elapsed_seconds": round(time.perf_counter() - start, 3),
+            "p50_ms": percentile(durations, 50), "p95_ms": percentile(durations, 95), "p99_ms": percentile(durations, 99), "errors": len(failures),
+            "error_statuses": sorted(set(reply.status for reply in failures))}
+        self.check("bounded parallel administrator dashboard reads complete without errors", not failures)
+        baseline = self.dashboard_contract(responses[0], 30, "views")
+        self.check("parallel dashboard reads preserve the same aggregate and ranking", all(isinstance(reply.data, dict)
+            and all(reply.data.get(key) == baseline[key] for key in ("timezone", "products", "members", "todos", "engagement", "trend", "ranking")) for reply in responses))
         payload = self.product_input(self.state["run_id"] + " concurrent")
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             replies = list(executor.map(lambda _: self.clients["member"].request("POST", "/api/v1/me/products", payload), range(20)))
@@ -483,6 +588,8 @@ class Suite:
         self.check("offline favorite hides private media and description", offline_favorite_is_private(favorites, pid))
         self.expect("forged cross-surface logout cannot revoke admin", self.clients["anonymous"].request("POST", "/api/v1/auth/logout", cookie="qingye_session=" + admin_token))
         self.call("admin", "GET", "/api/v1/me")
+        self.dashboard_security()
+        self.dashboard_contract(self.call("admin", "GET", "/api/v1/admin/dashboard?days=30&rank_by=consultations"), 30, "consultations")
         # Bounded password failures are deliberately last, so this phase does not
         # interfere with functional or concurrency evidence through shared limits.
         entry = self.credentials["other"]
