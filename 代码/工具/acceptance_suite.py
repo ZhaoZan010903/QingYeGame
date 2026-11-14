@@ -24,6 +24,7 @@ import urllib.request
 import uuid
 import zlib
 from admin_accounts_acceptance import AdminAccountsChecks
+from recommendation_boost_acceptance import RecommendationBoostChecks
 
 
 class CheckFailure(Exception):
@@ -160,7 +161,7 @@ class Client:
             return Reply(response.status, payload, dict(response.headers), (time.perf_counter() - start) * 1000)
 
 
-class Suite(AdminAccountsChecks):
+class Suite(AdminAccountsChecks, RecommendationBoostChecks):
     def __init__(self, args):
         self.args = args
         self.state = json.loads(Path(args.state).read_text(encoding="utf-8")) if Path(args.state).exists() else {}
@@ -365,6 +366,7 @@ class Suite(AdminAccountsChecks):
         self.dashboard_functional()
         self.purge_functional()
         self.r22_functional()
+        self.r23_functional()
         self.state["functional_complete"] = True
 
     def purge_fixture(self, name, image=False):
@@ -583,6 +585,7 @@ class Suite(AdminAccountsChecks):
         self.check("concurrent reviews publish once", statuses.count(200) == 1 and statuses.count(409) == 19, successes=statuses.count(200), conflicts=statuses.count(409))
         self.purge_concurrency()
         self.r22_concurrency()
+        self.r23_concurrency()
         self.state["concurrency_complete"] = True
 
     def rental_quotes_workflow(self, prefix):
@@ -667,6 +670,7 @@ class Suite(AdminAccountsChecks):
         self.purge_security()
         self.dashboard_contract(self.call("admin", "GET", "/api/v1/admin/dashboard?days=30&rank_by=consultations"), 30, "consultations")
         self.r22_security()
+        self.r23_security()
         # Bounded password failures are deliberately last, so this phase does not
         # interfere with functional or concurrency evidence through shared limits.
         entry = self.credentials["other"]

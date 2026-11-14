@@ -131,6 +131,66 @@ func TestDashboardCurrentInventoryAndTodoSemantics(t *testing.T) {
 	}
 }
 
+func TestR23DashboardReviewQueuesMatchListsAcrossRangesAndTransitions(t *testing.T) {
+	f := newChatFixture(t)
+	dashboardExec(t, f, `INSERT INTO categories(id,name,enabled) VALUES('dash-review-disabled','停用但仍有待审商品',false);
+ INSERT INTO products(id,product_code,category_id,title,trade_type,price_unit,status,source,created_at,updated_at) VALUES
+ ('dash-review-old','REVIEW-OLD','chat-test','九十天前待审核','sale','account','pending','member',now()-interval '90 days',now()-interval '90 days'),
+ ('dash-review-new','REVIEW-NEW','chat-test','新待审核','sale','account','pending','platform',now(),now()),
+ ('dash-review-category','REVIEW-CATEGORY','dash-review-disabled','分类停用待审核','sale','account','pending','member',now()-interval '90 days',now()-interval '90 days'),
+ ('dash-review-rejected','REVIEW-REJECTED','chat-test','已处理','sale','account','rejected','member',now(),now()),
+ ('dash-review-trash','REVIEW-TRASH','chat-test','回收站待审状态','sale','account','pending','member',now(),now());
+ UPDATE products SET deleted_at=now(),deleted_by_admin=true WHERE id='dash-review-trash';`)
+	dashboardExec(t, f, `UPDATE products SET owner_id=$1 WHERE id='dash-review-old'`, f.member)
+	dashboardExec(t, f, `UPDATE products SET owner_id=$1 WHERE id='dash-review-category'`, f.other)
+	dashboardExec(t, f, `UPDATE users SET enabled=false WHERE id=$1`, f.other)
+	dashboardExec(t, f, `INSERT INTO nickname_requests(id,user_id,previous_nickname,nickname,created_at) VALUES
+ ('dash-review-nickname-old',$1,'聊天验收','旧待审昵称',now()-interval '90 days'),
+ ('dash-review-nickname-disabled',$2,'聊天验收','停用会员待审',now())`, f.member, f.other)
+	dashboardExec(t, f, `INSERT INTO nickname_requests(id,user_id,previous_nickname,nickname,status,reviewed_by,reviewed_at) VALUES
+ ('dash-review-nickname-approved',$1,'旧名','已批准','approved',$2,now()),
+ ('dash-review-nickname-rejected',$1,'旧名','已拒绝','rejected',$2,now())`, f.member, f.first)
+
+	assertQueues := func(wantProducts, wantNicknames int) {
+		t.Helper()
+		// Compare HTTP totals, including later pages, rather than duplicating the SQL predicates.
+		for _, page := range []int{1, 2} {
+			var products struct {
+				Total int `json:"total"`
+			}
+			w := f.call(t, f.first, "GET", fmt.Sprintf("/api/v1/admin/products?status=pending&page=%d&limit=1", page), nil, 200)
+			if err := json.Unmarshal(w.Body.Bytes(), &products); err != nil {
+				t.Fatal(err)
+			}
+			var nicknames struct {
+				Pagination struct {
+					Total int `json:"total"`
+				} `json:"pagination"`
+			}
+			w = f.call(t, f.first, "GET", fmt.Sprintf("/api/v1/admin/nickname-requests?status=pending&page=%d&limit=1", page), nil, 200)
+			if err := json.Unmarshal(w.Body.Bytes(), &nicknames); err != nil {
+				t.Fatal(err)
+			}
+			if products.Total != wantProducts || nicknames.Pagination.Total != wantNicknames {
+				t.Fatalf("review list totals differ on page %d: products=%d nicknames=%d want=%d/%d", page, products.Total, nicknames.Pagination.Total, wantProducts, wantNicknames)
+			}
+			for _, days := range []int{7, 30} {
+				data := dashboardRead(t, f, fmt.Sprintf("?days=%d", days))
+				todos := data["todos"].(map[string]any)
+				if todos["pending_products"] != float64(products.Total) || todos["pending_nicknames"] != float64(nicknames.Pagination.Total) {
+					t.Fatalf("%d-day dashboard narrowed or expanded current review queues: %v, list totals=%d/%d", days, todos, products.Total, nicknames.Pagination.Total)
+				}
+			}
+		}
+	}
+	assertQueues(3, 2)
+	f.call(t, f.first, "POST", "/api/v1/admin/products/dash-review-old/review", map[string]any{"expected_version": 1, "decision": "reject", "reason": "请补充资料"}, 200)
+	f.call(t, f.first, "POST", "/api/v1/admin/nickname-requests/dash-review-nickname-disabled/review", map[string]any{"decision": "rejected", "note": "账户已停用"}, 200)
+	assertQueues(2, 1)
+	f.call(t, f.first, "POST", "/api/v1/admin/nickname-requests/dash-review-nickname-old/review", map[string]any{"decision": "approved"}, 200)
+	assertQueues(2, 0)
+}
+
 func TestDashboardEffectiveInteractionRelations(t *testing.T) {
 	f := newChatFixture(t)
 	dashboardExec(t, f, `UPDATE users SET created_at=now()-interval '90 days';

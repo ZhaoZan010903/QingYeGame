@@ -5,7 +5,7 @@
 
 .catalog-redesign .catalog-masthead {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) minmax(360px, 520px);
+  grid-template-columns: minmax(260px, 1fr) minmax(420px, 640px);
   align-items: center;
   gap: 48px;
   margin-bottom: 40px;
@@ -370,7 +370,7 @@
 @media (max-width: 1199px) {
   .catalog-redesign .catalog-masthead {
     gap: 30px;
-    grid-template-columns: minmax(260px, 1fr) minmax(340px, 460px);
+    grid-template-columns: minmax(240px, 1fr) minmax(400px, 560px);
   }
 
   .catalog-redesign .collection-layout {

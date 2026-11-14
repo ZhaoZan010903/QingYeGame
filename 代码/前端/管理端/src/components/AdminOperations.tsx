@@ -260,6 +260,13 @@ export function AdminRecommendations() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   useUnsavedChanges(dirty, busy);
+  const appliedConfig = result?.applied_config as
+    AdminRecord | null | undefined;
+  const parametersPending =
+    !!appliedConfig &&
+    ["version", ...fields.map(([key]) => key)].some(
+      (key) => config[key] !== appliedConfig[key],
+    );
   async function load(refresh = false) {
     if (dirty && !window.confirm("重新读取会替换未保存的参数，确认继续？"))
       return;
@@ -349,24 +356,44 @@ export function AdminRecommendations() {
               <div className="recommendation-summary">
                 <div className="panel">
                   <h3>
-                    <TrendingUp size={18} /> 热门商品自动排序
+                    <TrendingUp size={18} /> 热门推荐得分
                   </h3>
+                  {appliedConfig ? (
+                    <p>
+                      已生效的自然热度按最近 {appliedConfig.window_days}{" "}
+                      天的有效浏览、收藏和去重咨询人数计算。系统约每 15
+                      分钟更新一次。
+                    </p>
+                  ) : (
+                    <p>尚未生成自然热度快照，当前自然分按 0 计算。</p>
+                  )}
                   <p>
-                    根据最近 {config.window_days}{" "}
-                    天的有效浏览、收藏和去重咨询人数计算。系统约每 15
-                    分钟更新一次，通常无需手动调整。
-                  </p>
-                  <p className="formula">
-                    浏览 × {config.view_weight} + 收藏 ×{" "}
-                    {config.favorite_weight} + 咨询人数 ×{" "}
-                    {config.consultation_weight ?? 8}
+                    下方展示当前可公开商品的热门排序，由有效自然分与额外推荐加分相加。单个商品的加分在商品管理中设置。
                   </p>
                   <p>
-                    算例：100 次有效浏览、10 次有效收藏，热度分为{" "}
-                    {100 * Number(config.view_weight || 0) +
-                      10 * Number(config.favorite_weight || 0)}
-                    （未计咨询）。同一用户对同一商品反复咨询只计一人；上架时间不加分。
+                    自然热度快照有效期为 60 分钟，失效或尚未计算时自然分按 0
+                    计；推荐加分仍参与排序。
                   </p>
+                  {appliedConfig && (
+                    <>
+                      <p className="formula">
+                        浏览 × {appliedConfig.view_weight} + 收藏 ×{" "}
+                        {appliedConfig.favorite_weight} + 咨询人数 ×{" "}
+                        {appliedConfig.consultation_weight}
+                      </p>
+                      <p>
+                        算例：100 次有效浏览、10 次有效收藏，热度分为{" "}
+                        {100 * Number(appliedConfig.view_weight || 0) +
+                          10 * Number(appliedConfig.favorite_weight || 0)}
+                        （未计咨询）。同一用户对同一商品反复咨询只计一人；上架时间不加分。
+                      </p>
+                    </>
+                  )}
+                  {parametersPending && (
+                    <p className="admin-warning">
+                      参数有调整，需保存并等待下一批计算或更新榜单后应用；当前公式与自然分仍使用已生效参数。
+                    </p>
+                  )}
                 </div>
                 <div className="panel">
                   <h3>要修改哪个位置？</h3>
@@ -435,29 +462,53 @@ export function AdminRecommendations() {
                   </fieldset>
                 </form>
               </details>
-              <h3 className="admin-ranking-title">当前榜单</h3>
+              <h3 className="admin-ranking-title">当前热门排序</h3>
               <div className="admin-table-wrap">
-                <table className="admin-table">
+                <table className="admin-table recommendation-table">
                   <thead>
                     <tr>
                       <th>商品</th>
-                      <th>分数</th>
+                      <th>有效自然分</th>
+                      <th>推荐加分</th>
+                      <th>合计分</th>
                       <th>咨询人数</th>
-                      <th>计算时间</th>
+                      <th>自然分状态</th>
                     </tr>
                   </thead>
                   <tbody>
                     {result.data.map((item: AdminRecord, index: number) => (
                       <tr key={item.product_id}>
-                        <td>
+                        <td data-label="商品">
                           <strong>
                             {index + 1}. {item.title || item.product_id}
                           </strong>
                           <span>{item.product_id}</span>
                         </td>
-                        <td>{Number(item.score).toLocaleString("zh-CN")}</td>
-                        <td>{Number(item.consultations ?? 0)}</td>
-                        <td>{date(item.computed_at ?? result.computed_at)}</td>
+                        <td data-label="有效自然分">
+                          {Number(item.natural_score ?? 0).toLocaleString(
+                            "zh-CN",
+                          )}
+                        </td>
+                        <td data-label="推荐加分">
+                          {Number(
+                            item.recommendation_boost ?? 0,
+                          ).toLocaleString("zh-CN")}
+                        </td>
+                        <td data-label="合计分">
+                          <strong>
+                            {Number(item.hot_score ?? 0).toLocaleString(
+                              "zh-CN",
+                            )}
+                          </strong>
+                        </td>
+                        <td data-label="咨询人数">
+                          {Number(item.consultations ?? 0)}
+                        </td>
+                        <td data-label="自然分状态">
+                          {item.score_fresh
+                            ? date(item.computed_at ?? result.computed_at)
+                            : "暂无有效快照"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

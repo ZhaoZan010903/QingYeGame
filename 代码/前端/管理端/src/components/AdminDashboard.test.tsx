@@ -297,6 +297,10 @@ describe("趋势图与看板展示", () => {
     expect(html).toContain("当前快照 · 不随日期筛选");
     expect(html).toContain("最近 30 天");
     expect(html).toContain('href="/nickname-reviews"');
+    expect(html).toContain('href="/reviews"');
+    expect(html).toContain("待审核商品");
+    expect(html).toContain("待审核昵称");
+    expect(html).toContain("当前全部待审核数量，不受 7／30 天选择影响");
     expect(html).toContain('href="/products?status=publishing"');
     expect(html).toContain('href="/products?trash=1"');
     expect(html).toContain('href="/products/item%2Fa"');

@@ -2,6 +2,33 @@ import type { RentalQuote } from "../types";
 import { validateRentalQuotes } from "../../../共享/rental-quotes";
 const rentalUnits = ["hour", "day", "week", "month", "period"];
 
+interface ProductCategory {
+  id: string;
+  enabled: boolean;
+  trade_type: string;
+  price_units?: string[];
+}
+
+/** Existing records keep their category; only new records select a compatible enabled one. */
+export function defaultProductCategory(
+  categories: ProductCategory[],
+  mode: string,
+  existingId?: string,
+) {
+  if (existingId) return existingId;
+  return (
+    categories.find(
+      (category) =>
+        category.enabled &&
+        [mode, "all"].includes(category.trade_type) &&
+        (!category.price_units?.length ||
+          category.price_units.some((unit) =>
+            mode === "sale" ? unit === "account" : rentalUnits.includes(unit),
+          )),
+    )?.id ?? ""
+  );
+}
+
 /** The API uses the first quote as the card price, so preserve the editor's primary quote. */
 export function buildRentalQuotes(
   mode: string,

@@ -33,20 +33,37 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 		return nil
 	}
 	if id == "" {
-		if e = validateInput(); e != nil {
-			return nil, e
+		needsDefaultCategory := in.TradeType == "sale" && in.CategoryID == ""
+		if !needsDefaultCategory {
+			if e = validateInput(); e != nil {
+				return nil, e
+			}
 		}
+		// Hash the supplied request before resolving a default category. A retry
+		// remains the same request if administrators later reorder categories.
 		replay, hash, replayErr := replayProduct(ctx, tx, actor.ID, "admin-create", in.RequestID, in, s.CredentialKey)
 		if replayErr != nil {
 			return nil, productReplayError(replayErr)
 		}
 		if replay != "" {
 			tx.Rollback(ctx)
-			p, err := (&CatalogStore{DB: s.DB}).ProductView(ctx, replay, true)
+			p, err := (&CatalogStore{DB: s.DB}).AdminProductView(ctx, replay)
 			if err != nil {
 				return nil, managementStoreError(err)
 			}
 			return map[string]any{"data": p}, nil
+		}
+		if needsDefaultCategory {
+			e = tx.QueryRow(ctx, `SELECT id FROM categories WHERE enabled AND trade_type IN ('sale','all') AND (price_units='[]'::jsonb OR price_units ? 'account') ORDER BY sort_order,id LIMIT 1 FOR SHARE`).Scan(&in.CategoryID)
+			if errors.Is(e, pgx.ErrNoRows) {
+				return nil, fault.New(fault.Invalid, "SALE_CATEGORY_UNAVAILABLE", "暂无可用的出售分类，请先启用支持账号出售的分类")
+			}
+			if e != nil {
+				return nil, managementStoreError(e)
+			}
+			if e = validateInput(); e != nil {
+				return nil, e
+			}
 		}
 		id = s.NewID()
 		code, err := nextProductCode(ctx, tx, in.TradeType)
@@ -94,7 +111,7 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 	if e != nil {
 		return nil, managementStoreError(e)
 	}
-	p, e := (&CatalogStore{DB: s.DB}).ProductView(ctx, id, true)
+	p, e := (&CatalogStore{DB: s.DB}).AdminProductView(ctx, id)
 	if e != nil {
 		return nil, managementStoreError(e)
 	}
@@ -191,7 +208,7 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 	_, e = tx.Exec(ctx, `UPDATE products SET status=$2,version=version+1,approved_version=CASE WHEN $2='published' THEN version+1 ELSE NULL END,review_note=$3,published_at=CASE WHEN $2='published' THEN COALESCE(published_at,now()) ELSE published_at END,rental_category=$4,updated_at=now() WHERE id=$1`, id, target, strings.TrimSpace(in.Reason), rentalCategory)
 	if e == nil {
 		_, e = tx.Exec(ctx, `INSERT INTO product_reviews(id,product_id,reviewer_id,decision,reason,version,snapshot)
-SELECT $1,id,$2,$3,$4,version,(to_jsonb(products)-'legacy_payload')||jsonb_build_object('images',
+SELECT $1,id,$2,$3,$4,version,(to_jsonb(products)-'legacy_payload'-'recommendation_boost'-'recommendation_version')||jsonb_build_object('images',
 COALESCE((SELECT jsonb_agg(jsonb_build_object('id',m.id,'sort_order',pi.sort_order,'alt',m.filename) ORDER BY pi.sort_order,m.id) FROM product_images pi JOIN media_files m ON m.id=pi.media_id WHERE pi.product_id=products.id),'[]'::jsonb))
 FROM products WHERE id=$5`, s.NewID(), actor.ID, target, in.Reason, id)
 	}
@@ -204,7 +221,7 @@ FROM products WHERE id=$5`, s.NewID(), actor.ID, target, in.Reason, id)
 	if e != nil {
 		return nil, managementStoreError(e)
 	}
-	p, e := (&CatalogStore{DB: s.DB}).ProductView(ctx, id, true)
+	p, e := (&CatalogStore{DB: s.DB}).AdminProductView(ctx, id)
 	if e != nil {
 		return nil, managementStoreError(e)
 	}
@@ -233,7 +250,7 @@ func (s *ManagementStore) FeatureProduct(ctx context.Context, actor management.A
 	if e != nil {
 		return nil, managementStoreError(e)
 	}
-	p, e := (&CatalogStore{DB: s.DB}).ProductView(ctx, id, true)
+	p, e := (&CatalogStore{DB: s.DB}).AdminProductView(ctx, id)
 	if e != nil {
 		return nil, managementStoreError(e)
 	}
@@ -265,14 +282,14 @@ func (s *ManagementStore) Products(ctx context.Context, in management.ProductQue
 	if in.Sort == "created" {
 		order = "p.created_at DESC,p.id"
 	}
-	items, total, err := (&CatalogStore{DB: s.DB}).productRows(ctx, where, args, order, in.Limit, in.Offset, true, true)
+	items, total, err := (&CatalogStore{DB: s.DB}).projectedProductRows(ctx, where, args, order, in.Limit, in.Offset, true, true, AdminProductJSON)
 	if err != nil {
 		return nil, managementStoreError(err)
 	}
 	return map[string]any{"data": items, "total": total, "next_cursor": catalog.NextPage(in.Offset, in.Limit, total), "page": in.Offset/in.Limit + 1, "page_size": in.Limit}, nil
 }
 func (s *ManagementStore) Product(ctx context.Context, id string) (map[string]any, error) {
-	p, err := (&CatalogStore{DB: s.DB}).ProductView(ctx, id, true)
+	p, err := (&CatalogStore{DB: s.DB}).AdminProductView(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fault.New(fault.NotFound, "NOT_FOUND", "商品不存在")
 	}

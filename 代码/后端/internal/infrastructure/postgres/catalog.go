@@ -72,12 +72,24 @@ const ProductJSON = `jsonb_build_object(
  FROM product_images pi JOIN media_files m ON m.id=pi.media_id WHERE pi.product_id=p.id ORDER BY pi.sort_order,pi.media_id LIMIT %d) i),'[]'::jsonb))`
 
 func (a *CatalogStore) ProductView(ctx context.Context, id string, private bool) (map[string]any, error) {
+	return a.productView(ctx, id, private, ProductJSON)
+}
+
+// Owner reads deliberately keep ProductJSON; operational recommendation fields
+// are visible only through the management projection.
+const AdminProductJSON = ProductJSON + ` || jsonb_build_object('recommendation_boost',p.recommendation_boost,'recommendation_version',p.recommendation_version)`
+
+func (a *CatalogStore) AdminProductView(ctx context.Context, id string) (map[string]any, error) {
+	return a.productView(ctx, id, true, AdminProductJSON)
+}
+
+func (a *CatalogStore) productView(ctx context.Context, id string, private bool, projection string) (map[string]any, error) {
 	where := "p.id=$1 AND p.deleted_at IS NULL"
 	if !private {
 		where += " AND " + VisibleSQL
 	}
 	var data []byte
-	e := a.DB.QueryRow(ctx, "SELECT "+fmt.Sprintf(ProductJSON, 20)+" FROM products p JOIN categories c ON c.id=p.category_id WHERE "+where, id).Scan(&data)
+	e := a.DB.QueryRow(ctx, "SELECT "+fmt.Sprintf(projection, 20)+" FROM products p JOIN categories c ON c.id=p.category_id WHERE "+where, id).Scan(&data)
 	if e != nil {
 		return nil, e
 	}
@@ -93,6 +105,10 @@ func (a *CatalogStore) ProductRows(ctx context.Context, where string, args []any
 }
 
 func (a *CatalogStore) productRows(ctx context.Context, where string, args []any, order string, limit, offset int, summary, countTotal bool) ([]map[string]any, int, error) {
+	return a.projectedProductRows(ctx, where, args, order, limit, offset, summary, countTotal, ProductJSON)
+}
+
+func (a *CatalogStore) projectedProductRows(ctx context.Context, where string, args []any, order string, limit, offset int, summary, countTotal bool, projection string) ([]map[string]any, int, error) {
 	var total int
 	if countTotal {
 		if e := a.DB.QueryRow(ctx, "SELECT count(*) FROM products p JOIN categories c ON c.id=p.category_id WHERE "+where, args...).Scan(&total); e != nil {
@@ -100,7 +116,6 @@ func (a *CatalogStore) productRows(ctx context.Context, where string, args []any
 		}
 	}
 	args = append(args, limit, offset)
-	projection := ProductJSON
 	// 卡片不读取长说明；首页栏目无需执行总数统计。
 	if summary {
 		projection = strings.Replace(projection, "'description',p.description,", "", 1)

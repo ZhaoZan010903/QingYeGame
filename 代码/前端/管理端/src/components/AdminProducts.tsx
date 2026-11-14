@@ -27,6 +27,7 @@ import { Price, StateView } from "./shared";
 import { AdminProductEditor, statusNames } from "./AdminProductEditor";
 import { GuideButton } from "./AdminGuide";
 import { AdminTrashPurge, type PurgeTarget } from "./AdminTrashPurge";
+import { AdminProductRecommendation } from "./AdminProductRecommendation";
 import "../products.css";
 
 type Action = "publish" | "offline" | "trash" | "restore";
@@ -56,6 +57,7 @@ export function ProductListRow({
   edit,
   act,
   purge,
+  recommend,
 }: {
   product: Product;
   trash: boolean;
@@ -65,12 +67,16 @@ export function ProductListRow({
   edit: () => void;
   act: (kind: Action) => void;
   purge: () => void;
+  recommend?: () => void;
 }) {
   const cover = p.images[0];
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [cover?.thumbnailUrl, cover?.url]);
   return (
     <tr>
+      <td className="product-code-cell" data-label="商品编号">
+        <span className="product-code mono">{p.code || p.id}</span>
+      </td>
       <td className="product-cell" data-label="商品">
         <div className="product-summary">
           <div className="product-cover">
@@ -100,7 +106,6 @@ export function ProductListRow({
                 {p.title.trim() || "未填写标题"}
               </Link>
             )}
-            <span className="product-code mono">{p.code || p.id}</span>
             <div className="product-attributes">
               <span>{p.mode === "sale" ? "账号出售" : "账号租赁"}</span>
               <span>{p.server || "区服未填写"}</span>
@@ -133,7 +138,7 @@ export function ProductListRow({
           <small>{sources[p.source || ""] || "来源未记录"}</small>
         </div>
       </td>
-      <td data-label="图片 / 咨询">
+      <td className="product-count-cell" data-label="图片 / 咨询">
         <div className="product-counts">
           <span>
             图片 <b className="mono">{p.imageTotal}</b>
@@ -143,7 +148,7 @@ export function ProductListRow({
           </span>
         </div>
       </td>
-      <td data-label="时间记录">
+      <td className="product-time-cell" data-label="时间记录">
         <dl className="product-times">
           <div>
             <dt>首次上架</dt>
@@ -163,6 +168,11 @@ export function ProductListRow({
       </td>
       <td data-label="操作">
         <div className="product-row-actions">
+          {!trash && recommend && (
+            <button type="button" disabled={disabled} onClick={recommend}>
+              推荐加分 <b className="mono">{p.recommendationBoost ?? 0}</b>
+            </button>
+          )}
           {p.status === "rejected_final" ? (
             <>
               {!trash && (
@@ -276,6 +286,8 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [purgeTarget, setPurgeTarget] = useState<PurgeTarget | null>(null);
+  const [recommendationProduct, setRecommendationProduct] =
+    useState<Product | null>(null);
   const sequence = useRef(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const jump = useRef<HTMLInputElement>(null);
@@ -578,6 +590,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                     </caption>
                     <thead>
                       <tr>
+                        <th scope="col">商品编号</th>
                         <th>商品信息</th>
                         <th>报价</th>
                         <th>来源 / 状态</th>
@@ -598,6 +611,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                           review={review}
                           disabled={loading || busy}
                           edit={() => select(p.id)}
+                          recommend={() => setRecommendationProduct(p)}
                           act={(kind) => setAction({ product: p, kind })}
                           purge={() =>
                             setPurgeTarget({ kind: "single", product: p })
@@ -717,6 +731,14 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
           }}
         />
       )}
+      {recommendationProduct && (
+        <AdminProductRecommendation
+          key={recommendationProduct.id}
+          product={recommendationProduct}
+          onClose={() => setRecommendationProduct(null)}
+          onSaved={() => setRevision((value) => value + 1)}
+        />
+      )}
       <dialog
         ref={dialog}
         className="product-action-dialog"
@@ -747,14 +769,14 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
             <p>{actionNotes[action.kind]}</p>
             {action.kind === "publish" && action.product.mode === "rent" && (
               <label>
-                租赁分类
+                租赁标签
                 <select
                   required
-                  aria-label="租赁分类"
+                  aria-label="租赁标签"
                   value={rentalCategory}
                   onChange={(e) => setRentalCategory(e.target.value)}
                 >
-                  <option value="">请选择租赁分类</option>
+                  <option value="">请选择租赁标签</option>
                   <option value="hour_day">时日</option>
                   <option value="week_month">周月</option>
                 </select>

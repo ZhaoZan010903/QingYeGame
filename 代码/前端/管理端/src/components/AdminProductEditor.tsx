@@ -5,11 +5,13 @@ import {
   canAcceptFreshProduct,
   mergeMediaSyncDisplay,
   editorRecordFromProduct,
+  mergeRecommendationVersion,
 } from "../lib/media-sync-state";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adminApi, adminImageApi, type AdminRecord } from "../lib/admin-api";
 import { ApiError, productFrom } from "../lib/api";
 import { ImageUploader } from "./ImageUploader";
+import { AdminProductRecommendation } from "./AdminProductRecommendation";
 import { Price, StateView } from "./shared";
 import type { Product, RentalQuote, RentalCategory } from "../types";
 import { RentalQuoteEditor } from "../../../共享/RentalQuoteEditor";
@@ -30,6 +32,7 @@ import { Link } from "react-router-dom";
 import {
   buildRentalQuotes,
   customTagsForEditing,
+  defaultProductCategory,
   parseCustomTags,
 } from "../lib/product-input";
 import { fixedProductFields, type DictionaryGroup } from "../lib/dictionaries";
@@ -126,13 +129,14 @@ export function AdminProductEditor({
       enabled: true,
     },
     private_credentials: {
-      label: "账号交接资料",
+      label: "私密交接资料",
       placeholder: "仅供授权管理员核验，不公开展示。",
       required: false,
       enabled: true,
     },
   };
   const [showPreview, setShowPreview] = useState(false);
+  const [showRecommendation, setShowRecommendation] = useState(false);
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [step]);
@@ -144,7 +148,11 @@ export function AdminProductEditor({
     : "尚未保存";
   const locked = busy || imageBusy;
   const writeLocked = locked || conflict;
-  useUnsavedChanges(dirty || imagePending, locked);
+  const rentalCategoryDirty =
+    form.trade_type === "rent" &&
+    rentalCategory !== (row?.rental_category ?? "");
+  dirtyRef.current = dirty || rentalCategoryDirty;
+  useUnsavedChanges(dirty || rentalCategoryDirty || imagePending, locked);
   const primaryQuote = form.trade_type === "rent" ? quotes[0] : undefined;
   const previewAmount =
     form.trade_type === "rent"
@@ -183,9 +191,13 @@ export function AdminProductEditor({
   } catch {
     /* Preserve malformed legacy data for server validation instead of replacing it. */
   }
-  function accept(value: AdminRecord) {
+  function setRecord(value: AdminRecord) {
     rowRef.current = value;
     setRow(value);
+  }
+  function accept(incoming: AdminRecord) {
+    const value = mergeRecommendationVersion(rowRef.current, incoming);
+    setRecord(value);
     setForm(formFrom(value));
     dirtyRef.current = false;
     setDirty(false);
@@ -214,12 +226,12 @@ export function AdminProductEditor({
       dirtyRef.current,
     );
     if (!merged.requiresReload) {
-      setRow(merged.record);
+      setRecord(merged.record);
       if (next.interrupted !== current.publication_interrupted) onSaved();
       return;
     }
     if (dirtyRef.current) {
-      setRow(merged.record);
+      setRecord(merged.record);
       setConflict(true);
       setError(merged.message);
       return;
@@ -280,11 +292,7 @@ export function AdminProductEditor({
       else
         setForm(
           formFrom({
-            category_id: list.find(
-              (c) =>
-                c.enabled &&
-                (c.trade_type === "all" || c.trade_type === "sale"),
-            )?.id,
+            category_id: "",
           }),
         );
     } catch (e) {
@@ -340,8 +348,18 @@ export function AdminProductEditor({
         quotes,
         allowedUnits,
       );
+      const newSale = !row && form.trade_type === "sale";
+      if (!newSale && !form.category_id)
+        throw new Error(
+          "尚未配置可用的交易分类，请先在运营配置中启用对应分类。",
+        );
+      const { category_id, ...values } = form;
       const input = {
-        ...form,
+        ...values,
+        ...(!newSale ? { category_id } : {}),
+        ...(form.trade_type === "rent"
+          ? { rental_category: rentalCategory }
+          : {}),
         attributes: {
           ...attributes,
           game: "QQ炫舞",
@@ -403,7 +421,11 @@ export function AdminProductEditor({
     }
     setError("");
     setNotice("");
-    if (dirty || imagePending) {
+    if (
+      dirty ||
+      imagePending ||
+      (rentalCategoryDirty && !["approve", "publish"].includes(kind))
+    ) {
       setError("请先保存资料并处理完图片队列，再进行状态操作。");
       return;
     }
@@ -419,7 +441,7 @@ export function AdminProductEditor({
       row.trade_type === "rent" &&
       !rentalCategory
     ) {
-      setError("请先选择租赁分类：时日或周月。");
+      setError("请先在账号资料中选择租赁标签：时日或周月。");
       return;
     }
     const confirmations = {
@@ -492,6 +514,16 @@ export function AdminProductEditor({
           </p>
         </div>
         <div className="heading-actions">
+          {product && (
+            <button
+              type="button"
+              className="button-outline"
+              disabled={locked}
+              onClick={() => setShowRecommendation(true)}
+            >
+              推荐加分 {product.recommendationBoost ?? 0}
+            </button>
+          )}
           {row?.status !== "rejected_final" && (
             <button
               type="button"
@@ -638,6 +670,42 @@ export function AdminProductEditor({
                   ["publishing", "rejected_final"].includes(row?.status)
                 }
               >
+                <h2 className="editor-section-title">账号资料</h2>
+                <label className="form-field">
+                  发布类型
+                  <select
+                    value={form.trade_type}
+                    disabled={!!row}
+                    onChange={(e) => {
+                      const mode = e.target.value;
+                      const targetId = defaultProductCategory(
+                        categories as Parameters<
+                          typeof defaultProductCategory
+                        >[0],
+                        mode,
+                      );
+                      const target = categories.find((c) => c.id === targetId);
+                      setForm((old) => ({
+                        ...old,
+                        trade_type: mode,
+                        category_id: mode === "sale" ? "" : (target?.id ?? ""),
+                        price_unit:
+                          mode === "sale"
+                            ? "account"
+                            : (target?.price_units?.find(
+                                (u: string) =>
+                                  !["account", "unknown"].includes(u),
+                              ) ?? "day"),
+                      }));
+                      setRentalCategory("");
+                      setDirty(true);
+                    }}
+                  >
+                    <option value="sale">账号出售</option>
+                    <option value="rent">账号租赁</option>
+                  </select>
+                  {row && <small>租售类型已固定，如需更换请新建资产。</small>}
+                </label>
                 <label className="form-field">
                   {formFields.title.label}
                   <input
@@ -665,184 +733,6 @@ export function AdminProductEditor({
                       字以内；详细内容可保留在商品介绍。
                     </p>
                   )}
-                <div className="admin-grid">
-                  <label className="form-field">
-                    交易类型
-                    <select
-                      value={form.trade_type}
-                      disabled={!!row}
-                      onChange={(e) => {
-                        const mode = e.target.value;
-                        const target = categories.find(
-                          (c) =>
-                            c.enabled &&
-                            (c.trade_type === "all" || c.trade_type === mode),
-                        );
-                        setForm((old) => ({
-                          ...old,
-                          trade_type: mode,
-                          category_id: target?.id ?? "",
-                          price_unit:
-                            mode === "sale"
-                              ? "account"
-                              : (target?.price_units?.find(
-                                  (u: string) =>
-                                    !["account", "unknown"].includes(u),
-                                ) ?? "day"),
-                        }));
-                        setDirty(true);
-                      }}
-                    >
-                      <option value="sale">账号出售</option>
-                      <option value="rent">账号租赁</option>
-                    </select>
-                    {row && <small>租售类型已固定，如需更换请新建资产。</small>}
-                  </label>
-                  <label className="form-field">
-                    交易分类
-                    <select
-                      required
-                      value={form.category_id}
-                      onChange={(e) => change("category_id", e.target.value)}
-                    >
-                      <option value="">选择交易分类</option>
-                      {categories
-                        .filter(
-                          (c) =>
-                            c.trade_type === "all" ||
-                            c.trade_type === form.trade_type,
-                        )
-                        .map((c) => (
-                          <option key={c.id} value={c.id} disabled={!c.enabled}>
-                            {c.name}
-                            {!c.enabled ? "（已停用）" : ""}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  {form.trade_type === "sale" && (
-                    <label className="form-field">
-                      商品报价（元）
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={form.price_amount}
-                        placeholder="留空表示联系客服"
-                        onChange={(e) => change("price_amount", e.target.value)}
-                      />
-                    </label>
-                  )}
-                </div>
-                {form.trade_type === "rent" && (
-                  <section className="subform-card">
-                    <h3>租赁报价</h3>
-                    {form.price_unit === "unknown" && !quotes.length && (
-                      <p className="field-hint">
-                        历史报价单位待核对，未填写新报价时保留原始信息。
-                      </p>
-                    )}
-                    <p className="field-hint">
-                      可填写普通租期和自定义时段，价格按填写的单位展示，不自动换算。
-                    </p>
-                    <RentalQuoteEditor
-                      quotes={quotes}
-                      allowed={allowedUnits}
-                      onChange={(next) => {
-                        setQuotes(next);
-                        setDirty(true);
-                      }}
-                    />
-                  </section>
-                )}
-                <label className="form-field">
-                  {formFields.description.label}
-                  <textarea
-                    rows={7}
-                    required
-                    placeholder={formFields.description.placeholder}
-                    value={form.description}
-                    onChange={(e) => change("description", e.target.value)}
-                  />
-                </label>
-                {formFields.custom_tags.enabled && (
-                  <label className="form-field">
-                    {formFields.custom_tags.label}
-                    <input
-                      maxLength={600}
-                      required={formFields.custom_tags.required}
-                      placeholder={formFields.custom_tags.placeholder}
-                      value={tags}
-                      onChange={(e) => {
-                        setTags(e.target.value);
-                        setDirty(true);
-                      }}
-                    />
-                    <small>
-                      用逗号分隔，最多 20 个标签，新标签每个最多 5
-                      字。历史标签保留在原始属性中，不计入这里的额度。
-                    </small>
-                  </label>
-                )}
-                {formFields.private_credentials.enabled && (
-                  <section className="subform-card private-credentials">
-                    <h3>{formFields.private_credentials.label}</h3>
-                    <p className="field-hint">
-                      {formFields.private_credentials.placeholder}{" "}
-                      {row?.has_private_credentials
-                        ? "已保存私密资料；留空保留现有内容。"
-                        : "尚未保存私密资料。"}
-                    </p>
-                    <div className="admin-grid">
-                      <label className="form-field">
-                        QQ 账号
-                        <input
-                          autoComplete="off"
-                          maxLength={15}
-                          inputMode="numeric"
-                          pattern="[1-9][0-9]{4,14}"
-                          title="请输入 5 至 15 位 QQ 账号"
-                          required={
-                            !!privatePassword ||
-                            (formFields.private_credentials.required &&
-                              !row?.has_private_credentials)
-                          }
-                          value={privateAccount}
-                          onChange={(e) => {
-                            setPrivateAccount(e.target.value);
-                            setDirty(true);
-                          }}
-                        />
-                      </label>
-                      <label className="form-field">
-                        QQ 密码
-                        <input
-                          type={privateVisible ? "text" : "password"}
-                          autoComplete="new-password"
-                          maxLength={128}
-                          required={
-                            !!privateAccount ||
-                            (formFields.private_credentials.required &&
-                              !row?.has_private_credentials)
-                          }
-                          value={privatePassword}
-                          onChange={(e) => {
-                            setPrivatePassword(e.target.value);
-                            setDirty(true);
-                          }}
-                        />
-                      </label>
-                    </div>
-                    <label className="agreement-check">
-                      <input
-                        type="checkbox"
-                        checked={privateVisible}
-                        onChange={(e) => setPrivateVisible(e.target.checked)}
-                      />
-                      显示本次输入的密码
-                    </label>
-                  </section>
-                )}
                 <div className="admin-grid fixed-product-fields">
                   {groups.map((group) => {
                     const existing = attributes[group.key];
@@ -903,6 +793,177 @@ export function AdminProductEditor({
                     );
                   })}
                 </div>
+                {form.trade_type === "rent" && (
+                  <label className="form-field editor-rental-category">
+                    租赁标签（审核或上架前必选）
+                    <select
+                      aria-label="租赁标签"
+                      value={rentalCategory}
+                      onChange={(e) =>
+                        setRentalCategory(e.target.value as RentalCategory | "")
+                      }
+                    >
+                      <option value="">请选择租赁标签</option>
+                      <option value="hour_day">时日</option>
+                      <option value="week_month">周月</option>
+                    </select>
+                    <small>
+                      用于账号集市的时日／周月筛选，由管理员设置；随保存草稿或审核、上架一并保存。
+                    </small>
+                  </label>
+                )}
+                <div className="admin-grid">
+                  {form.trade_type === "rent" && (
+                    <label className="form-field">
+                      交易分类
+                      <select
+                        required
+                        value={form.category_id}
+                        onChange={(e) => change("category_id", e.target.value)}
+                      >
+                        <option value="">选择交易分类</option>
+                        {categories
+                          .filter(
+                            (c) =>
+                              c.trade_type === "all" ||
+                              c.trade_type === form.trade_type,
+                          )
+                          .map((c) => (
+                            <option
+                              key={c.id}
+                              value={c.id}
+                              disabled={!c.enabled}
+                            >
+                              {c.name}
+                              {!c.enabled ? "（已停用）" : ""}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  )}
+                  {form.trade_type === "sale" && (
+                    <label className="form-field">
+                      出售报价（元）
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.price_amount}
+                        placeholder="留空表示联系客服报价"
+                        onChange={(e) => change("price_amount", e.target.value)}
+                      />
+                    </label>
+                  )}
+                </div>
+                {form.trade_type === "rent" && (
+                  <section className="subform-card">
+                    <h3>租赁报价（可多选）</h3>
+                    {form.price_unit === "unknown" && !quotes.length && (
+                      <p className="field-hint">
+                        历史报价单位待核对，未填写新报价时保留原始信息。
+                      </p>
+                    )}
+                    <p className="field-hint">
+                      可填写普通租期和自定义时段，价格按填写的单位展示，不自动换算。
+                    </p>
+                    <RentalQuoteEditor
+                      quotes={quotes}
+                      allowed={allowedUnits}
+                      onChange={(next) => {
+                        setQuotes(next);
+                        setDirty(true);
+                      }}
+                    />
+                  </section>
+                )}
+                {formFields.custom_tags.enabled && (
+                  <label className="form-field">
+                    {formFields.custom_tags.label}
+                    <input
+                      maxLength={600}
+                      required={formFields.custom_tags.required}
+                      placeholder={formFields.custom_tags.placeholder}
+                      value={tags}
+                      onChange={(e) => {
+                        setTags(e.target.value);
+                        setDirty(true);
+                      }}
+                    />
+                    <small>
+                      用逗号分隔，最多 20 个标签，新标签每个最多 5
+                      字。历史标签保留在原始属性中，不计入这里的额度。
+                    </small>
+                  </label>
+                )}
+                <label className="form-field">
+                  {formFields.description.label}
+                  <textarea
+                    rows={7}
+                    required
+                    placeholder={formFields.description.placeholder}
+                    value={form.description}
+                    onChange={(e) => change("description", e.target.value)}
+                  />
+                </label>
+                {formFields.private_credentials.enabled && (
+                  <section className="subform-card private-credentials">
+                    <h3>{formFields.private_credentials.label}</h3>
+                    <p className="field-hint">
+                      {formFields.private_credentials.placeholder}{" "}
+                      {row?.has_private_credentials
+                        ? "已保存私密资料；留空保留现有内容。"
+                        : "尚未保存私密资料。"}
+                    </p>
+                    <div className="admin-grid">
+                      <label className="form-field">
+                        QQ账号
+                        <input
+                          autoComplete="off"
+                          maxLength={15}
+                          inputMode="numeric"
+                          pattern="[1-9][0-9]{4,14}"
+                          title="请输入 5 至 15 位 QQ 账号"
+                          required={
+                            !!privatePassword ||
+                            (formFields.private_credentials.required &&
+                              !row?.has_private_credentials)
+                          }
+                          value={privateAccount}
+                          onChange={(e) => {
+                            setPrivateAccount(e.target.value);
+                            setDirty(true);
+                          }}
+                        />
+                      </label>
+                      <label className="form-field">
+                        QQ密码
+                        <input
+                          type={privateVisible ? "text" : "password"}
+                          autoComplete="new-password"
+                          maxLength={128}
+                          required={
+                            !!privateAccount ||
+                            (formFields.private_credentials.required &&
+                              !row?.has_private_credentials)
+                          }
+                          value={privatePassword}
+                          onChange={(e) => {
+                            setPrivatePassword(e.target.value);
+                            setDirty(true);
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <label className="agreement-check">
+                      <input
+                        type="checkbox"
+                        checked={privateVisible}
+                        onChange={(e) => setPrivateVisible(e.target.checked)}
+                      />
+                      显示本次输入的密码
+                    </label>
+                  </section>
+                )}
                 {row?.status === "published" && (
                   <p className="admin-warning">
                     保存资料或修改图片后，商品会停止公开并转为草稿。
@@ -910,7 +971,9 @@ export function AdminProductEditor({
                 )}
                 <div className="save-bar">
                   <span>
-                    {dirty ? "资料有修改，尚未保存" : "保存草稿后再检查图片"}
+                    {dirty || rentalCategoryDirty
+                      ? "资料有修改，尚未保存"
+                      : "保存草稿后再检查图片"}
                   </span>
                   <button className="button-white" type="submit">
                     {busy ? "处理中…" : "保存为草稿"}
@@ -937,7 +1000,7 @@ export function AdminProductEditor({
               <Image size={18} />
               商品图集
             </h3>
-            {dirty && product && (
+            {(dirty || rentalCategoryDirty) && product && (
               <p className="admin-warning">
                 商品资料有修改，请先返回第 1 步保存，再调整图片。
               </p>
@@ -946,7 +1009,9 @@ export function AdminProductEditor({
               product={product}
               transport={adminImageApi}
               ensureDraft={() =>
-                dirty || !product ? save() : Promise.resolve(product)
+                dirty || rentalCategoryDirty || !product
+                  ? save()
+                  : Promise.resolve(product)
               }
               onChange={(next) => {
                 if (dirtyRef.current) {
@@ -967,7 +1032,7 @@ export function AdminProductEditor({
               disabled={
                 busy ||
                 conflict ||
-                (!!product && dirty) ||
+                (!!product && (dirty || rentalCategoryDirty)) ||
                 ["publishing", "rejected_final"].includes(row?.status)
               }
             />
@@ -1077,31 +1142,27 @@ export function AdminProductEditor({
                   />
                 )}
                 {row.review_note && <p>最近审核说明：{row.review_note}</p>}
-                {row.trade_type === "rent" &&
-                  !["published", "publishing", "rejected_final"].includes(
-                    row.status,
-                  ) && (
-                    <label className="form-field">
-                      租赁分类（审核或上架前必选）
-                      <select
-                        aria-label="租赁分类"
-                        value={rentalCategory}
-                        disabled={writeLocked}
-                        onChange={(e) =>
-                          setRentalCategory(
-                            e.target.value as RentalCategory | "",
-                          )
-                        }
-                      >
-                        <option value="">请选择租赁分类</option>
-                        <option value="hour_day">时日</option>
-                        <option value="week_month">周月</option>
-                      </select>
-                      <small>
-                        决定商品在账号集市的分类，由管理员审核确认。
-                      </small>
-                    </label>
-                  )}
+                {row.trade_type === "rent" && (
+                  <div className="editor-rental-summary">
+                    <span>
+                      租赁标签：
+                      <strong>
+                        {rentalCategory === "hour_day"
+                          ? "时日"
+                          : rentalCategory === "week_month"
+                            ? "周月"
+                            : "尚未选择"}
+                      </strong>
+                    </span>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => setStep(0)}
+                    >
+                      返回账号资料修改
+                    </button>
+                  </div>
+                )}
                 {["pending", "published", "publishing"].includes(
                   row.status,
                 ) && (
@@ -1198,6 +1259,25 @@ export function AdminProductEditor({
             )}
           </div>
         </>
+      )}
+      {showRecommendation && product && (
+        <AdminProductRecommendation
+          key={product.id}
+          product={product}
+          onClose={() => setShowRecommendation(false)}
+          onSaved={(next) => {
+            const current = rowRef.current;
+            if (current?.id === next.id)
+              setRecord(
+                mergeRecommendationVersion(current, {
+                  ...current,
+                  recommendation_boost: next.boost,
+                  recommendation_version: next.version,
+                }),
+              );
+            onSaved();
+          }}
+        />
       )}
     </section>
   );

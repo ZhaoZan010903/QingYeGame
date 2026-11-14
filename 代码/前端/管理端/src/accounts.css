@@ -190,7 +190,7 @@
   background: #eef2ff;
 }
 .account-avatar-picker button > span:last-child {
-  font-size: 11px;
+  font-size: 12px;
   width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -250,6 +250,6 @@
   body:has(.admin-accounts) .admin-session > button {
     white-space: nowrap;
     padding-inline: 9px;
-    font-size: 11px;
+    font-size: 12px;
   }
 }

@@ -144,6 +144,8 @@ export function productFrom(value: RecordData): Product {
     code: String(value.product_code ?? value.public_id ?? value.id),
     categoryId: value.category_id,
     source: value.source,
+    recommendationBoost: Number(value.recommendation_boost ?? 0),
+    recommendationVersion: Number(value.recommendation_version ?? 1),
     legacyPrice:
       value.legacy_price == null ? undefined : String(value.legacy_price),
     legacyCategory: value.legacy_category,

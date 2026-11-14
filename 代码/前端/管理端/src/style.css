@@ -297,7 +297,7 @@ select {
   left: 6px;
   top: 6px;
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: 12px;
   background: #263653ed;
   color: #ffffff;
   border-radius: 5px;
@@ -318,7 +318,7 @@ select {
   background: #f4f6fa;
   border-radius: 5px;
   padding: 6px 8px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .upload-progress {
   width: 100%;
@@ -423,7 +423,7 @@ button svg {
   color: #8a6b2c;
   padding: 5px 9px;
   border-radius: 5px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .topbar-help {
   color: #53617b;
@@ -455,10 +455,43 @@ button svg {
     scroll-behavior: auto !important;
   }
 }
+@media (max-width: 360px) {
+  .admin-brand > span {
+    display: none;
+  }
+  .admin-brand strong {
+    white-space: nowrap;
+  }
+  .admin-topbar {
+    gap: 12px;
+  }
+}
 
 /* Upload queues are paged so large galleries do not decode hundreds of previews at once. */
-.upload-queue-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0 12px; }
-.upload-queue-toolbar span { flex: 1 1 220px; font-size: 12px; opacity: .8; }
-.upload-queue-toolbar button { border: 1px solid currentColor; border-radius: 8px; padding: 8px 14px; background: transparent; color: inherit; cursor: pointer; }
-.upload-queue-toolbar button:disabled { opacity: .5; cursor: not-allowed; }
-.upload-preview img { content-visibility: auto; }
+.upload-queue-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 20px 0 12px;
+}
+.upload-queue-toolbar span {
+  flex: 1 1 220px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.upload-queue-toolbar button {
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.upload-queue-toolbar button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.upload-preview img {
+  content-visibility: auto;
+}

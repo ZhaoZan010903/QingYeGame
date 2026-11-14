@@ -5,12 +5,33 @@ interface EditableRecord {
 }
 import type { Product } from "../types";
 
+/** Content and recommendation writes have independent versions; keep each confirmed snapshot current. */
+export function mergeRecommendationVersion<T extends Record<string, any>>(
+  current: Record<string, any> | null,
+  incoming: T,
+): T {
+  if (
+    current &&
+    current.id === incoming.id &&
+    Number(current?.recommendation_version ?? 0) > 0 &&
+    Number(current.recommendation_version) >=
+      Number(incoming.recommendation_version ?? 0)
+  ) {
+    return {
+      ...incoming,
+      recommendation_boost: current.recommendation_boost,
+      recommendation_version: current.recommendation_version,
+    };
+  }
+  return incoming;
+}
+
 /** Gallery APIs return the complete public edit snapshot, not just image metadata. */
 export function editorRecordFromProduct<T extends Record<string, any>>(
   current: T | null,
   product: Product,
 ) {
-  return {
+  return mergeRecommendationVersion(current, {
     ...current,
     id: product.id,
     title: product.title,
@@ -22,6 +43,10 @@ export function editorRecordFromProduct<T extends Record<string, any>>(
     attributes: product.attributes ?? {},
     rental_quotes: product.rentalQuotes ?? [],
     rental_category: product.rentalCategory ?? "",
+    recommendation_boost:
+      product.recommendationBoost ?? current?.recommendation_boost ?? 0,
+    recommendation_version:
+      product.recommendationVersion ?? current?.recommendation_version ?? 1,
     status: product.status,
     version: product.version,
     image_total: product.imageTotal,
@@ -30,7 +55,7 @@ export function editorRecordFromProduct<T extends Record<string, any>>(
     source: product.source,
     has_private_credentials: product.hasPrivateCredentials,
     publication_interrupted: product.publicationInterrupted,
-  };
+  });
 }
 interface SyncState {
   status: string;

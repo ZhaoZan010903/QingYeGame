@@ -58,7 +58,7 @@
 .product-list-filters > label {
   display: grid;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   color: #66738a;
 }
 .product-list-filters select {
@@ -137,7 +137,7 @@
   display: block;
   margin-top: 4px;
   color: #986267;
-  font-size: 11px;
+  font-size: 12px;
 }
 .product-danger-outline {
   display: inline-flex;
@@ -194,7 +194,7 @@
 }
 .trash-purge-dialog label small {
   color: #8993a3;
-  font-size: 11px;
+  font-size: 12px;
 }
 .trash-purge-dialog .trash-purge-error {
   background: #fff4f4;
@@ -225,33 +225,36 @@
   opacity: 0.55;
 }
 .admin-table.product-table {
-  min-width: 1120px;
+  min-width: 1080px;
   table-layout: fixed;
 }
 .product-table th:nth-child(1) {
-  width: 34%;
-}
-.product-table th:nth-child(2) {
-  width: 12%;
-}
-.product-table th:nth-child(3) {
   width: 10%;
 }
+.product-table th:nth-child(2) {
+  width: 25%;
+}
+.product-table th:nth-child(3) {
+  width: 12%;
+}
 .product-table th:nth-child(4) {
-  width: 9%;
+  width: 10%;
 }
 .product-table th:nth-child(5) {
-  width: 21%;
+  width: 10%;
 }
 .product-table th:nth-child(6) {
-  width: 14%;
+  width: 20%;
+}
+.product-table th:nth-child(7) {
+  width: 13%;
 }
 .admin-table.product-table th,
 .admin-table.product-table td {
-  padding: 16px 14px;
+  padding: 16px 10px;
 }
 .product-table th small {
-  font-size: 10px;
+  font-size: 12px;
   margin-left: 4px;
   font-weight: 400;
 }
@@ -297,15 +300,20 @@ a.product-list-title:hover {
 .product-code {
   display: block;
   color: #7c879a;
-  font-size: 11px;
-  margin-top: 6px;
+  font-size: 12px;
+  margin: 0;
   overflow-wrap: anywhere;
+}
+.product-code-cell .product-code {
+  color: #3658d4;
+  font-weight: 600;
+  line-height: 1.7;
 }
 .product-attributes {
   display: flex;
   flex-wrap: wrap;
   gap: 3px 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: #657188;
   margin-top: 5px;
 }
@@ -327,12 +335,12 @@ a.product-list-title:hover {
   color: #26334b;
 }
 .product-table .price-box .price-unit {
-  font-size: 11px;
+  font-size: 12px;
 }
 .product-cell-note {
   display: block;
   color: #8290a5;
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 7px;
 }
 .product-status {
@@ -341,7 +349,7 @@ a.product-list-title:hover {
   gap: 6px;
 }
 .product-status small {
-  font-size: 11px;
+  font-size: 12px;
   color: #7c879a;
 }
 .status-deleted {
@@ -352,7 +360,7 @@ a.product-list-title:hover {
   display: grid;
   gap: 7px;
   color: #8290a5;
-  font-size: 11px;
+  font-size: 12px;
 }
 .product-counts b {
   color: #34435c;
@@ -364,7 +372,7 @@ a.product-list-title:hover {
   margin: 0;
   display: grid;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .product-times div {
   display: flex;
@@ -378,7 +386,7 @@ a.product-list-title:hover {
 .product-times dd {
   margin: 0;
   color: #58657b;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 .product-row-actions {
@@ -512,6 +520,19 @@ a.product-list-title:hover {
   margin-top: 0;
   overflow-wrap: anywhere;
 }
+.recommendation-dialog input {
+  width: 100%;
+  min-height: 44px;
+}
+.recommendation-dialog .form-error {
+  color: #b54436;
+}
+.recommendation-dialog .admin-success {
+  color: #2d7855;
+}
+.recommendation-dialog .product-dialog-actions {
+  flex-wrap: wrap;
+}
 .product-action-dialog label {
   display: grid;
   gap: 8px;
@@ -605,9 +626,9 @@ a.product-list-title:hover {
   }
   .product-table tr {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 16px;
-    padding: 16px 0;
+    padding: 16px 12px;
     border-bottom: 1px solid #e3e7ef;
   }
   .admin-table.product-table td {
@@ -621,19 +642,27 @@ a.product-list-title:hover {
     content: attr(data-label);
     display: block;
     color: #8c96a6;
-    font-size: 10px;
+    font-size: 12px;
     margin-bottom: 7px;
   }
   .product-table td.product-cell,
-  .product-table td:nth-child(5),
+  .product-table td.product-code-cell,
+  .product-table td.product-time-cell,
+  .product-table td.product-count-cell,
   .product-table td:last-child {
     grid-column: 1/-1;
   }
   .product-table td.product-cell::before {
     display: none;
   }
-  .product-table td:nth-child(4) {
-    grid-column: 1/-1;
+  .product-table td.product-code-cell {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .product-table td.product-code-cell::before {
+    margin-bottom: 0;
+    flex-shrink: 0;
   }
   .product-counts,
   .product-row-actions {
@@ -648,7 +677,7 @@ a.product-list-title:hover {
     gap: 8px;
   }
   .product-times dd {
-    font-size: 11px;
+    font-size: 12px;
   }
   .product-pagination {
     justify-content: center;

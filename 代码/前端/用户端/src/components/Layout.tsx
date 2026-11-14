@@ -230,7 +230,7 @@ export function Layout() {
               onClick={() => setSearch(true)}
             >
               <Search />
-              <span>搜索编号、区服或珍藏</span>
+              <span>搜索编号、标题或区服</span>
               <kbd>⌘ K</kbd>
             </button>
           )}

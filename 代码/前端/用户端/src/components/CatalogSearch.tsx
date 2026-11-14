@@ -288,7 +288,7 @@ export function CatalogSearch({
                 ref={input}
                 id="catalog-query"
                 aria-label="搜索商品编号、标题或区服"
-                placeholder="商品编号、标题或区服"
+                placeholder="搜索编号、标题或区服"
                 autoComplete="off"
                 onFocus={() => scheduleMotion.current()}
                 onBlur={() => scheduleMotion.current()}

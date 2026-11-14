@@ -55,7 +55,7 @@
   min-height: 38px;
   padding: 10px 2px;
   color: #728097;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-section-title {
   display: flex;
@@ -77,12 +77,12 @@
   display: block;
   margin-bottom: 5px;
   color: #71809b;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.025em;
 }
 .dashboard-note {
   color: #778397;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.85;
 }
 .dashboard-snapshot-grid {
@@ -124,16 +124,72 @@
   justify-content: space-between;
   gap: 6px;
   color: #7c8799;
-  font-size: 10px;
+  font-size: 12px;
 }
 .dashboard-snapshot:hover,
 .dashboard-action:hover {
   border-color: #b9c8ed;
   box-shadow: 0 3px 12px #26385408;
 }
+.dashboard-review-section {
+  margin: 26px 0;
+}
+.dashboard-review-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.dashboard-review-card {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 12px 16px;
+  align-items: center;
+  padding: 22px;
+  border: 1px solid #dce3f0;
+  border-radius: 12px;
+  background: #fff;
+}
+.dashboard-review-card.has-todo {
+  background: #f7f9ff;
+  border-color: #cdd9f4;
+}
+.dashboard-review-card > svg,
+.dashboard-review-card > strong {
+  color: #3658d4;
+}
+.dashboard-review-card h3 {
+  font-size: 15px;
+}
+.dashboard-review-card p {
+  color: #657188;
+  font-size: 12px;
+  margin-top: 5px;
+  line-height: 1.7;
+}
+.dashboard-review-card > strong {
+  font-size: 32px;
+}
+.dashboard-review-card > span {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #3658d4;
+  font-size: 13px;
+}
+@media (max-width: 700px) {
+  .dashboard-review-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .dashboard-review-card {
+    padding: 18px;
+    gap: 10px 12px;
+  }
+}
 .dashboard-todos {
   display: grid;
-  grid-template-columns: auto repeat(4, minmax(0, 1fr));
+  grid-template-columns: auto repeat(2, minmax(0, 1fr));
   gap: 15px;
   align-items: center;
   background: #eef2fc;
@@ -152,7 +208,7 @@
   align-items: center;
   gap: 8px;
   color: #78869d;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-todos a > strong {
   margin-left: auto;
@@ -187,7 +243,7 @@
 }
 .dashboard-period-stat > span {
   color: #728099;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-period-stat > strong {
   grid-column: 2;
@@ -212,7 +268,7 @@
   border-radius: 12px;
 }
 .dashboard-period {
-  font-size: 10px;
+  font-size: 12px;
   color: #7e899b;
   white-space: nowrap;
 }
@@ -225,7 +281,7 @@
 .dashboard-metric-tabs button {
   border: 1px solid var(--line);
   padding: 7px 10px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-metric-tabs button[aria-pressed="true"] {
   color: var(--blue);
@@ -238,7 +294,7 @@
   flex-wrap: wrap;
   gap: 8px 12px;
   color: #687993;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-chart-summary strong {
   font-size: 27px;
@@ -249,7 +305,7 @@
 }
 .dashboard-chart-summary > span {
   color: #8a95a6;
-  font-size: 10px;
+  font-size: 12px;
 }
 .dashboard-chart {
   width: 100%;
@@ -260,7 +316,7 @@
 }
 .dashboard-chart text {
   fill: #8692a5;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 .dashboard-chart-grid {
@@ -308,12 +364,12 @@
   min-width: 520px;
   border-collapse: collapse;
   text-align: right;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-table-scroll caption {
   text-align: left;
   color: #7c899e;
-  font-size: 10px;
+  font-size: 12px;
   padding: 0 0 10px;
 }
 .dashboard-table-scroll th,
@@ -344,7 +400,7 @@
   border-radius: 8px;
   background: #f5f7fc;
   color: #6f809b;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-trade-split a:last-child {
   background: #f3f8f7;
@@ -375,7 +431,7 @@
   grid-template-columns: 56px minmax(0, 1fr) minmax(24px, auto);
   align-items: center;
   gap: 12px;
-  font-size: 11px;
+  font-size: 12px;
   color: #75839a;
 }
 .dashboard-status-bars strong {
@@ -402,7 +458,7 @@
   align-items: center;
   gap: 5px;
   color: #5976ae;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-distributions > .dashboard-inline-link {
   margin-top: 12px;
@@ -456,7 +512,7 @@
 .dashboard-rank-product > span {
   display: block;
   margin-top: 5px;
-  font-size: 10px;
+  font-size: 12px;
   color: #8590a2;
   overflow-wrap: anywhere;
 }
@@ -470,7 +526,7 @@
   min-width: 45px;
 }
 .dashboard-rank-counts dt {
-  font-size: 10px;
+  font-size: 12px;
   color: #8b97a8;
 }
 .dashboard-rank-counts dd {
@@ -494,14 +550,14 @@
   color: #647693;
 }
 .dashboard-ranking-empty > span {
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-definition {
   padding: 17px 0;
 }
 .dashboard-definition ul {
   color: #7a879a;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.9;
   padding-left: 20px;
   margin: 12px 0 0;
@@ -548,7 +604,7 @@
 .dashboard-action small {
   display: block;
   color: #8692a5;
-  font-size: 10px;
+  font-size: 12px;
   margin-top: 5px;
 }
 .dashboard-help {
@@ -561,10 +617,10 @@
   border: 1px dashed #d9e1ee;
   border-radius: 9px;
   color: #8190a8;
-  font-size: 11px;
+  font-size: 12px;
 }
 .dashboard-help .guide-trigger {
-  font-size: 11px;
+  font-size: 12px;
   padding: 7px 10px;
 }
 .dashboard-loading {
@@ -690,7 +746,7 @@
   }
   .dashboard-todos a {
     gap: 6px;
-    font-size: 10px;
+    font-size: 12px;
   }
   .dashboard-todos a > svg:last-child {
     display: none;
@@ -704,7 +760,7 @@
     gap: 6px;
   }
   .dashboard-period-stat > span {
-    font-size: 10px;
+    font-size: 12px;
   }
   .dashboard-period-stat > strong {
     font-size: 24px;
@@ -723,7 +779,7 @@
   }
   .dashboard-metric-tabs button {
     padding: 7px 9px;
-    font-size: 10px;
+    font-size: 12px;
   }
   .dashboard-ranking-list > li {
     grid-template-columns: 24px minmax(0, 1fr);
@@ -764,11 +820,11 @@
     display: none;
   }
   .dashboard-action strong {
-    font-size: 11px;
+    font-size: 12px;
   }
   .dashboard-action small {
     line-height: 1.7;
-    font-size: 9px;
+    font-size: 12px;
   }
   .dashboard-help {
     padding: 12px;
@@ -785,18 +841,18 @@
     padding: 14px 12px;
   }
   .dashboard-snapshot > div {
-    font-size: 11px;
+    font-size: 12px;
   }
   .dashboard-snapshot > div svg {
     width: 16px;
   }
   .dashboard-range button {
-    font-size: 11px;
+    font-size: 12px;
     padding-inline: 8px;
   }
   .dashboard-refresh {
     padding-inline: 9px;
-    font-size: 11px;
+    font-size: 12px;
   }
   .dashboard-period-stat {
     padding-inline: 11px;

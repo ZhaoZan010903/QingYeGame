@@ -13,7 +13,11 @@ import (
 type RecommendationStore struct{ DB *pgxpool.Pool }
 
 func (a *RecommendationStore) Report(ctx context.Context) (map[string]any, error) {
-	rows, e := (&CatalogStore{DB: a.DB}).JSONRows(ctx, "SELECT to_jsonb(h)||jsonb_build_object('title',p.title) FROM product_hot_scores h JOIN products p ON p.id=h.product_id JOIN categories c ON c.id=p.category_id WHERE "+VisibleSQL+" ORDER BY score DESC,p.published_at DESC NULLS LAST,p.id LIMIT 50")
+	// The management report uses the same live candidate visibility and score
+	// freshness as public hot ordering. Retain score as the original batch value
+	// so an expired batch is distinguishable from its currently effective zero.
+	natural := "CASE WHEN h.computed_at BETWEEN now()-interval '60 minutes' AND now() THEN COALESCE(h.score,0) ELSE 0 END"
+	rows, e := (&CatalogStore{DB: a.DB}).JSONRows(ctx, "SELECT COALESCE(to_jsonb(h),'{}'::jsonb)||jsonb_build_object('product_id',p.id,'title',p.title,'score',COALESCE(h.score,0),'natural_score',"+natural+",'recommendation_boost',p.recommendation_boost,'hot_score',("+natural+"+p.recommendation_boost),'score_fresh',COALESCE(h.computed_at BETWEEN now()-interval '60 minutes' AND now(),false)) FROM products p JOIN categories c ON c.id=p.category_id LEFT JOIN product_hot_scores h ON h.product_id=p.id WHERE "+VisibleSQL+" ORDER BY ("+natural+"+p.recommendation_boost) DESC,p.published_at DESC NULLS LAST,p.id LIMIT 50")
 	if e != nil {
 		return nil, e
 	}
@@ -23,7 +27,7 @@ func (a *RecommendationStore) Report(ctx context.Context) (map[string]any, error
 	}
 	var state map[string]any
 	_ = a.DB.QueryRow(ctx, "SELECT value FROM site_settings WHERE key='recommendation_state'").Scan(&state)
-	return map[string]any{"data": rows, "rule_version": state["rule_version"], "computed_at": state["computed_at"], "applied_config": state["config"], "config": config, "rule": "按配置窗口内有效浏览、首次有效收藏及首次咨询人数加权；同一账号重复咨询不重复加分，上架时间不加热度分"}, nil
+	return map[string]any{"data": rows, "rule_version": state["rule_version"], "computed_at": state["computed_at"], "applied_config": state["config"], "config": config, "rule": "当前热门按有效自然热度加单商品推荐加分排序；自然热度为窗口内有效浏览、首次有效收藏和首次咨询人数加权，快照超过60分钟或处于未来时按0计算。本榜不表示个人推荐得分"}, nil
 }
 
 func LoadRecommendations(ctx context.Context, q RowQuerier) (recommendation.Config, error) {

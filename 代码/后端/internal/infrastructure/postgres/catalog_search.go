@@ -10,14 +10,19 @@ import (
 	"strings"
 )
 
+const naturalHotScore = "COALESCE((SELECT score FROM product_hot_scores h WHERE h.product_id=p.id AND h.computed_at BETWEEN now()-interval '60 minutes' AND now()),0)"
+const naturalHotOrder = naturalHotScore + " DESC,p.published_at DESC NULLS LAST,p.id"
+
 func ProductOrder(sort string) (string, error) {
 	switch sort {
 	case "", "featured":
-		return "p.manual_rank ASC NULLS LAST,p.published_at DESC NULLS LAST,p.id", nil
+		// Keep legacy out-of-range ranks before NULL when all boosts are zero.
+		// bigint also handles old integer extremes without subtraction overflow.
+		return "(CASE WHEN p.manual_rank IS NULL THEN 0 ELSE GREATEST(1::bigint,10001::bigint-p.manual_rank) END+p.recommendation_boost) DESC,p.manual_rank ASC NULLS LAST,p.published_at DESC NULLS LAST,p.id", nil
 	case "newest":
 		return "p.published_at DESC NULLS LAST,p.id", nil
 	case "hot", "recommended":
-		return "COALESCE((SELECT score FROM product_hot_scores h WHERE h.product_id=p.id AND h.computed_at BETWEEN now()-interval '60 minutes' AND now()),0) DESC,p.published_at DESC NULLS LAST,p.id", nil
+		return "(" + naturalHotScore + "+p.recommendation_boost) DESC,p.published_at DESC NULLS LAST,p.id", nil
 	case "price_asc", "price-up":
 		return "p.price_amount ASC NULLS LAST,p.id", nil
 	case "price_desc", "price-down":
@@ -144,11 +149,14 @@ func PersonalizedOrder(weights map[string]map[string]float64, where *string, arg
 	*args = append(*args, json.RawMessage(raw))
 	n := len(*args)
 	*where += fmt.Sprintf(" AND $%d::jsonb IS NOT NULL", n)
-	order := fmt.Sprintf(`COALESCE(($%[1]d::jsonb->'itemcf'->>p.id)::float8,0) DESC,
- (6*COALESCE(($%[1]d::jsonb->'category'->>p.category_id)::float8,0)
+	itemCF := fmt.Sprintf(`COALESCE(($%d::jsonb->'itemcf'->>p.id)::float8,0)`, n)
+	attributes := fmt.Sprintf(`(6*COALESCE(($%[1]d::jsonb->'category'->>p.category_id)::float8,0)
  +2*COALESCE(($%[1]d::jsonb->'trade'->>p.trade_type)::float8,0)
  +3*COALESCE(($%[1]d::jsonb->'server'->>(p.attributes->>'server'))::float8,0)
- +COALESCE(($%[1]d::jsonb->'price'->>(CASE WHEN p.price_amount>0 AND p.price_unit<>'unknown' THEN p.price_unit||':'||floor(log(2,p.price_amount+1))::text ELSE '' END))::float8,0)) DESC,`, n)
-	hot, _ := ProductOrder("hot")
-	return order + hot, nil
+ +COALESCE(($%[1]d::jsonb->'price'->>(CASE WHEN p.price_amount>0 AND p.price_unit<>'unknown' THEN p.price_unit||':'||floor(log(2,p.price_amount+1))::text ELSE '' END))::float8,0))`, n)
+	// The window sees the filtered candidate set, before pagination. A profile
+	// may contain ItemCF matches that the active filters have already excluded.
+	combined := "(CASE WHEN max(" + itemCF + ") OVER ()>0 THEN 100*" + itemCF + " ELSE (100.0/12)*" + attributes + " END+p.recommendation_boost) DESC,"
+	// Preserve the complete previous order on ties, without adding boost twice.
+	return combined + itemCF + " DESC," + attributes + " DESC," + naturalHotOrder, nil
 }

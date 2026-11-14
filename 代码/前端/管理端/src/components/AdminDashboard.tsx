@@ -407,19 +407,23 @@ export function DashboardContent({
       to: "/products?status=draft",
     },
   ];
-  const todos = [
+  const reviews = [
     {
-      label: "商品待审核",
+      label: "待审核商品",
       value: data.todos.pending_products,
       to: "/reviews",
       icon: ClipboardCheck,
+      note: "查看会员提交的账号资料与图片",
     },
     {
-      label: "昵称待审核",
+      label: "待审核昵称",
       value: data.todos.pending_nicknames,
       to: "/nickname-reviews",
       icon: Users,
+      note: "核对会员申请的新昵称",
     },
+  ];
+  const todos = [
     {
       label: "等待接待",
       value: data.todos.waiting_conversations,
@@ -462,7 +466,37 @@ export function DashboardContent({
           ))}
         </div>
       </section>
-      <section className="dashboard-todos" aria-label="当前待办">
+      <section
+        className="dashboard-review-section"
+        aria-labelledby="dashboard-review-title"
+      >
+        <div className="dashboard-section-title dashboard-section-heading">
+          <h2 id="dashboard-review-title">待审核事项</h2>
+          <span className="dashboard-note">
+            当前全部待审核数量，不受 7／30 天选择影响
+          </span>
+        </div>
+        <div className="dashboard-review-grid">
+          {reviews.map((item) => (
+            <Link
+              className={`dashboard-review-card${item.value > 0 ? " has-todo" : ""}`}
+              key={item.label}
+              to={item.to}
+            >
+              <item.icon size={22} aria-hidden="true" />
+              <div>
+                <h3>{item.label}</h3>
+                <p>{item.note}</p>
+              </div>
+              <strong className="mono">{number(item.value)}</strong>
+              <span>
+                前往审核 <ArrowRight size={15} aria-hidden="true" />
+              </span>
+            </Link>
+          ))}
+        </div>
+      </section>
+      <section className="dashboard-todos" aria-label="其他当前待办">
         <span className="dashboard-todos-heading">待办事项</span>
         {todos.map((item) => (
           <Link

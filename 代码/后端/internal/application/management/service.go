@@ -18,6 +18,7 @@ type Repository interface {
 	PurgeProduct(context.Context, management.Actor, string, management.PurgeProductInput) (map[string]any, error)
 	PurgeTrash(context.Context, management.Actor, management.PurgeTrashInput) (map[string]any, error)
 	FeatureProduct(ctx context.Context, actor management.Actor, id string, rank *int) (map[string]any, error)
+	Recommendation(context.Context, management.Actor, string, management.RecommendationInput) (map[string]any, error)
 	SaveCategory(ctx context.Context, actor management.Actor, id string, create bool, in management.CategoryInput) (map[string]any, error)
 	SaveContact(ctx context.Context, actor management.Actor, id string, in management.ContactInput) (map[string]any, error)
 	SavePage(ctx context.Context, actor management.Actor, slug string, in management.PageInput) (map[string]any, error)
@@ -226,6 +227,16 @@ func (s *Service) FeatureProduct(ctx context.Context, actor management.Actor, id
 		return nil, fault.New(fault.Invalid, "INVALID_RANK", "精选顺序无效")
 	}
 	return s.store.FeatureProduct(ctx, actor, id, rank)
+}
+
+func (s *Service) Recommendation(ctx context.Context, actor management.Actor, id string, in management.RecommendationInput) (map[string]any, error) {
+	if err := management.ValidateActor(actor); err != nil {
+		return nil, err
+	}
+	if err := management.ValidateRecommendationInput(in); err != nil {
+		return nil, err
+	}
+	return s.store.Recommendation(ctx, actor, id, in)
 }
 
 func (s *Service) Products(ctx context.Context, actor management.Actor, in management.ProductQuery) (map[string]any, error) {

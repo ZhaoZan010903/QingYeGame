@@ -34,6 +34,7 @@ func (a *App) registerAdmin(m routeRegistrar) {
 		m.HandleFunc("POST /api/v1/admin/products/{id}/"+action, a.adminOnly(a.adminTransition))
 	}
 	m.HandleFunc("PUT /api/v1/admin/products/{id}/featured", a.adminOnly(a.adminFeatured))
+	m.HandleFunc("PATCH /api/v1/admin/products/{id}/recommendation", a.adminOnly(a.adminProductRecommendation))
 	m.HandleFunc("GET /api/v1/admin/categories", a.adminOnly(a.adminCategories))
 	m.HandleFunc("POST /api/v1/admin/categories", a.adminOnly(a.saveCategory))
 	m.HandleFunc("PUT /api/v1/admin/categories/{id}", a.adminOnly(a.saveCategory))
