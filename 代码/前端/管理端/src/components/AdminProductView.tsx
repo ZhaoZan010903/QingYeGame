@@ -1,4 +1,8 @@
-import { ProtectedImage } from '../../../共享/MediaSecurity';
+import {
+  rentalQuoteLabel,
+  rentalUnitLabels,
+} from "../../../共享/rental-quotes";
+import { ProtectedImage } from "../../../共享/MediaSecurity";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, ChevronLeft, ChevronRight, X } from "lucide-react";
@@ -114,7 +118,10 @@ export function AdminProductView({ id }: { id: string }) {
               onClick={() => dialog.current?.showModal()}
               aria-label="放大当前商品图片"
             >
-              <ProtectedImage src={current.url} alt={current.alt || product.title} />
+              <ProtectedImage
+                src={current.url}
+                alt={current.alt || product.title}
+              />
             </button>
           ) : (
             <p>此商品暂无可用图片</p>
@@ -184,18 +191,15 @@ export function AdminProductView({ id }: { id: string }) {
           <Price product={product} />
           {!!product.rentalQuotes?.length && (
             <div className="preview-tags">
-              {product.rentalQuotes.map((q) => (
-                <span key={q.unit}>
-                  {q.amount} 元/
+              {product.rentalQuotes.map((q, index) => (
+                <span key={index}>
+                  {rentalQuoteLabel(q)} · {q.amount} 元 /{" "}
                   {
-                    (
-                      {
-                        hour: "小时",
-                        day: "日",
-                        week: "周",
-                        month: "月",
-                      } as Record<string, string>
-                    )[q.unit]
+                    rentalUnitLabels[
+                      q.unit === "period"
+                        ? (q.billing_unit ?? "period")
+                        : q.unit
+                    ]
                   }
                 </span>
               ))}
@@ -210,6 +214,18 @@ export function AdminProductView({ id }: { id: string }) {
               <dt>交易方式</dt>
               <dd>{product.mode === "rent" ? "出租" : "出售"}</dd>
             </div>
+            {product.mode === "rent" && (
+              <div>
+                <dt>租赁分类</dt>
+                <dd>
+                  {product.rentalCategory === "hour_day"
+                    ? "时日"
+                    : product.rentalCategory === "week_month"
+                      ? "周月"
+                      : "待管理员分类"}
+                </dd>
+              </div>
+            )}
             <div>
               <dt>所在区服</dt>
               <dd>{product.server || "未填写"}</dd>

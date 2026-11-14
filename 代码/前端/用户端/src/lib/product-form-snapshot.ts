@@ -9,7 +9,6 @@ export function formFromProduct(value: Product): ProductWrite {
     server: value.server,
     gender: value.gender,
     level: value.level,
-    kind: value.kind,
     categoryId: value.categoryId,
     description: value.description,
     attributes: value.attributes,

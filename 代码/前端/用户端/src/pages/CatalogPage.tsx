@@ -10,6 +10,8 @@ import type { FilterGroup } from '../types';
 import { useSession } from '../context';
 import { catalogPriceUnits } from '../lib/catalog-units';
 import { catalogFilters, catalogRequest } from '../lib/catalog-filters';
+import { catalogPageNumbers } from '../lib/catalog-pagination';
+import { rentalBillingLabels } from '../lib/rental-prices';
 import '../catalog.css';
 const defaultFilters: FilterGroup[] = [
   {
@@ -46,6 +48,7 @@ export function FilterForm({
     const p = new URLSearchParams(params);
     value ? p.set(key, value) : p.delete(key);
     p.delete('cursor');
+    if (key === 'price_unit' && value !== 'period') p.delete('period_basis');
     if (key === 'price_unit' && !value) {
       p.delete('min_price');
       p.delete('max_price');
@@ -106,10 +109,22 @@ export function FilterForm({
               )
               .map(([value, label]) => ({
                 value,
-                label: value === 'account' ? '元（账号总价）' : label,
+                label:
+                  value === 'account' ? '元（账号总价）' : value === 'period' ? '时段报价' : label,
               })),
           ]}
         />
+        {params.get('price_unit') === 'period' && (
+          <CatalogSelect
+            label="时段计价方式"
+            value={params.get('period_basis') || 'period'}
+            onChange={(value) => update('period_basis', value)}
+            options={Object.entries(rentalBillingLabels).map(([value, label]) => ({
+              value,
+              label,
+            }))}
+          />
+        )}
         <div className="price-inputs">
           <input
             type="number"
@@ -131,9 +146,40 @@ export function FilterForm({
             onChange={(e) => update('max_price', e.target.value)}
           />
         </div>
-        <p className="budget-hint">先选择报价单位，再按预算筛选或价格排序。</p>
+        <p className="budget-hint">
+          {params.get('price_unit') === 'period'
+            ? '按所选计价方式的最低时段报价筛选、排序。'
+            : '先选择报价单位，再按预算筛选或价格排序。'}
+        </p>
       </fieldset>
       {groups.filter((g) => g.key !== 'keyword').map(renderGroup)}
+    </div>
+  );
+}
+export function RentalCategoryTabs({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="rental-category-tabs" role="group" aria-label="租号分类">
+      {[
+        ['', '全部租号'],
+        ['hour_day', '时日'],
+        ['week_month', '周月'],
+      ].map(([category, label]) => (
+        <button
+          key={category}
+          type="button"
+          aria-pressed={value === category}
+          className={value === category ? 'active' : ''}
+          onClick={() => onChange(category)}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -165,7 +211,8 @@ export function Catalog({ home = false }: { home?: boolean }) {
       priceUnits: catalogPriceUnits(relevant, mode),
     };
   }, [categories.data, params.get('trade_type')]);
-  const request = catalogRequest(params, groups, home ? 6 : 9);
+  const pageSize = home ? 6 : 9;
+  const request = catalogRequest(params, groups, pageSize);
   const { user } = useSession();
   const result = useLoad(
     () => api.products(request),
@@ -173,6 +220,7 @@ export function Catalog({ home = false }: { home?: boolean }) {
   );
   const update = (p: URLSearchParams) => {
     p.delete('cursor');
+    if (p.get('trade_type') !== 'rent') p.delete('rental_category');
     setParams(p, { preventScrollReset: true });
   };
   const sort = (v: string) => {
@@ -184,6 +232,8 @@ export function Catalog({ home = false }: { home?: boolean }) {
     const p = new URLSearchParams(source);
     [
       'price_unit',
+      'period_basis',
+      'rental_category',
       'min_price',
       'max_price',
       'cursor',
@@ -195,16 +245,20 @@ export function Catalog({ home = false }: { home?: boolean }) {
     return p;
   };
   const active = [...params.entries()].filter(
-    ([k]) => !['sort', 'cursor', 'q', 'trade_type', 'kind', 'filters'].includes(k),
+    ([k]) =>
+      !['sort', 'cursor', 'q', 'trade_type', 'rental_category', 'kind', 'filters'].includes(k),
   );
   const filterLabel = (key: string, value: string) => {
-    if (key === 'price_unit') return unitLabels[value]?.replace('/ ', '每') || value;
+    if (key === 'price_unit')
+      return value === 'period' ? '时段报价' : unitLabels[value]?.replace('/ ', '每') || value;
+    if (key === 'period_basis') return `时段计价：${unitLabels[value] || value}`;
     if (key === 'min_price') return `最低 ¥${value}`;
     if (key === 'max_price') return `最高 ¥${value}`;
     return (
       groups.find((g) => g.key === key)?.options.find((o) => o.value === value)?.label || value
     );
   };
+  const page = catalogPageNumbers(result.data?.total ?? 0, params.get('cursor'), pageSize);
   const Heading = home ? 'h2' : 'h1';
   return (
     <section
@@ -282,14 +336,22 @@ export function Catalog({ home = false }: { home?: boolean }) {
         </aside>
         <div className="collection-results">
           <div className="results-toolbar flex items-center justify-between">
-            <div className="result-summary" aria-live="polite">
-              <span className="catalog-result-query" title={params.get('q') || undefined}>
-                {params.get('q') ? `“${params.get('q')}”` : '全部结果'}
-              </span>
-              <span className="catalog-result-count">
-                <strong>{result.data?.total ?? '—'}</strong> 个账号
-              </span>
-            </div>
+            {params.get('trade_type') === 'rent' ? (
+              <RentalCategoryTabs
+                value={params.get('rental_category') || ''}
+                onChange={(value) => {
+                  const p = new URLSearchParams(params);
+                  value ? p.set('rental_category', value) : p.delete('rental_category');
+                  update(p);
+                }}
+              />
+            ) : (
+              <div className="result-summary" aria-live="polite">
+                <span className="catalog-result-query" title={params.get('q') || undefined}>
+                  {params.get('q') ? `“${params.get('q')}”` : '全部结果'}
+                </span>
+              </div>
+            )}
             <div className="toolbar-actions">
               <button
                 className="mobile-filter-button"
@@ -337,6 +399,7 @@ export function Catalog({ home = false }: { home?: boolean }) {
                     p.delete(k);
                     values.forEach((value) => p.append(k, value));
                     if (k === 'price_unit') {
+                      p.delete('period_basis');
                       p.delete('min_price');
                       p.delete('max_price');
                       if (p.get('sort')?.startsWith('price')) p.delete('sort');
@@ -385,7 +448,7 @@ export function Catalog({ home = false }: { home?: boolean }) {
                   </button>
                 )}
                 <span>
-                  共 {result.data.total} 个账号 · 每页 {home ? 6 : 9} 个
+                  第 {page.current} 页，共 {page.pages} 页
                 </span>
               </div>
             </>

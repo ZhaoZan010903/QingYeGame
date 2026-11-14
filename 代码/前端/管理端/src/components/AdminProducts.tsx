@@ -1,4 +1,4 @@
-import { ProtectedImage } from '../../../共享/MediaSecurity';
+import { ProtectedImage } from "../../../共享/MediaSecurity";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { publicationInterrupted } from "../../../共享/upload-progress";
 import { Link, useSearchParams } from "react-router-dom";
@@ -260,6 +260,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
     kind: Action;
   } | null>(null);
   const [reason, setReason] = useState("");
+  const [rentalCategory, setRentalCategory] = useState("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const sequence = useRef(0);
@@ -306,6 +307,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
   useEffect(() => {
     if (action) {
       setReason("");
+      setRentalCategory(action.product.rentalCategory ?? "");
       setActionError("");
       dialog.current?.showModal();
     } else dialog.current?.close();
@@ -334,6 +336,8 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
     setActionError("");
     const { product: p, kind } = action;
     try {
+      if (kind === "publish" && p.mode === "rent" && !rentalCategory)
+        throw new Error("请先选择租赁分类：时日或周月。");
       // Use the version the operator saw; never silently overwrite a concurrent edit.
       if (kind === "trash")
         await adminApi.trashProduct(p.id, p.version, reason.trim());
@@ -342,6 +346,9 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
       else
         await adminApi.action(p.id, kind === "publish" ? "publish" : "status", {
           expected_version: p.version,
+          ...(kind === "publish" && p.mode === "rent"
+            ? { rental_category: rentalCategory }
+            : {}),
           ...(kind === "offline"
             ? { action: "offline", reason: reason.trim() }
             : {}),
@@ -682,6 +689,21 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
               {action.product.title.trim() || "未填写标题"}
             </p>
             <p>{actionNotes[action.kind]}</p>
+            {action.kind === "publish" && action.product.mode === "rent" && (
+              <label>
+                租赁分类
+                <select
+                  required
+                  aria-label="租赁分类"
+                  value={rentalCategory}
+                  onChange={(e) => setRentalCategory(e.target.value)}
+                >
+                  <option value="">请选择租赁分类</option>
+                  <option value="hour_day">时日</option>
+                  <option value="week_month">周月</option>
+                </select>
+              </label>
+            )}
             {["trash", "offline"].includes(action.kind) && (
               <label>
                 操作原因
@@ -718,6 +740,9 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                 }
                 disabled={
                   busy ||
+                  (action.kind === "publish" &&
+                    action.product.mode === "rent" &&
+                    !rentalCategory) ||
                   (["trash", "offline"].includes(action.kind) && !reason.trim())
                 }
               >

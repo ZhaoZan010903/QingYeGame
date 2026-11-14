@@ -2,7 +2,8 @@ import type { HomePresentation } from "./home-content";
 
 export type TradeType = "sale" | "rent";
 export type PriceUnit =
-  "account" | "hour" | "day" | "week" | "month" | "unknown";
+  "account" | "hour" | "day" | "week" | "month" | "period" | "unknown";
+export type RentalCategory = "hour_day" | "week_month";
 export type ProductStatus =
   | "draft"
   | "pending"
@@ -15,8 +16,12 @@ export type ProductStatus =
   | "rented";
 export type VerificationStatus = "unprovided" | "pending" | "verified";
 export interface RentalQuote {
-  unit: "hour" | "day" | "week" | "month";
+  unit: "hour" | "day" | "week" | "month" | "period";
   amount: string;
+  start_time?: string;
+  end_time?: string;
+  label?: string;
+  billing_unit?: "period" | "hour" | "day" | "week" | "month";
 }
 export interface ImageItem {
   id: string;
@@ -31,6 +36,7 @@ export interface Product {
   >;
   draftExpiresAt?: string | null;
   rentalQuotes?: RentalQuote[];
+  rentalCategory?: RentalCategory;
   hasPrivateCredentials?: boolean;
   consultationCount?: number;
   id: string;

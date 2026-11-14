@@ -257,7 +257,7 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 		combined = append(combined, g)
 	}
 	combinedJSON, _ := json.Marshal(combined)
-	_, e := a.DB.Exec(ctx, `INSERT INTO categories(id,name,trade_type,price_units,filter_config) VALUES('qq-dance','QQ炫舞','all','["account","hour","day","week","month"]',$1) ON CONFLICT(id) DO NOTHING`, combinedJSON)
+	_, e := a.DB.Exec(ctx, `INSERT INTO categories(id,name,trade_type,price_units,filter_config) VALUES('qq-dance','QQ炫舞','all','["account","hour","day","week","month","period"]',$1) ON CONFLICT(id) DO NOTHING`, combinedJSON)
 	if e != nil {
 		return 0, e
 	}

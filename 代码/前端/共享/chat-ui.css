@@ -462,9 +462,11 @@
 }
 .chat-product-card b {
   display: block;
+  overflow-wrap: anywhere;
   font:
     500 12px "JetBrains Mono",
     monospace;
+  line-height: 1.6;
   margin-top: 9px;
   color: var(--chat-accent);
 }

@@ -1,4 +1,8 @@
+import type { RentalCategory, RentalQuote } from "./types";
+
 export interface ChatProduct {
+  rental_quotes?: RentalQuote[];
+  rental_category?: RentalCategory | "";
   id: string;
   code: string;
   title: string;

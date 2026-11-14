@@ -43,7 +43,7 @@ func saveProductExtras(ctx context.Context, tx pgx.Tx, id, key string, in catalo
 	if quotes == nil {
 		quotes = []catalog.RentalQuote{}
 	}
-	if _, err := tx.Exec(ctx, "UPDATE products SET rental_quotes=$2 WHERE id=$1", id, quotes); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE products SET rental_quotes=$2,rental_category=COALESCE($3::text,rental_category) WHERE id=$1", id, quotes, in.RentalCategory); err != nil {
 		return err
 	}
 	if in.PrivateCredentials == nil {

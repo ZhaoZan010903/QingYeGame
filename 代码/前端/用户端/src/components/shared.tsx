@@ -4,7 +4,9 @@ import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, X, Search, ShieldCheck, RefreshCw } from 'lucide-react';
 import { isDemo } from '../lib/api';
 import type { Product } from '../types';
+import { rentalCategoryLabel, rentalPriceRows } from '../lib/rental-prices';
 import '../card-readability.css';
+import '../rental-prices.css';
 
 export const unitLabels: Record<string, string> = {
   account: '元',
@@ -12,11 +14,54 @@ export const unitLabels: Record<string, string> = {
   day: '元/日',
   week: '元/周',
   month: '元/月',
+  period: '元/时段',
   unknown: '原站报价 · 单位待核对',
 };
 export const genderLabel = (gender: Product['gender']) =>
   gender === 'female' ? '女角色' : gender === 'male' ? '男角色' : '角色未注明';
-export function Price({ product: p, compact = false }: { product: Product; compact?: boolean }) {
+export function Price({
+  product: p,
+  compact = false,
+  allPeriods = false,
+}: {
+  product: Product;
+  compact?: boolean;
+  allPeriods?: boolean;
+}) {
+  if (p.mode === 'rent' && p.rentalQuotes?.length) {
+    const rows = rentalPriceRows(p.rentalQuotes, allPeriods);
+    const periodCount = p.rentalQuotes.filter((quote) => quote.unit === 'period').length;
+    const grouped = periodCount > rows.filter((row) => row.period).length;
+    return (
+      <span
+        className={`rental-price-list ${compact ? 'rental-price-compact' : ''}`}
+        role="group"
+        aria-label="租赁报价"
+      >
+        {rows.map((row, index) => (
+          <span
+            className={`rental-price-item ${row.period ? 'rental-price-period' : ''}`}
+            key={index}
+          >
+            <span className="rental-price-label">
+              {row.label}
+              {row.time && <small>{row.time}</small>}
+            </span>
+            <span className="rental-price-value">
+              <b className="mono">{row.amount}</b>
+              <small>
+                {row.unit}
+                {row.starting ? '起' : ''}
+              </small>
+            </span>
+          </span>
+        ))}
+        {grouped && (
+          <small className="rental-price-more">共 {periodCount} 档时段报价，详情查看</small>
+        )}
+      </span>
+    );
+  }
   const legacy = p.unit === 'unknown' && p.legacyPrice !== undefined;
   return (
     <span className={`price-box ${compact ? 'price-compact' : ''}`}>
@@ -84,17 +129,12 @@ export function AssetCard({ product: p }: { product: Product }) {
   const tradeKind =
     p.mode === 'sale'
       ? 'sale'
-      : p.unit === 'week' || p.unit === 'month' || p.legacyCategory === '周月租号'
+      : p.rentalCategory === 'week_month'
         ? 'long-rent'
-        : 'short-rent';
-  const tradeLabel =
-    tradeKind === 'sale'
-      ? '账号出售'
-      : p.unit === 'unknown'
-        ? p.legacyCategory || '账号租赁'
-        : tradeKind === 'long-rent'
-          ? '周月租号'
-          : '时日租号';
+        : p.rentalCategory === 'hour_day'
+          ? 'short-rent'
+          : 'rent';
+  const tradeLabel = rentalCategoryLabel(p);
   return (
     <article className="asset-card">
       <Link
@@ -123,7 +163,9 @@ export function AssetCard({ product: p }: { product: Product }) {
               <span key={t}>{t}</span>
             ))}
           </div>
-          <div className="asset-bottom">
+          <div
+            className={`asset-bottom ${p.mode === 'rent' && p.rentalQuotes?.length ? 'asset-bottom-rental' : ''}`}
+          >
             <span className="card-caption">查看详情</span>
             <div className="asset-price-side">
               <Price product={p} compact />

@@ -32,6 +32,8 @@ export function catalogRequest(params: URLSearchParams, groups: FilterGroup[], l
   // Retired links must not silently keep the removed account-structure filter active.
   request.delete('kind');
   request.delete('filters');
+  if (request.get('trade_type') !== 'rent') request.delete('rental_category');
+  if (request.get('price_unit') !== 'period') request.delete('period_basis');
   request.set('limit', String(limit));
   const filterValues: Record<string, string[]> = {};
   groups.forEach((group) => {

@@ -26,7 +26,7 @@ describe('固定发布表单', () => {
     expect(publishAttributeLabel(group, 'server_new', product)).toBe('新大区');
     expect(publishAttributeLabel(group, '', product)).toBe('');
   });
-  it('交易类型共用字典，四个属性始终单选且只有区服性别必填', () => {
+  it('交易类型共用字典，三个属性始终单选且只有区服性别必填', () => {
     const fields = fixedPublishFields(
       [
         {
@@ -41,7 +41,7 @@ describe('固定发布表单', () => {
       ],
       [],
     );
-    expect(fields.map((field) => field.key)).toEqual(['server', 'gender', 'level', 'kind']);
+    expect(fields.map((field) => field.key)).toEqual(['server', 'gender', 'level']);
     expect(fields.every((field) => field.type === 'select' && !field.multiple)).toBe(true);
     expect(fields.filter((field) => field.required).map((field) => field.key)).toEqual([
       'server',

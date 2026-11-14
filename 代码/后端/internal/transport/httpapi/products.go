@@ -34,7 +34,7 @@ func (a *App) publicProducts(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "INVALID_CURSOR", e.Error())
 		return
 	}
-	input := catalog.SearchInput{Query: q.Get("q"), Category: q.Get("category"), TradeType: q.Get("trade_type"), PriceUnit: q.Get("price_unit"), Sort: q.Get("sort"), Limit: limit, Offset: offset}
+	input := catalog.SearchInput{Query: q.Get("q"), Category: q.Get("category"), TradeType: q.Get("trade_type"), RentalCategory: q.Get("rental_category"), PriceUnit: q.Get("price_unit"), PeriodBasis: q.Get("period_basis"), Sort: q.Get("sort"), Limit: limit, Offset: offset}
 	if q.Has("min_price") {
 		v := q.Get("min_price")
 		input.MinPrice = &v

@@ -31,6 +31,8 @@ export function toApiQuery(source: URLSearchParams): URLSearchParams {
   if (p.has('high')) p.set('max_price', p.get('high')!);
   ['mode', 'unit', 'low', 'high', 'page'].forEach((key) => p.delete(key));
   if (mode === 'sale' || mode === 'rent' || mode === 'all') p.delete('category');
+  if (p.get('trade_type') !== 'rent') p.delete('rental_category');
+  if (p.get('price_unit') !== 'period') p.delete('period_basis');
   for (const [key, value] of [...p]) if (value === 'all' || value === '') p.delete(key);
   if (
     p.get('price_unit') === 'unknown' &&

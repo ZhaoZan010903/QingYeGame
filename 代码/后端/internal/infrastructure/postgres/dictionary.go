@@ -78,7 +78,7 @@ func (s *ManagementStore) SaveDictionary(ctx context.Context, actor management.A
 
 // All product writes hold group locks in the same order as dictionary updates.
 func validateDictionaryAttributes(ctx context.Context, q RowQuerier, p catalog.ProductInput, complete bool) error {
-	for _, key := range []string{"gender", "kind", "level", "server"} {
+	for _, key := range []string{"gender", "level", "server"} {
 		var label string
 		if err := q.QueryRow(ctx, `SELECT label FROM product_dictionary_groups WHERE key=$1 FOR SHARE`, key).Scan(&label); err != nil {
 			return errors.New("发布字典暂不可用")

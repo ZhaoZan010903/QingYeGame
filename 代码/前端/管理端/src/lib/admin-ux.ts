@@ -52,6 +52,7 @@ export const unitLabels: Record<string, string> = {
   day: "元 / 天",
   week: "元 / 周",
   month: "元 / 月",
+  period: "元 / 时段",
   unknown: "待核对（历史数据）",
 };
 export interface EditableOption {

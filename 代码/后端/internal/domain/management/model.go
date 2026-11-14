@@ -188,10 +188,11 @@ type HomePresentation struct {
 
 // 所有写入口共用状态规则，避免管理端绕开审核。
 type TransitionInput struct {
-	ExpectedVersion int    `json:"expected_version"`
-	Decision        string `json:"decision"`
-	Action          string `json:"action"`
-	Reason          string `json:"reason"`
+	ExpectedVersion int     `json:"expected_version"`
+	Decision        string  `json:"decision"`
+	Action          string  `json:"action"`
+	Reason          string  `json:"reason"`
+	RentalCategory  *string `json:"rental_category,omitempty"`
 }
 
 func Transition(status, source, operation string, in TransitionInput) (target, action string, err error) {
@@ -262,7 +263,7 @@ func ValidateCategoryRules(in CategoryInput) error {
 		return fault.New(fault.Invalid, "INVALID_CATEGORY", "交易类型无效")
 	}
 	for _, u := range in.PriceUnits {
-		if !slices.Contains([]string{"account", "hour", "day", "week", "month", "unknown"}, u) || in.TradeType == "sale" && u != "account" && u != "unknown" || in.TradeType == "rent" && u == "account" {
+		if !slices.Contains([]string{"account", "hour", "day", "week", "month", "period", "unknown"}, u) || in.TradeType == "sale" && u != "account" && u != "unknown" || in.TradeType == "rent" && u == "account" {
 			return fault.New(fault.Invalid, "INVALID_CATEGORY", "报价单位不适用于该分类")
 		}
 	}
@@ -281,6 +282,7 @@ func ValidateCategoryIdentity(id string, in CategoryInput) error {
 
 type ProductQuery struct {
 	Status, Source, Query, TradeType, Sort string
+	RentalCategory                         string
 	Trash                                  bool
 	Limit, Offset                          int
 }

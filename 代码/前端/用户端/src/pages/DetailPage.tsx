@@ -11,8 +11,27 @@ import { ConsultationOptions } from '../components/ConsultationOptions';
 import { levelLabel } from '../../../共享/level';
 import { AssetArchive } from '../components/AssetArchive';
 import { quoteTerms } from '../lib/asset-copy';
+import { rentalCategoryLabel } from '../lib/rental-prices';
 import '../gallery.css';
 import '../service-refinement.css';
+
+export function ProductTradeMode({ product: p }: { product: Product }) {
+  // New listings no longer collect account structure; only persisted history may show it.
+  const kind =
+    p.attributeLabels?.kind ||
+    (p.attributes?.kind === 'linked'
+      ? '双号连体'
+      : p.attributes?.kind === 'single'
+        ? '独立账号'
+        : '');
+  return (
+    <>
+      {rentalCategoryLabel(p)}
+      {kind && <> · {kind}</>}
+    </>
+  );
+}
+
 function DetailContent({
   product: p,
   reloadProduct,
@@ -30,15 +49,9 @@ function DetailContent({
   const location = useLocation();
   const quotes = quoteTerms(p.title + '\n' + p.description);
   const deposit = quotes.find((quote) => quote.label === '押金');
+  const structuredRates = p.mode === 'rent' && !!p.rentalQuotes?.length;
   const rates =
-    p.mode === 'rent'
-      ? p.rentalQuotes?.length
-        ? p.rentalQuotes.map((q) => ({
-            label: { hour: '时租', day: '日租', week: '周租', month: '月租' }[q.unit],
-            value: q.amount,
-          }))
-        : quotes.filter((quote) => quote.label !== '押金')
-      : [];
+    p.mode === 'rent' && !structuredRates ? quotes.filter((quote) => quote.label !== '押金') : [];
   useEffect(() => {
     void api.view(p.id).catch(() => {});
     try {
@@ -140,7 +153,7 @@ function DetailContent({
           </div>
           <div className="detail-price">
             <div className="detail-price-line">
-              <Price product={p} compact />
+              <Price product={p} compact={!structuredRates} allPeriods />
               {deposit && (
                 <span className="deposit-badge">
                   押金 <b className="mono">¥{deposit.value}</b>
@@ -158,9 +171,11 @@ function DetailContent({
               </div>
             )}
             <p>
-              {rates.length || deposit
-                ? '分档报价与押金来自卖家说明，实际条件请向客服确认。'
-                : '展示报价，实际租期与交付安排请向客服确认。'}
+              {structuredRates
+                ? '展示各档租赁报价，实际租期、押金与交付安排请向客服确认。'
+                : rates.length || deposit
+                  ? '分档报价与押金来自卖家说明，实际条件请向客服确认。'
+                  : '展示报价，实际租期与交付安排请向客服确认。'}
             </p>
           </div>
           <dl className="property-grid">
@@ -182,8 +197,7 @@ function DetailContent({
             <div>
               <dt>交易模式</dt>
               <dd>
-                {p.mode === 'sale' ? '出售' : '租赁'} ·{' '}
-                {p.attributeLabels?.kind || (p.kind === 'linked' ? '双号连体' : '独立账号')}
+                <ProductTradeMode product={p} />
               </dd>
             </div>
           </dl>

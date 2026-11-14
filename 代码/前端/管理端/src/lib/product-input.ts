@@ -1,14 +1,18 @@
-const rentalUnits = ["hour", "day", "week", "month"];
+import type { RentalQuote } from "../types";
+import { validateRentalQuotes } from "../../../共享/rental-quotes";
+const rentalUnits = ["hour", "day", "week", "month", "period"];
 
 /** The API uses the first quote as the card price, so preserve the editor's primary quote. */
 export function buildRentalQuotes(
   mode: string,
   primaryUnit: string,
   primaryAmount: string,
-  additional: Record<string, string>,
+  additional: Record<string, string> | RentalQuote[],
   allowedUnits: string[] = rentalUnits,
 ) {
   if (mode !== "rent") return [];
+  if (Array.isArray(additional))
+    return validateRentalQuotes(additional, allowedUnits);
   const configured = allowedUnits.length ? allowedUnits : rentalUnits;
   if (primaryUnit !== "unknown" && !configured.includes(primaryUnit))
     throw new Error("当前交易分类不支持主报价单位，请重新选择。");

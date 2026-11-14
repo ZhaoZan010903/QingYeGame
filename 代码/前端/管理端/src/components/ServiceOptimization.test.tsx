@@ -116,12 +116,11 @@ describe("R15运营工作流", () => {
     expect(html).toContain("layout-image-left");
     expect(html).toContain("--slide-x:80%");
   });
-  it("字典只维护固定四组，重复名称不会新建重复标识", () => {
+  it("发布保留三组属性，重复名称不会新建重复标识", () => {
     expect(fixedProductFields.map((field) => field.key)).toEqual([
       "server",
       "gender",
       "level",
-      "kind",
     ]);
     const group: DictionaryGroup = {
       key: "server",

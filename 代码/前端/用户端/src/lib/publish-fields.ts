@@ -1,6 +1,6 @@
 import type { FilterGroup, PriceUnit, ProductWrite, RentalQuote } from '../types';
 
-const builtins = new Set(['server', 'gender', 'level', 'kind']);
+const builtins = new Set(['server', 'gender', 'level']);
 
 /** Unknown units remain unknown until explicit rental quotes replace them; legacy prices are separate. */
 export function rentalPriceForWrite(

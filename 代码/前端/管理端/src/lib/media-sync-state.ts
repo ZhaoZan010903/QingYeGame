@@ -21,6 +21,7 @@ export function editorRecordFromProduct<T extends Record<string, any>>(
     description: product.description,
     attributes: product.attributes ?? {},
     rental_quotes: product.rentalQuotes ?? [],
+    rental_category: product.rentalCategory ?? "",
     status: product.status,
     version: product.version,
     image_total: product.imageTotal,

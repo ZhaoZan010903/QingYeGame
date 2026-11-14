@@ -1,3 +1,4 @@
+import { chatProductPrice } from "../../../共享/chat-product-price";
 import { ProtectedImage } from "../../../共享/MediaSecurity";
 import {
   useCallback,
@@ -61,14 +62,6 @@ const emojis = [
   "🌿",
 ];
 const statusNames = { waiting: "等待接待", active: "咨询中", closed: "已结束" };
-const units: Record<string, string> = {
-  account: "元",
-  hour: "元/小时",
-  day: "元/日",
-  week: "元/周",
-  month: "元/月",
-  unknown: "",
-};
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message : "操作失败，请稍后重试。";
 const date = (value: string) =>
@@ -78,7 +71,7 @@ const date = (value: string) =>
     hour: "2-digit",
     minute: "2-digit",
   });
-function ProductCard({ product }: { product: ChatProduct }) {
+export function ChatProductCard({ product }: { product: ChatProduct }) {
   const [failed, setFailed] = useState(false);
   return (
     <a
@@ -101,11 +94,7 @@ function ProductCard({ product }: { product: ChatProduct }) {
       <span>
         <small>咨询商品 · 报价以客服确认为准</small>
         <strong>{product.title}</strong>
-        <b>
-          {product.price !== null && product.unit !== "unknown"
-            ? `¥ ${Number(product.price).toLocaleString("zh-CN")} ${units[product.unit] || ""}`
-            : "联系客服报价"}
-        </b>
+        <b>{chatProductPrice(product)}</b>
       </span>
     </a>
   );
@@ -756,7 +745,7 @@ export function ChatPage() {
                           {item.sender_role === "admin" && <em>客服</em>}
                         </small>
                         {item.kind === "product" && item.product ? (
-                          <ProductCard product={item.product} />
+                          <ChatProductCard product={item.product} />
                         ) : (
                           <div className="chat-bubble">
                             {!!item.images?.length && (

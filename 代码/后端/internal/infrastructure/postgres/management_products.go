@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
 	"qingye/backend/internal/domain/catalog"
@@ -15,10 +14,6 @@ import (
 
 func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Actor, id string, in catalog.ProductInput) (map[string]any, error) {
 	catalog.NormalizeInput(&in)
-	attrs, _ := json.Marshal(in.Attributes)
-	if in.Attributes == nil {
-		attrs = []byte("{}")
-	}
 	tx, e := s.DB.Begin(ctx)
 	if e != nil {
 		return nil, managementStoreError(e)
@@ -58,7 +53,7 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 		if err != nil {
 			return nil, managementStoreError(err)
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO products(id,product_code,category_id,title,trade_type,price_unit,price_amount,attributes,description,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'platform')`, id, code, in.CategoryID, strings.TrimSpace(in.Title), in.TradeType, in.PriceUnit, in.PriceAmount, attrs, in.Description)
+		_, e = tx.Exec(ctx, `INSERT INTO products(id,product_code,category_id,title,trade_type,price_unit,price_amount,attributes,description,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'platform')`, id, code, in.CategoryID, strings.TrimSpace(in.Title), in.TradeType, in.PriceUnit, in.PriceAmount, in.Attributes, in.Description)
 		if e == nil {
 			e = recordProductReplay(ctx, tx, actor.ID, "admin-create", in.RequestID, hash, id)
 		}
@@ -79,10 +74,11 @@ func (s *ManagementStore) SaveProduct(ctx context.Context, actor management.Acto
 			return nil, fault.New(fault.Invalid, "TRADE_TYPE_IMMUTABLE", "已保存商品的租售类型不可更改，如需更换请新建资产")
 		}
 		if e == nil {
+			catalog.PreserveHistoricalKind(&in)
 			e = validateInput()
 		}
 		if e == nil {
-			_, e = tx.Exec(ctx, `UPDATE products SET category_id=$2,title=$3,trade_type=$4,price_unit=$5,price_amount=$6,attributes=$7,description=$8,status='draft',version=version+1,approved_version=NULL,review_note='',updated_at=now() WHERE id=$1`, id, in.CategoryID, strings.TrimSpace(in.Title), in.TradeType, in.PriceUnit, in.PriceAmount, attrs, in.Description)
+			_, e = tx.Exec(ctx, `UPDATE products SET category_id=$2,title=$3,trade_type=$4,price_unit=$5,price_amount=$6,attributes=$7,description=$8,status='draft',version=version+1,approved_version=NULL,review_note='',updated_at=now() WHERE id=$1`, id, in.CategoryID, strings.TrimSpace(in.Title), in.TradeType, in.PriceUnit, in.PriceAmount, in.Attributes, in.Description)
 		}
 	}
 	if e != nil {
@@ -110,9 +106,9 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 		return nil, managementStoreError(e)
 	}
 	defer tx.Rollback(ctx)
-	var status, source, title, description, tradeType string
+	var status, source, title, description, tradeType, rentalCategory string
 	var version int
-	e = tx.QueryRow(ctx, "SELECT status,source,title,description,version,trade_type FROM products WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", id).Scan(&status, &source, &title, &description, &version, &tradeType)
+	e = tx.QueryRow(ctx, "SELECT status,source,title,description,version,trade_type,rental_category FROM products WHERE id=$1 AND deleted_at IS NULL FOR UPDATE", id).Scan(&status, &source, &title, &description, &version, &tradeType, &rentalCategory)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, fault.New(fault.NotFound, "NOT_FOUND", "商品不存在")
 	}
@@ -128,6 +124,16 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 	target, action, e := management.Transition(status, source, operation, in)
 	if e != nil {
 		return nil, e
+	}
+	previousRentalCategory := rentalCategory
+	if in.RentalCategory != nil {
+		rentalCategory = *in.RentalCategory
+	}
+	if !catalog.ValidRentalCategory(rentalCategory) || tradeType != "rent" && rentalCategory != "" {
+		return nil, fault.New(fault.Invalid, "INVALID_RENTAL_CATEGORY", "出租分类无效或不适用于出售商品")
+	}
+	if target == "published" && tradeType == "rent" && rentalCategory == "" {
+		return nil, fault.New(fault.Invalid, "RENTAL_CATEGORY_REQUIRED", "请先选择时/日租号或周/月租号分类")
 	}
 	if target == "sold" && tradeType != "sale" || target == "rented" && tradeType != "rent" {
 		return nil, fault.New(fault.Invalid, "INVALID_STATE", "成交状态与交易类型不符")
@@ -161,7 +167,7 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 			return nil, fault.New(fault.Invalid, "INCOMPLETE_PRODUCT", "请补全资料并等待全部图片就绪")
 		}
 	}
-	_, e = tx.Exec(ctx, `UPDATE products SET status=$2,version=version+1,approved_version=CASE WHEN $2='published' THEN version+1 ELSE NULL END,review_note=$3,published_at=CASE WHEN $2='published' THEN COALESCE(published_at,now()) ELSE published_at END,updated_at=now() WHERE id=$1`, id, target, strings.TrimSpace(in.Reason))
+	_, e = tx.Exec(ctx, `UPDATE products SET status=$2,version=version+1,approved_version=CASE WHEN $2='published' THEN version+1 ELSE NULL END,review_note=$3,published_at=CASE WHEN $2='published' THEN COALESCE(published_at,now()) ELSE published_at END,rental_category=$4,updated_at=now() WHERE id=$1`, id, target, strings.TrimSpace(in.Reason), rentalCategory)
 	if e == nil {
 		_, e = tx.Exec(ctx, `INSERT INTO product_reviews(id,product_id,reviewer_id,decision,reason,version,snapshot)
 SELECT $1,id,$2,$3,$4,version,(to_jsonb(products)-'legacy_payload')||jsonb_build_object('images',
@@ -169,7 +175,7 @@ COALESCE((SELECT jsonb_agg(jsonb_build_object('id',m.id,'sort_order',pi.sort_ord
 FROM products WHERE id=$5`, s.NewID(), actor.ID, target, in.Reason, id)
 	}
 	if e == nil {
-		_, e = tx.Exec(ctx, "INSERT INTO admin_logs(id,user_id,action,resource_id) VALUES($1,$2,$3,$4)", s.NewID(), actor.ID, "product."+action, id)
+		_, e = tx.Exec(ctx, "INSERT INTO admin_logs(id,user_id,action,resource_id,detail) VALUES($1,$2,$3,$4,$5)", s.NewID(), actor.ID, "product."+action, id, map[string]any{"rental_category": rentalCategory, "previous_rental_category": previousRentalCategory})
 	}
 	if e == nil {
 		e = tx.Commit(ctx)
@@ -220,7 +226,7 @@ func (s *ManagementStore) Products(ctx context.Context, in management.ProductQue
 	}
 	args := []any{}
 	// 列名固定，用户输入只作为绑定参数。
-	for _, item := range []struct{ column, value string }{{"status", in.Status}, {"source", in.Source}, {"trade_type", in.TradeType}} {
+	for _, item := range []struct{ column, value string }{{"status", in.Status}, {"source", in.Source}, {"trade_type", in.TradeType}, {"rental_category", in.RentalCategory}} {
 		if item.value != "" && item.value != "all" {
 			args = append(args, item.value)
 			where += " AND p." + item.column + "=$" + strconv.Itoa(len(args))

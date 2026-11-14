@@ -1,0 +1,97 @@
+.rental-price-list {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+}
+.rental-price-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+}
+.rental-price-label {
+  color: var(--muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.rental-price-label > small {
+  display: block;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.rental-price-value {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+  margin-left: auto;
+}
+.rental-price-value > b {
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.rental-price-value > small,
+.rental-price-more {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.asset-card .asset-bottom-rental {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+.asset-card .asset-bottom-rental .asset-price-side {
+  align-items: flex-end;
+  width: 100%;
+  min-width: 0;
+  gap: 10px;
+}
+.rental-price-compact {
+  gap: 6px;
+}
+.rental-price-compact .rental-price-item {
+  gap: 2px 6px;
+}
+.rental-price-compact .rental-price-label {
+  font-size: 11px;
+}
+.rental-price-compact .rental-price-value > b {
+  font-size: 18px;
+}
+.rental-price-compact .rental-price-value > small {
+  font-size: 10px;
+}
+.detail-price .rental-price-list {
+  padding: 8px 0;
+}
+.detail-price .rental-price-item + .rental-price-item {
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+.detail-price-line:has(.rental-price-list) {
+  flex-wrap: wrap;
+}
+@media (max-width: 639px) {
+  .asset-card .asset-bottom-rental .asset-price-side {
+    gap: 4px;
+  }
+  .asset-bottom-rental .asset-arrow {
+    display: none;
+  }
+  .rental-price-compact .rental-price-value > b {
+    font-size: 16px;
+  }
+  .rental-price-compact .rental-price-period .rental-price-label {
+    flex-basis: 100%;
+  }
+  .rental-price-compact .rental-price-more {
+    font-size: 10px;
+  }
+}

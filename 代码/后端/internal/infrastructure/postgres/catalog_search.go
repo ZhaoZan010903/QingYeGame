@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"qingye/backend/internal/domain/catalog"
+	"strconv"
 	"strings"
 )
 
@@ -49,12 +50,28 @@ func (a *CatalogStore) search(ctx context.Context, q catalog.SearchInput, countT
 	if q.TradeType != "" && q.TradeType != "all" {
 		add("p.trade_type=$%d", q.TradeType)
 	}
+	if q.RentalCategory != "" {
+		add("p.rental_category=$%d", q.RentalCategory)
+	}
+	periodBasis := q.PeriodBasis
+	if periodBasis == "" {
+		periodBasis = "period"
+	}
 	priceSQL := "p.price_amount"
 	if q.PriceUnit != "" && q.PriceUnit != "all" {
 		args = append(args, q.PriceUnit)
 		n := len(args)
-		where += fmt.Sprintf(" AND (p.price_unit=$%[1]d OR EXISTS(SELECT 1 FROM jsonb_array_elements(p.rental_quotes) quote WHERE quote->>'unit'=$%[1]d))", n)
-		priceSQL = fmt.Sprintf("COALESCE((SELECT (quote->>'amount')::numeric FROM jsonb_array_elements(p.rental_quotes) quote WHERE quote->>'unit'=$%[1]d LIMIT 1),CASE WHEN p.price_unit=$%[1]d THEN p.price_amount END)", n)
+		predicate := fmt.Sprintf("quote->>'unit'=$%d", n)
+		if q.PriceUnit == "period" {
+			args = append(args, periodBasis)
+			predicate += fmt.Sprintf(" AND COALESCE(NULLIF(quote->>'billing_unit',''),'period')=$%d", len(args))
+			where += " AND EXISTS(SELECT 1 FROM jsonb_array_elements(p.rental_quotes) quote WHERE " + predicate + ")"
+			// 时段计价方式分别比较，不能用顶层主价混入另一种计价方式。
+			priceSQL = "(SELECT min((quote->>'amount')::numeric) FROM jsonb_array_elements(p.rental_quotes) quote WHERE " + predicate + ")"
+		} else {
+			where += fmt.Sprintf(" AND (p.price_unit=$%d OR EXISTS(SELECT 1 FROM jsonb_array_elements(p.rental_quotes) quote WHERE ", n) + predicate + "))"
+			priceSQL = "COALESCE((SELECT min((quote->>'amount')::numeric) FROM jsonb_array_elements(p.rental_quotes) quote WHERE " + predicate + fmt.Sprintf("),CASE WHEN p.price_unit=$%d THEN p.price_amount END)", n)
+		}
 		order = strings.ReplaceAll(order, "p.price_amount", priceSQL)
 	}
 	if q.MinPrice != nil {
@@ -88,13 +105,29 @@ func (a *CatalogStore) search(ctx context.Context, q catalog.SearchInput, countT
 	if err == nil && q.PriceUnit != "" && q.PriceUnit != "all" {
 		for _, p := range items {
 			if quotes, ok := p["rental_quotes"].([]any); ok {
+				var selected string
+				var minimum float64
 				for _, raw := range quotes {
 					quote, ok := raw.(map[string]any)
 					if ok && quote["unit"] == q.PriceUnit {
-						p["price_unit"] = q.PriceUnit
-						p["price_amount"] = quote["amount"]
-						break
+						basis, _ := quote["billing_unit"].(string)
+						if basis == "" {
+							basis = "period"
+						}
+						if q.PriceUnit == "period" && basis != periodBasis {
+							continue
+						}
+						amount, _ := quote["amount"].(string)
+						value, e := strconv.ParseFloat(amount, 64)
+						if e == nil && (selected == "" || value < minimum) {
+							selected = amount
+							minimum = value
+						}
 					}
+				}
+				if selected != "" {
+					p["price_unit"] = q.PriceUnit
+					p["price_amount"] = selected
 				}
 			}
 		}

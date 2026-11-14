@@ -51,7 +51,7 @@ const VisibleSQL = "p.deleted_at IS NULL AND p.status='published' AND p.approved
 // each card, and prevents future internal columns from silently becoming API fields.
 const ProductJSON = `jsonb_build_object(
  'id',p.id,'product_code',p.product_code,'category_id',p.category_id,'title',p.title,
- 'trade_type',p.trade_type,'price_unit',p.price_unit,'attributes',p.attributes,'description',p.description,
+ 'trade_type',p.trade_type,'rental_category',p.rental_category,'price_unit',p.price_unit,'attributes',p.attributes,'description',p.description,
  'attribute_labels',COALESCE((SELECT jsonb_object_agg(g.key,COALESCE((SELECT string_agg(COALESCE(o.label,v.value #>> '{}'),'、' ORDER BY v.position)
  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.attributes->g.key)='array' THEN p.attributes->g.key ELSE jsonb_build_array(p.attributes->g.key) END) WITH ORDINALITY v(value,position)
  LEFT JOIN product_dictionary_options o ON o.dictionary_key=g.key AND o.value=v.value #>> '{}'),'')) FROM product_dictionary_groups g WHERE p.attributes ? g.key),'{}'::jsonb),

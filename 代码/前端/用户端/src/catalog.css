@@ -515,3 +515,26 @@
     bottom: -20px;
   }
 }
+.catalog-redesign .rental-category-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.catalog-redesign .rental-category-tabs button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.catalog-redesign .rental-category-tabs button.active {
+  background: var(--bg-subtle);
+  border-color: var(--line);
+  color: var(--text);
+}
+.catalog-redesign .rental-category-tabs button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}

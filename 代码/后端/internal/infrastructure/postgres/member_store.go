@@ -217,6 +217,9 @@ func (s *MemberStore) Favorite(ctx context.Context, u member.Actor, id string, a
 }
 
 func (s *MemberStore) Create(ctx context.Context, u member.Actor, input catalog.ProductInput) (map[string]any, error) {
+	if input.RentalCategory != nil {
+		return nil, fault.New(fault.Forbidden, "RENTAL_CATEGORY_ADMIN_ONLY", "出租分类由管理员审核时分配")
+	}
 	catalog.NormalizeInput(&input)
 	if input.Attributes == nil {
 		input.Attributes = map[string]any{}
@@ -262,6 +265,9 @@ func (s *MemberStore) Create(ctx context.Context, u member.Actor, input catalog.
 }
 
 func (s *MemberStore) Edit(ctx context.Context, u member.Actor, id string, input catalog.ProductInput) (map[string]any, error) {
+	if input.RentalCategory != nil {
+		return nil, fault.New(fault.Forbidden, "RENTAL_CATEGORY_ADMIN_ONLY", "出租分类由管理员审核时分配")
+	}
 	catalog.NormalizeInput(&input)
 	if input.Attributes == nil {
 		input.Attributes = map[string]any{}
@@ -288,6 +294,7 @@ func (s *MemberStore) Edit(ctx context.Context, u member.Actor, id string, input
 	if originalTrade != input.TradeType {
 		return nil, fault.New(fault.Invalid, "TRADE_TYPE_IMMUTABLE", "已保存商品的租售类型不可更改，如需更换请新建资产")
 	}
+	catalog.PreserveHistoricalKind(&input)
 	if err := ValidateProductInput(ctx, tx, input, false); err != nil {
 		return nil, fault.New(fault.Invalid, "INVALID_PRODUCT", err.Error())
 	}

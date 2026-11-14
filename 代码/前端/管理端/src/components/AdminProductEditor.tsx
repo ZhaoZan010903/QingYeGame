@@ -1,4 +1,4 @@
-import { ProtectedImage } from '../../../共享/MediaSecurity';
+import { ProtectedImage } from "../../../共享/MediaSecurity";
 import { MediaSyncPanel } from "./MediaSyncPanel";
 import { publicationInterrupted } from "../../../共享/upload-progress";
 import {
@@ -11,7 +11,13 @@ import { adminApi, adminImageApi, type AdminRecord } from "../lib/admin-api";
 import { ApiError, productFrom } from "../lib/api";
 import { ImageUploader } from "./ImageUploader";
 import { Price, StateView } from "./shared";
-import type { Product } from "../types";
+import type { Product, RentalQuote, RentalCategory } from "../types";
+import { RentalQuoteEditor } from "../../../共享/RentalQuoteEditor";
+import {
+  quotesFromProduct,
+  rentalQuoteLabel,
+  rentalUnitLabels,
+} from "../../../共享/rental-quotes";
 import {
   ArrowLeft,
   ArrowRight,
@@ -48,14 +54,6 @@ export const statusNames: Record<string, string> = {
 };
 const message = (error: unknown) =>
   error instanceof Error ? error.message : "保存失败，请重试。";
-const units: Record<string, string> = {
-  account: "元（账号总价）",
-  hour: "元 / 小时",
-  day: "元 / 日",
-  week: "元 / 周",
-  month: "元 / 月",
-  unknown: "原站报价，单位待核对",
-};
 interface FormValues {
   title: string;
   category_id: string;
@@ -112,7 +110,8 @@ export function AdminProductEditor({
   const [privatePassword, setPrivatePassword] = useState("");
   const [privateVisible, setPrivateVisible] = useState(false);
   const [tags, setTags] = useState("");
-  const [quotes, setQuotes] = useState<Record<string, string>>({});
+  const [quotes, setQuotes] = useState<RentalQuote[]>([]);
+  const [rentalCategory, setRentalCategory] = useState<RentalCategory | "">("");
   const [dictionaries, setDictionaries] = useState<DictionaryGroup[]>([]);
   const formFields = {
     title: { label: "账号标题", placeholder: "填写账号特点与标题" },
@@ -146,17 +145,28 @@ export function AdminProductEditor({
   const locked = busy || imageBusy;
   const writeLocked = locked || conflict;
   useUnsavedChanges(dirty || imagePending, locked);
+  const primaryQuote = form.trade_type === "rent" ? quotes[0] : undefined;
+  const previewAmount =
+    form.trade_type === "rent"
+      ? (primaryQuote?.amount ?? "")
+      : form.price_amount;
+  const previewUnit = primaryQuote
+    ? (primaryQuote.unit === "period"
+        ? rentalQuoteLabel(primaryQuote) + " · "
+        : "") +
+      "元 / " +
+      rentalUnitLabels[
+        primaryQuote.unit === "period"
+          ? (primaryQuote.billing_unit ?? "period")
+          : primaryQuote.unit
+      ]
+    : unitLabels[form.price_unit];
   const category = categories.find((c) => c.id === form.category_id);
   const allowedUnits: string[] = category?.price_units?.length
     ? category.price_units
     : form.trade_type === "rent"
-      ? ["hour", "day", "week", "month"]
+      ? ["hour", "day", "week", "month", "period"]
       : ["account"];
-  const unsupportedPrimary =
-    form.price_unit !== "unknown" && !allowedUnits.includes(form.price_unit);
-  const unsupportedQuotes = Object.entries(quotes).filter(
-    ([unit]) => unit !== form.price_unit && !allowedUnits.includes(unit),
-  );
   let groups: EditableGroup[] = [],
     attributes: Record<string, unknown> = {};
   try {
@@ -184,13 +194,8 @@ export function AdminProductEditor({
     setPrivatePassword("");
     setPrivateVisible(false);
     setTags(customTagsForEditing(value.attributes));
-    setQuotes(
-      Object.fromEntries(
-        (value.rental_quotes ?? []).map(
-          (q: { unit: string; amount: string }) => [q.unit, String(q.amount)],
-        ),
-      ),
-    );
+    setQuotes(quotesFromProduct(productFrom(value)));
+    setRentalCategory(value.rental_category ?? "");
   }
   async function receiveMediaState(next: AdminRecord) {
     const current = rowRef.current;
@@ -328,6 +333,13 @@ export function AdminProductEditor({
         Array.isArray(attributes)
       )
         throw new Error("账号属性必须为对象。");
+      const rentalQuotes = buildRentalQuotes(
+        form.trade_type,
+        form.price_unit,
+        form.price_amount,
+        quotes,
+        allowedUnits,
+      );
       const input = {
         ...form,
         attributes: {
@@ -338,13 +350,7 @@ export function AdminProductEditor({
             row?.attributes?.custom_tags ?? [],
           ),
         },
-        rental_quotes: buildRentalQuotes(
-          form.trade_type,
-          form.price_unit,
-          form.price_amount,
-          quotes,
-          allowedUnits,
-        ),
+        rental_quotes: rentalQuotes,
         ...(privateAccount || privatePassword
           ? {
               private_credentials: {
@@ -353,10 +359,19 @@ export function AdminProductEditor({
               },
             }
           : {}),
+        price_unit:
+          form.trade_type === "rent"
+            ? (rentalQuotes[0]?.unit ??
+              (form.price_unit === "unknown"
+                ? "unknown"
+                : (allowedUnits[0] ?? "unknown")))
+            : form.price_unit === "unknown" && !form.price_amount.trim()
+              ? "unknown"
+              : "account",
         price_amount:
-          form.price_unit === "unknown" || form.price_amount === ""
-            ? null
-            : form.price_amount,
+          form.trade_type === "rent"
+            ? (rentalQuotes[0]?.amount ?? null)
+            : form.price_amount || null,
       };
       const value = await adminApi.saveProduct(input, row?.id, row?.version);
       accept(value);
@@ -399,6 +414,14 @@ export function AdminProductEditor({
       setError("请填写退回或下架原因。");
       return;
     }
+    if (
+      ["approve", "publish"].includes(kind) &&
+      row.trade_type === "rent" &&
+      !rentalCategory
+    ) {
+      setError("请先选择租赁分类：时日或周月。");
+      return;
+    }
     const confirmations = {
       approve:
         "审核通过后将准备图片，准备完成后公开展示。确认资料与图片已经核对？",
@@ -421,6 +444,9 @@ export function AdminProductEditor({
           : "status";
       const body = {
         expected_version: row.version,
+        ...(["approve", "publish"].includes(kind) && row.trade_type === "rent"
+          ? { rental_category: rentalCategory }
+          : {}),
         ...(endpoint === "review"
           ? { decision: kind, reason }
           : endpoint === "status"
@@ -549,7 +575,10 @@ export function AdminProductEditor({
             >
               <span className="eyebrow">当前编辑内容预览 · 尚未发布</span>
               {product?.images[0]?.url && (
-                <ProtectedImage src={product.images[0].url} alt="商品封面预览" />
+                <ProtectedImage
+                  src={product.images[0].url}
+                  alt="商品封面预览"
+                />
               )}
               <div>
                 <small>
@@ -568,15 +597,22 @@ export function AdminProductEditor({
                     ))}
                 </div>
                 <strong>
-                  {form.price_amount
-                    ? `¥ ${form.price_amount} ${unitLabels[form.price_unit] || ""}`
+                  {previewAmount
+                    ? `¥ ${previewAmount} ${previewUnit || ""}`
                     : "联系客服报价"}
                 </strong>
                 {form.trade_type === "rent" && (
                   <div className="preview-tags">
-                    {Object.entries(quotes).map(([unit, amount]) => (
-                      <span key={unit}>
-                        {amount || "—"} {unitLabels[unit]}
+                    {quotes.map((quote, index) => (
+                      <span key={index}>
+                        {rentalQuoteLabel(quote)} · {quote.amount || "—"} 元 /{" "}
+                        {
+                          rentalUnitLabels[
+                            quote.unit === "period"
+                              ? (quote.billing_unit ?? "period")
+                              : quote.unit
+                          ]
+                        }
                       </span>
                     ))}
                   </div>
@@ -684,149 +720,39 @@ export function AdminProductEditor({
                         ))}
                     </select>
                   </label>
-                  <label className="form-field">
-                    报价单位
-                    <select
-                      value={form.price_unit}
-                      onChange={(e) => {
-                        const unit = e.target.value;
-                        setQuotes((old) =>
-                          form.trade_type === "rent" &&
-                          form.price_amount &&
-                          form.price_unit !== "unknown"
-                            ? { ...old, [form.price_unit]: form.price_amount }
-                            : old,
-                        );
-                        setForm((old) => ({
-                          ...old,
-                          price_unit: unit,
-                          price_amount: quotes[unit] ?? "",
-                        }));
-                        setDirty(true);
-                      }}
-                    >
-                      {unsupportedPrimary && (
-                        <option value={form.price_unit} disabled>
-                          {units[form.price_unit]}（当前分类不支持）
-                        </option>
-                      )}
-                      {Object.entries(units)
-                        .filter(([key]) =>
-                          key === "unknown"
-                            ? row?.price_unit === "unknown"
-                            : !allowedUnits.includes(key)
-                              ? false
-                              : form.trade_type === "sale"
-                                ? key === "account"
-                                : key !== "account",
-                        )
-                        .map(([key, label]) => (
-                          <option key={key} value={key}>
-                            {label}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    商品报价（元）
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      disabled={form.price_unit === "unknown"}
-                      value={form.price_amount}
-                      placeholder="留空表示联系客服"
-                      onChange={(e) => change("price_amount", e.target.value)}
-                    />
-                    <small>
-                      留空显示“联系客服”。单位由左侧选择，不自动换算租期。
-                    </small>
-                  </label>
+                  {form.trade_type === "sale" && (
+                    <label className="form-field">
+                      商品报价（元）
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.price_amount}
+                        placeholder="留空表示联系客服"
+                        onChange={(e) => change("price_amount", e.target.value)}
+                      />
+                    </label>
+                  )}
                 </div>
                 {form.trade_type === "rent" && (
                   <section className="subform-card">
-                    <h3>更多租期报价</h3>
-                    {unsupportedPrimary && (
-                      <p className="admin-warning">
-                        当前分类不支持原主报价单位，金额仍保留。请重新选择报价单位并核对金额。
+                    <h3>租赁报价</h3>
+                    {form.price_unit === "unknown" && !quotes.length && (
+                      <p className="field-hint">
+                        历史报价单位待核对，未填写新报价时保留原始信息。
                       </p>
                     )}
-                    {unsupportedQuotes.length > 0 && (
-                      <div className="admin-warning" role="status">
-                        <p>
-                          以下旧报价不适用于当前分类，尚未删除。请切回原分类，或确认后逐项移除。
-                        </p>
-                        {unsupportedQuotes.map(([unit, amount]) => (
-                          <div key={unit}>
-                            <span>
-                              {amount || "未填写"} {unitLabels[unit] || unit}
-                            </span>
-                            <button
-                              type="button"
-                              className="text-button"
-                              onClick={() => {
-                                setQuotes((old) => {
-                                  const next = { ...old };
-                                  delete next[unit];
-                                  return next;
-                                });
-                                setDirty(true);
-                              }}
-                            >
-                              移除此报价
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                     <p className="field-hint">
-                      可同时填写多种租期。上方报价优先展示；未填主价时使用这里的首个报价，不自动换算。
+                      可填写普通租期和自定义时段，价格按填写的单位展示，不自动换算。
                     </p>
-                    <div className="admin-grid">
-                      {["hour", "day", "week", "month"]
-                        .filter(
-                          (unit) =>
-                            unit !== form.price_unit &&
-                            allowedUnits.includes(unit),
-                        )
-                        .map((unit) => (
-                          <div key={unit}>
-                            <label className="agreement-check">
-                              <input
-                                type="checkbox"
-                                checked={Object.hasOwn(quotes, unit)}
-                                onChange={(e) => {
-                                  setQuotes((old) => {
-                                    const next = { ...old };
-                                    if (e.target.checked) next[unit] = "";
-                                    else delete next[unit];
-                                    return next;
-                                  });
-                                  setDirty(true);
-                                }}
-                              />
-                              {unitLabels[unit]}
-                            </label>
-                            {Object.hasOwn(quotes, unit) && (
-                              <input
-                                aria-label={`${unitLabels[unit]}报价`}
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                required
-                                value={quotes[unit]}
-                                onChange={(e) => {
-                                  setQuotes((old) => ({
-                                    ...old,
-                                    [unit]: e.target.value,
-                                  }));
-                                  setDirty(true);
-                                }}
-                              />
-                            )}
-                          </div>
-                        ))}
-                    </div>
+                    <RentalQuoteEditor
+                      quotes={quotes}
+                      allowed={allowedUnits}
+                      onChange={(next) => {
+                        setQuotes(next);
+                        setDirty(true);
+                      }}
+                    />
                   </section>
                 )}
                 <label className="form-field">
@@ -1086,13 +1012,10 @@ export function AdminProductEditor({
                 <span className="pill">{statusLabel}</span>
                 <h2>{form.title || "尚未填写商品标题"}</h2>
                 <p>
-                  {category?.name || "尚未选择分类"} ·{" "}
-                  {unitLabels[form.price_unit]}
+                  {category?.name || "尚未选择分类"} · {previewUnit}
                 </p>
                 <strong>
-                  {form.price_amount === ""
-                    ? "联系客服"
-                    : `¥ ${form.price_amount}`}
+                  {previewAmount === "" ? "联系客服" : `¥ ${previewAmount}`}
                 </strong>
                 <p>当前已保存 {product?.imageTotal ?? 0} 张图片</p>
               </div>
@@ -1154,6 +1077,31 @@ export function AdminProductEditor({
                   />
                 )}
                 {row.review_note && <p>最近审核说明：{row.review_note}</p>}
+                {row.trade_type === "rent" &&
+                  !["published", "publishing", "rejected_final"].includes(
+                    row.status,
+                  ) && (
+                    <label className="form-field">
+                      租赁分类（审核或上架前必选）
+                      <select
+                        aria-label="租赁分类"
+                        value={rentalCategory}
+                        disabled={writeLocked}
+                        onChange={(e) =>
+                          setRentalCategory(
+                            e.target.value as RentalCategory | "",
+                          )
+                        }
+                      >
+                        <option value="">请选择租赁分类</option>
+                        <option value="hour_day">时日</option>
+                        <option value="week_month">周月</option>
+                      </select>
+                      <small>
+                        决定商品在账号集市的分类，由管理员审核确认。
+                      </small>
+                    </label>
+                  )}
                 {["pending", "published", "publishing"].includes(
                   row.status,
                 ) && (

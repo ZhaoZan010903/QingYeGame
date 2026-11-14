@@ -61,7 +61,8 @@ func (s *ChatStore) Start(ctx context.Context, actor chat.Actor, in chat.StartIn
 	var own bool
 	// 每次发起都重新校验可见性；已有会话不能绕过商品下架权限。
 	e = tx.QueryRow(ctx, `SELECT jsonb_build_object('id',p.id,'code',p.product_code,'title',p.title,'price',p.price_amount::text,'unit',p.price_unit,
-    'trade_type',p.trade_type,'category_name',c.name,'server',coalesce((SELECT o.label FROM product_dictionary_options o WHERE o.dictionary_key='server' AND o.value=p.attributes->>'server'),p.attributes->>'server',''),
+	    'trade_type',p.trade_type,'rental_category',p.rental_category,'rental_quotes',p.rental_quotes,
+	    'category_name',c.name,'server',coalesce((SELECT o.label FROM product_dictionary_options o WHERE o.dictionary_key='server' AND o.value=p.attributes->>'server'),p.attributes->>'server',''),
     'cover_url',coalesce((SELECT '/api/v1/media/'||i.media_id||'/file?variant=thumb' FROM product_images i JOIN media_files f ON f.id=i.media_id AND f.status='ready' WHERE i.product_id=p.id ORDER BY i.sort_order,i.media_id LIMIT 1),''))
 	  ,coalesce(p.owner_id=$2,false)
     FROM products p JOIN categories c ON c.id=p.category_id WHERE p.id=$1 AND p.status='published' AND p.approved_version=p.version AND c.enabled FOR SHARE OF p,c`, in.ProductID, actor.ID).Scan(&snapshot, &own)

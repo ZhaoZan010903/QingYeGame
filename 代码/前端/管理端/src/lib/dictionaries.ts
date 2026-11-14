@@ -19,12 +19,12 @@ export const fixedProductFields: {
   { key: "server", label: "所在区服", required: true },
   { key: "gender", label: "角色性别", required: true },
   { key: "level", label: "VIP 等级", required: false },
-  { key: "kind", label: "账号结构", required: false },
 ];
 
 export const dictionarySettingsFields = [
   { key: "keyword" as const, label: "热门筛选", required: false },
   ...fixedProductFields,
+  { key: "kind" as const, label: "账号结构（历史字典）", required: false },
 ];
 
 export function addDictionaryOption(

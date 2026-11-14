@@ -1,13 +1,22 @@
 import type { Product } from "../types";
+import {
+  rentalQuoteLabel,
+  rentalUnitLabels,
+} from "../../../共享/rental-quotes";
 const units: Record<string, string> = {
   account: "元",
   hour: "元/小时",
   day: "元/日",
   week: "元/周",
   month: "元/月",
+  period: "元/时段",
   unknown: "原站报价，单位待核对",
 };
 export function Price({ product }: { product: Product }) {
+  const period =
+    product.unit === "period"
+      ? product.rentalQuotes?.find((q) => q.unit === "period")
+      : undefined;
   return (
     <span className="price-box">
       <span className="price mono">
@@ -22,7 +31,9 @@ export function Price({ product }: { product: Product }) {
           ? product.priceNote || units.unknown
           : product.price === null
             ? "报价咨询"
-            : units[product.unit]}
+            : period
+              ? `${rentalQuoteLabel(period)} · 元/${rentalUnitLabels[period.billing_unit ?? "period"]}`
+              : units[product.unit]}
       </small>
     </span>
   );

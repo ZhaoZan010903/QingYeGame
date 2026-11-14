@@ -6,12 +6,17 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
 type RentalQuote struct {
-	Unit   string `json:"unit"`
-	Amount string `json:"amount"`
+	Unit        string `json:"unit"`
+	Amount      string `json:"amount"`
+	StartTime   string `json:"start_time,omitempty"`
+	EndTime     string `json:"end_time,omitempty"`
+	Label       string `json:"label,omitempty"`
+	BillingUnit string `json:"billing_unit,omitempty"`
 }
 type PrivateCredentials struct {
 	QQAccount  string `json:"qq_account"`
@@ -22,6 +27,7 @@ type ProductInput struct {
 	LegacyAttributes      bool                `json:"-"`
 	HasPrivateCredentials bool                `json:"-"`
 	RentalQuotes          []RentalQuote       `json:"rental_quotes"`
+	RentalCategory        *string             `json:"rental_category,omitempty"`
 	PrivateCredentials    *PrivateCredentials `json:"private_credentials,omitempty"`
 	CategoryID            string              `json:"category_id"`
 	Title                 string              `json:"title"`
@@ -35,6 +41,14 @@ type ProductInput struct {
 }
 
 var MoneyPattern = regexp.MustCompile(`^\d{1,10}(\.\d{1,2})?$`)
+var ClockTimePattern = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+
+func ValidRentalCategory(value string) bool {
+	return value == "" || value == "hour_day" || value == "week_month"
+}
+func ValidPeriodBasis(value string) bool {
+	return value == "period" || value == "hour" || value == "day" || value == "week" || value == "month"
+}
 
 type FilterOption struct {
 	Value   string `json:"value"`
@@ -65,7 +79,7 @@ func ValidateBasicInput(p ProductInput, complete bool) error {
 	if p.TradeType != "sale" && p.TradeType != "rent" {
 		return errors.New("请选择出售或出租")
 	}
-	units := map[string]bool{"account": true, "hour": true, "day": true, "week": true, "month": true, "unknown": true}
+	units := map[string]bool{"account": true, "hour": true, "day": true, "week": true, "month": true, "period": true, "unknown": true}
 	if !units[p.PriceUnit] || p.TradeType == "sale" && p.PriceUnit != "account" && p.PriceUnit != "unknown" || p.TradeType == "rent" && p.PriceUnit == "account" {
 		return errors.New("报价单位与交易类型不符")
 	}
@@ -122,6 +136,9 @@ func ValidateInput(p ProductInput, complete bool, category CategoryRules) error 
 		return errors.New("分类筛选配置无效")
 	}
 	for _, g := range groups {
+		if g.Key == "kind" {
+			continue
+		}
 		value, exists := p.Attributes[g.Key]
 		if complete && g.Required && (g.Enabled == nil || *g.Enabled) && (!exists || value == nil || strings.TrimSpace(fmt.Sprint(value)) == "") {
 			return fmt.Errorf("请填写%s", g.Label)
@@ -197,7 +214,7 @@ var publicFields = map[string]bool{
 	"id": true, "product_code": true, "category_id": true, "title": true, "trade_type": true, "price_unit": true,
 	"attributes": true, "attribute_labels": true, "description": true, "status": true, "source": true, "version": true, "manual_rank": true,
 	"legacy_price": true, "legacy_category": true, "verification_status": true, "created_at": true, "updated_at": true,
-	"published_at": true, "rental_quotes": true, "consultation_count": true, "price_amount": true, "price_note": true, "image_total": true, "images": true,
+	"published_at": true, "rental_quotes": true, "rental_category": true, "consultation_count": true, "price_amount": true, "price_note": true, "image_total": true, "images": true,
 }
 
 // Catalog cards do not render the full introduction. Keep titles and attributes
@@ -210,22 +227,63 @@ func NormalizeInput(p *ProductInput) {
 		p.Attributes = map[string]any{}
 	}
 	p.Attributes["game"] = "QQ炫舞"
+	delete(p.Attributes, "kind")
+	for i := range p.RentalQuotes {
+		if p.RentalQuotes[i].Unit == "period" {
+			p.RentalQuotes[i].Label = strings.TrimSpace(p.RentalQuotes[i].Label)
+			if p.RentalQuotes[i].BillingUnit == "" {
+				p.RentalQuotes[i].BillingUnit = "period"
+			}
+		}
+	}
 	if len(p.RentalQuotes) > 0 {
 		p.PriceUnit = p.RentalQuotes[0].Unit
 		amount := p.RentalQuotes[0].Amount
 		p.PriceAmount = &amount
 	}
 }
+
+// 已撤下的发布字段只保留原编码，编辑新界面不能误删旧资料或引入新值。
+func PreserveHistoricalKind(p *ProductInput) {
+	delete(p.Attributes, "kind")
+	if old, ok := p.PreviousAttributes["kind"]; ok {
+		p.Attributes["kind"] = old
+	}
+}
 func ValidateExtendedInput(p ProductInput) error {
-	if len(p.RentalQuotes) > 4 || p.TradeType == "sale" && len(p.RentalQuotes) > 0 {
-		return errors.New("出售不支持租赁报价，出租最多四种单位")
+	if p.RentalCategory != nil && (!ValidRentalCategory(*p.RentalCategory) || p.TradeType != "rent" && *p.RentalCategory != "") {
+		return errors.New("出租分类无效或不适用于出售商品")
+	}
+	if len(p.RentalQuotes) > 16 || p.TradeType == "sale" && len(p.RentalQuotes) > 0 {
+		return errors.New("出售不支持租赁报价，出租最多四种常规报价和十二个时段")
 	}
 	seen := map[string]bool{}
+	periods := 0
 	for _, q := range p.RentalQuotes {
-		if (q.Unit != "hour" && q.Unit != "day" && q.Unit != "week" && q.Unit != "month") || seen[q.Unit] || !MoneyPattern.MatchString(q.Amount) {
+		key := q.Unit
+		if q.Unit == "period" {
+			periods++
+			basis := q.BillingUnit
+			if basis == "" {
+				basis = "period"
+			}
+			if periods > 12 || strings.TrimSpace(q.Label) == "" || utf8.RuneCountInString(q.Label) > 30 || !utf8.ValidString(q.Label) || strings.IndexFunc(q.Label, unicode.IsControl) >= 0 || !ValidPeriodBasis(basis) {
+				return errors.New("时段报价最多十二条，名称需为1至30个有效字符并选择正确计价方式")
+			}
+			if (q.StartTime != "" || q.EndTime != "") && (!ClockTimePattern.MatchString(q.StartTime) || !ClockTimePattern.MatchString(q.EndTime) || q.StartTime == q.EndTime) {
+				return errors.New("时段起止时间需同时填写HH:mm且不能相同，也可均不填写")
+			}
+			key += "\x00" + q.Label + "\x00" + q.StartTime + "\x00" + q.EndTime + "\x00" + basis
+		} else if q.StartTime != "" || q.EndTime != "" || q.Label != "" || q.BillingUnit != "" {
+			return errors.New("仅时段报价可填写名称、起止时间和额外计价方式")
+		}
+		if (q.Unit != "hour" && q.Unit != "day" && q.Unit != "week" && q.Unit != "month" && q.Unit != "period") || seen[key] || !MoneyPattern.MatchString(q.Amount) {
 			return errors.New("租赁报价单位重复或金额无效")
 		}
-		seen[q.Unit] = true
+		seen[key] = true
+	}
+	if p.PriceUnit == "period" && (len(p.RentalQuotes) == 0 || p.RentalQuotes[0].Unit != "period") {
+		return errors.New("时段主报价必须包含完整的时段报价明细")
 	}
 	if p.PrivateCredentials != nil {
 		c := p.PrivateCredentials

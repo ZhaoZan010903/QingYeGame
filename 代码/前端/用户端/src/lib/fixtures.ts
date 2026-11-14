@@ -290,7 +290,7 @@ export const fixtureCategories: Category[] = [
   {
     id: 'qq-dance',
     name: 'QQ 炫舞',
-    priceUnits: ['account', 'hour', 'day', 'week', 'month'],
+    priceUnits: ['account', 'hour', 'day', 'week', 'month', 'period'],
     filters: [
       {
         key: 'server',

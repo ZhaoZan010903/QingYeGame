@@ -8,6 +8,8 @@ import (
 
 type SearchInput struct {
 	Query, Category, TradeType, PriceUnit, Sort string
+	RentalCategory                              string
+	PeriodBasis                                 string
 	MinPrice, MaxPrice                          *string
 	Filters                                     map[string][]string
 	Limit, Offset                               int
@@ -28,6 +30,17 @@ func (q SearchInput) Validate() error {
 	}
 	if q.TradeType != "" && q.TradeType != "all" && q.TradeType != "sale" && q.TradeType != "rent" {
 		return fault.New(fault.Invalid, "INVALID_TRADE", "交易类型无效")
+	}
+	if !ValidRentalCategory(q.RentalCategory) || q.RentalCategory != "" && q.TradeType == "sale" {
+		return fault.New(fault.Invalid, "INVALID_RENTAL_CATEGORY", "出租分类筛选无效")
+	}
+	switch q.PriceUnit {
+	case "", "all", "unknown", "account", "hour", "day", "week", "month", "period":
+	default:
+		return fault.New(fault.Invalid, "INVALID_PRICE_UNIT", "报价单位无效")
+	}
+	if q.PeriodBasis != "" && (q.PriceUnit != "period" || !ValidPeriodBasis(q.PeriodBasis)) {
+		return fault.New(fault.Invalid, "INVALID_PERIOD_BASIS", "请在时段报价中选择有效计价方式")
 	}
 	if (q.MinPrice != nil || q.MaxPrice != nil || strings.HasPrefix(q.Sort, "price")) && (q.PriceUnit == "" || q.PriceUnit == "all" || q.PriceUnit == "unknown") {
 		return fault.New(fault.Invalid, "PRICE_UNIT_REQUIRED", "先选择已确认的报价单位再比较价格")

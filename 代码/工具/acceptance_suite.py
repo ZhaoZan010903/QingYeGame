@@ -232,7 +232,10 @@ class Suite:
     def submit_approve(self, product_id):
         p = self.own(product_id)
         submitted = self.call("member", "POST", f"/api/v1/me/products/{product_id}/submit", {"expected_version": p["version"]}).data
-        approved = self.call("admin", "POST", f"/api/v1/admin/products/{product_id}/review", {"expected_version": submitted["version"], "decision": "approve"}).data
+        review = {"expected_version": submitted["version"], "decision": "approve"}
+        if submitted.get("trade_type") == "rent":
+            review["rental_category"] = submitted.get("rental_category") or "hour_day"
+        approved = self.call("admin", "POST", f"/api/v1/admin/products/{product_id}/review", review).data
         return self.wait_published(product_id, approved)
 
     def wait_published(self, product_id, product):
@@ -264,7 +267,7 @@ class Suite:
         else:
             options.append({"value": "acceptance", "label": "Acceptance", "enabled": True, "sort_order": 999})
         self.call("admin", "PUT", "/api/v1/admin/dictionaries/server", {"expected_version": server["version"], "options": options})
-        category = {"code": prefix, "name": prefix, "trade_type": "all", "price_units": ["account", "day", "unknown"],
+        category = {"code": prefix, "name": prefix, "trade_type": "all", "price_units": ["account", "day", "period", "unknown"],
                     "filter_config": [{"key": "server", "label": "Test region", "multiple": False,
                                        "options": [{"value": "acceptance", "label": "Acceptance"}]}], "sort_order": 999, "enabled": True}
         self.call("admin", "POST", "/api/v1/admin/categories", category)
@@ -325,6 +328,7 @@ class Suite:
         platform = self.wait_published(platform['id'], platform)
         self.call("anonymous", "GET", f"/api/v1/products/{platform['id']}")
         self.fixtures["platform_product_id"], self.fixtures["admin_media_id"] = platform["id"], platform_image
+        self.rental_quotes_workflow(prefix)
         contact_body = {"name": prefix, "purpose": ["general"], "channel": "wechat", "contact_value": "acceptance-only", "hours": "test", "enabled": True}
         contact = self.call("admin", "POST", "/api/v1/admin/contacts", contact_body).data
         self.fixtures["contact_id"] = contact["id"]
@@ -400,6 +404,33 @@ class Suite:
         statuses = [r.status for r in replies]
         self.check("concurrent reviews publish once", statuses.count(200) == 1 and statuses.count(409) == 19, successes=statuses.count(200), conflicts=statuses.count(409))
         self.state["concurrency_complete"] = True
+
+    def rental_quotes_workflow(self, prefix):
+        # This suite only permits its dedicated loopback acceptance services.
+        payload = dict(self.product_input(prefix + " rental quotes"), trade_type="rent", price_unit="period",
+                       rental_quotes=[{"unit": "period", "amount": "90", "label": "长包"},
+                                      {"unit": "period", "amount": "20", "label": "包夜"},
+                                      {"unit": "period", "amount": "8", "label": "夜间", "start_time": "22:00", "end_time": "07:00", "billing_unit": "hour"},
+                                      {"unit": "day", "amount": "25"}])
+        self.call("member", "POST", "/api/v1/me/products", dict(payload, rental_category=""), status=403)
+        product = self.call("member", "POST", "/api/v1/me/products", payload).data
+        pid = product["id"]
+        image = self.upload()
+        product = self.call("member", "POST", f"/api/v1/me/products/{pid}/images", {"media_ids": [image], "expected_version": product["version"], "request_id": str(uuid.uuid4())}).data
+        pending = self.call("member", "POST", f"/api/v1/me/products/{pid}/submit", {"expected_version": product["version"]}).data
+        review = {"expected_version": pending["version"], "decision": "approve"}
+        self.call("admin", "POST", f"/api/v1/admin/products/{pid}/review", review, status=422)
+        published = self.call("admin", "POST", f"/api/v1/admin/products/{pid}/review", dict(review, rental_category="week_month")).data
+        product = self.wait_published(pid, published)
+        self.check("rental category is assigned by the approving administrator", product.get("rental_category") == "week_month")
+        public = self.call("anonymous", "GET", f"/api/v1/products/{pid}").data
+        self.check("all quote details remain public", len(public.get("rental_quotes", [])) == 4 and public["rental_quotes"][2].get("billing_unit") == "hour")
+        for basis, price in (("period", "20"), ("hour", "8")):
+            rows = self.call("anonymous", "GET", f"/api/v1/products?q={prefix}&price_unit=period&period_basis={basis}&sort=price_asc&max_price=30").data
+            matches = [item for item in rows if item["id"] == pid]
+            self.check(f"period search compares the minimum {basis} price", len(matches) == 1 and matches[0].get("price_amount") == price)
+        self.call("member", "PATCH", f"/api/v1/me/products/{pid}", dict(payload, expected_version=product["version"], rental_category="hour_day"), status=403)
+        self.fixtures["rental_product_id"] = pid
 
     def security(self):
         self.state["security_complete"] = False

@@ -48,11 +48,17 @@ func (s *Service) Create(ctx context.Context, u member.Actor, input catalog.Prod
 	if err := member.ValidateActor(u); err != nil {
 		return nil, err
 	}
+	if input.RentalCategory != nil {
+		return nil, fault.New(fault.Forbidden, "RENTAL_CATEGORY_ADMIN_ONLY", "出租分类由管理员审核时分配")
+	}
 	return s.store.Create(ctx, u, input)
 }
 func (s *Service) Edit(ctx context.Context, u member.Actor, id string, input catalog.ProductInput) (map[string]any, error) {
 	if err := member.ValidateActor(u); err != nil {
 		return nil, err
+	}
+	if input.RentalCategory != nil {
+		return nil, fault.New(fault.Forbidden, "RENTAL_CATEGORY_ADMIN_ONLY", "出租分类由管理员审核时分配")
 	}
 	return s.store.Edit(ctx, u, id, input)
 }

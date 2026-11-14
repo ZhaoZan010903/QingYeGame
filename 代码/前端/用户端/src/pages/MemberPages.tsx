@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { api, isDemo, ApiError } from '../lib/api';
 import type { Product } from '../types';
+import { rentalPriceRows } from '../lib/rental-prices';
 import { useSession, useUi } from '../context';
 import { RecommendationPreferences } from '../components/RecommendationPreferences';
 import { ProfileAvatar, ProfileAvatarEditor, useProfileAvatar } from '../components/ProfileAvatar';
@@ -35,7 +36,14 @@ export const listingStatus: Record<Product['status'], string> = {
   rented: '租用中',
 };
 const message = (e: unknown) => (e instanceof Error ? e.message : '操作失败，请重试。');
-const units = { account: ' 元', hour: ' 元/小时', day: ' 元/日', week: ' 元/周', month: ' 元/月' };
+const units = {
+  account: ' 元',
+  hour: ' 元/小时',
+  day: ' 元/日',
+  week: ' 元/周',
+  month: ' 元/月',
+  period: ' 元/时段',
+};
 const memberLinks = [
   { to: '/me', label: '账户概览', icon: LayoutGrid },
   {
@@ -450,11 +458,18 @@ export function MemberPage() {
                           {product.server || '区服未填写'} ·{' '}
                           {product.mode === 'sale' ? '出售' : '租赁'} ·{' '}
                           <span className="mono">
-                            {product.unit === 'unknown'
-                              ? `${product.legacyPrice ?? '原站报价'} · 单位待核对`
-                              : product.price == null
-                                ? '联系客服报价'
-                                : `¥ ${product.price.toLocaleString()}${units[product.unit]}`}
+                            {product.mode === 'rent' && product.rentalQuotes?.length
+                              ? rentalPriceRows(product.rentalQuotes)
+                                  .map(
+                                    (quote) =>
+                                      `${quote.label} ${quote.amount}${quote.unit}${quote.starting ? '起' : ''}`,
+                                  )
+                                  .join(' · ')
+                              : product.unit === 'unknown'
+                                ? `${product.legacyPrice ?? '原站报价'} · 单位待核对`
+                                : product.price == null
+                                  ? '联系客服报价'
+                                  : `¥ ${product.price.toLocaleString()}${units[product.unit]}`}
                           </span>
                         </p>
                         {tab === 'listings' &&

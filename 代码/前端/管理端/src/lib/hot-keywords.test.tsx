@@ -34,7 +34,6 @@ describe("R21-1 热门筛选管理", () => {
       "server",
       "gender",
       "level",
-      "kind",
     ]);
     expect(() => addDictionaryOption(group, "永夜头")).toThrow("同名");
     expect(() =>

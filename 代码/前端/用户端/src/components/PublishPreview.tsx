@@ -6,8 +6,8 @@ import { GalleryPager } from '../lib/gallery-pager';
 import { Modal } from './shared';
 import type { Product, RentalQuote, TradeType } from '../types';
 import '../gallery.css';
+import { rentalQuoteLabel, rentalUnitLabels } from '../../../共享/rental-quotes';
 
-const unitLabels = { hour: '元 / 小时', day: '元 / 日', week: '元 / 周', month: '元 / 月' };
 export function PublishPreview({
   product,
   title,
@@ -162,9 +162,18 @@ export function PublishPreview({
           <div className="preview-prices">
             {mode === 'rent' ? (
               quotes.length ? (
-                quotes.map((quote) => (
-                  <strong key={quote.unit}>
-                    {quote.amount} <small>{unitLabels[quote.unit]}</small>
+                quotes.map((quote, index) => (
+                  <strong key={index}>
+                    {quote.unit === 'period' && <small>{rentalQuoteLabel(quote)} · </small>}
+                    {quote.amount}{' '}
+                    <small>
+                      元 /{' '}
+                      {
+                        rentalUnitLabels[
+                          quote.unit === 'period' ? (quote.billing_unit ?? 'period') : quote.unit
+                        ]
+                      }
+                    </small>
                   </strong>
                 ))
               ) : (

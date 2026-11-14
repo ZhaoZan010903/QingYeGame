@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Category } from '../types';
 import { catalogPriceUnits } from './catalog-units';
+import { fixtureCategories } from './fixtures';
 
 const category = (
   tradeType?: Category['tradeType'],
@@ -14,16 +15,51 @@ const category = (
 });
 
 describe('集市模板报价单位', () => {
+  it('演示默认模板提供全部租赁单位，包含时段报价入口', () => {
+    expect(catalogPriceUnits(fixtureCategories, 'rent')).toEqual([
+      'hour',
+      'day',
+      'week',
+      'month',
+      'period',
+    ]);
+  });
   it('空出售与出租模板分别使用业务默认，交易页签不混入其他单位', () => {
     const categories = [category('sale'), category('rent')];
     expect(catalogPriceUnits(categories, 'sale')).toEqual(['account']);
-    expect(catalogPriceUnits(categories, 'rent')).toEqual(['hour', 'day', 'week', 'month']);
-    expect(catalogPriceUnits(categories)).toEqual(['account', 'hour', 'day', 'week', 'month']);
+    expect(catalogPriceUnits(categories, 'rent')).toEqual([
+      'hour',
+      'day',
+      'week',
+      'month',
+      'period',
+    ]);
+    expect(catalogPriceUnits(categories)).toEqual([
+      'account',
+      'hour',
+      'day',
+      'week',
+      'month',
+      'period',
+    ]);
   });
   it('通用空模板跟随当前页签，全部账号页合并默认单位', () => {
     expect(catalogPriceUnits([category()], 'sale')).toEqual(['account']);
-    expect(catalogPriceUnits([category()], 'rent')).toEqual(['hour', 'day', 'week', 'month']);
-    expect(catalogPriceUnits([category()])).toEqual(['account', 'hour', 'day', 'week', 'month']);
+    expect(catalogPriceUnits([category()], 'rent')).toEqual([
+      'hour',
+      'day',
+      'week',
+      'month',
+      'period',
+    ]);
+    expect(catalogPriceUnits([category()])).toEqual([
+      'account',
+      'hour',
+      'day',
+      'week',
+      'month',
+      'period',
+    ]);
   });
   it('非空配置不扩充，合并去重且待核对单位不参与价格筛选', () => {
     expect(

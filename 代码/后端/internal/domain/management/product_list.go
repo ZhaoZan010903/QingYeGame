@@ -32,6 +32,9 @@ func ValidateProductQuery(in ProductQuery) error {
 	if !slices.Contains([]string{"", "all", "member", "platform", "legacy"}, in.Source) || !slices.Contains([]string{"", "sale", "rent"}, in.TradeType) || !slices.Contains([]string{"", "updated", "published", "created"}, in.Sort) || utf8.RuneCountInString(in.Query) > 200 {
 		return fault.New(fault.Invalid, "INVALID_QUERY", "商品筛选条件无效")
 	}
+	if !catalog.ValidRentalCategory(in.RentalCategory) || in.RentalCategory != "" && in.TradeType == "sale" {
+		return fault.New(fault.Invalid, "INVALID_RENTAL_CATEGORY", "出租分类筛选无效")
+	}
 	return nil
 }
 

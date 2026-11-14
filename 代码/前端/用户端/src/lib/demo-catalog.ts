@@ -2,6 +2,8 @@ import type { Product, ProductPage } from '../types';
 import { fixtureScores, fixtureProducts, editorialIds } from './fixtures';
 import { ApiError, queryValues } from './query';
 import { resolveHomePresentation, selectHomeSections } from './home-content';
+import { matchesQuoteUnit, selectedQuotePrice } from './rental-prices';
+import { catalogCursor, catalogCursorOffset } from './catalog-pagination';
 export { fixtureProducts, fixtureCategories, fixturePages } from './fixtures';
 
 // Local-only preview algorithms. API results are never passed through these rankings.
@@ -13,6 +15,9 @@ export function filterProducts(products: Product[], params: URLSearchParams): Pr
   const q = (params.get('q') ?? '').trim().toLowerCase();
   const mode = params.get('trade_type') ?? params.get('mode') ?? params.get('category') ?? 'all';
   const unit = params.get('price_unit') ?? params.get('unit') ?? 'all';
+  const periodBasis = params.get('period_basis') || 'period';
+  const rentalCategory = mode === 'rent' ? params.get('rental_category') : null;
+  const price = (product: Product) => selectedQuotePrice(product, unit, periodBasis);
   const sort = params.get('sort') ?? 'featured';
   const priceSort = ['price-up', 'price-down', 'price_asc', 'price_desc'].includes(sort);
   const low = params.get('min_price') ?? params.get('low');
@@ -45,7 +50,8 @@ export function filterProducts(products: Product[], params: URLSearchParams): Pr
       (!q ||
         `${p.id} ${p.title} ${p.server} QQ炫舞 ${p.tags.join(' ')}`.toLowerCase().includes(q)) &&
       (mode === 'all' || mode === 'qq-dance' || (mode === 'rare' ? p.rare : p.mode === mode)) &&
-      (unit === 'all' || p.unit === unit) &&
+      (!rentalCategory || p.rentalCategory === rentalCategory) &&
+      (unit === 'all' || matchesQuoteUnit(p, unit, periodBasis)) &&
       matches('server', p.server) &&
       matches('gender', p.gender) &&
       matches('level', String(p.level)) &&
@@ -59,32 +65,36 @@ export function filterProducts(products: Product[], params: URLSearchParams): Pr
       (!selected('tag').length ||
         selected('tag').some((t) => p.tags.some((tag) => tag.includes(t)))) &&
       (params.get('verified') !== 'true' || p.verification === 'verified') &&
-      (low === null || (p.price !== null && p.price >= Number(low))) &&
-      (high === null || (p.price !== null && p.price <= Number(high))),
+      (low === null || (price(p) !== null && price(p)! >= Number(low))) &&
+      (high === null || (price(p) !== null && price(p)! <= Number(high))),
   );
   if (sort === 'hot') result.sort(demoHot);
   if (sort === 'newest') result.sort(stableNewest);
   if (priceSort)
-    result.sort((a, b) =>
-      a.price === null
-        ? b.price === null
+    result.sort((a, b) => {
+      const aPrice = price(a),
+        bPrice = price(b);
+      return aPrice === null
+        ? bPrice === null
           ? stableNewest(a, b)
           : 1
-        : b.price === null
+        : bPrice === null
           ? -1
-          : (a.price - b.price) * (sort === 'price-down' || sort === 'price_desc' ? -1 : 1) ||
-            stableNewest(a, b),
-    );
+          : (aPrice - bPrice) * (sort === 'price-down' || sort === 'price_desc' ? -1 : 1) ||
+            stableNewest(a, b);
+    });
   return result;
 }
 export function paginate(products: Product[], params: URLSearchParams): ProductPage {
   const limit = Math.min(50, Math.max(1, Number(params.get('limit')) || 12));
   const page = Math.max(1, Number(params.get('page')) || 1);
-  const start = Math.max(0, Number(params.get('cursor')) || (page - 1) * limit);
+  const start = params.has('cursor')
+    ? catalogCursorOffset(params.get('cursor'))
+    : (page - 1) * limit;
   return {
     items: products.slice(start, start + limit),
     total: products.length,
-    nextCursor: start + limit < products.length ? String(start + limit) : null,
+    nextCursor: start + limit < products.length ? catalogCursor(start + limit) : null,
   };
 }
 

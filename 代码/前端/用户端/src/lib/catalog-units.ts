@@ -1,7 +1,7 @@
 import type { Category, PriceUnit } from '../types';
 
 const saleUnits: PriceUnit[] = ['account'];
-const rentUnits: PriceUnit[] = ['hour', 'day', 'week', 'month'];
+const rentUnits: PriceUnit[] = ['hour', 'day', 'week', 'month', 'period'];
 
 /** Empty template units mean business defaults, while explicit choices remain restrictive. */
 export function catalogPriceUnits(categories: Category[], tradeType?: string | null): PriceUnit[] {

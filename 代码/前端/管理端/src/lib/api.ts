@@ -148,10 +148,24 @@ export function productFrom(value: RecordData): Product {
       value.legacy_price == null ? undefined : String(value.legacy_price),
     legacyCategory: value.legacy_category,
     priceNote: value.price_note,
+    rentalCategory:
+      value.rental_category === "hour_day" ||
+      value.rental_category === "week_month"
+        ? value.rental_category
+        : undefined,
     rentalQuotes: Array.isArray(value.rental_quotes)
       ? value.rental_quotes.map((q: RecordData) => ({
           unit: q.unit,
           amount: String(q.amount),
+          ...(q.unit === "period"
+            ? {
+                label: q.label,
+                billing_unit: q.billing_unit || "period",
+                ...(q.start_time
+                  ? { start_time: q.start_time, end_time: q.end_time }
+                  : {}),
+              }
+            : {}),
         }))
       : [],
     hasPrivateCredentials: !!value.has_private_credentials,

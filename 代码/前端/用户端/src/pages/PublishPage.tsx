@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, isDemo, request } from '../lib/api';
-import type { Category, PriceUnit, Product, ProductWrite } from '../types';
+import type { Category, Product, ProductWrite } from '../types';
 import { useUi } from '../context';
 import { ImageUploader } from '../components/ImageUploader';
 import '../member.css';
@@ -17,6 +17,8 @@ import {
 import type { FilterGroup, RentalQuote } from '../types';
 import { missingPublishField, publishAttributes, rentalPriceForWrite } from '../lib/publish-fields';
 import { formFromProduct, galleryFormDecision } from '../lib/product-form-snapshot';
+import { RentalQuoteEditor } from '../../../共享/RentalQuoteEditor';
+import { quotesFromProduct, validateRentalQuotes } from '../../../共享/rental-quotes';
 
 const initial: ProductWrite = {
   title: '',
@@ -28,14 +30,6 @@ const initial: ProductWrite = {
   level: '',
   tags: [],
   description: '',
-};
-const unitNames: Record<PriceUnit, string> = {
-  account: '元（出售总价）',
-  hour: '元 / 小时',
-  day: '元 / 日',
-  week: '元 / 周',
-  month: '元 / 月',
-  unknown: '报价单位待核对',
 };
 const errorText = (e: unknown) =>
   e instanceof Error ? e.message : '保存失败，已填写的内容仍然保留，请重试。';
@@ -50,9 +44,7 @@ export function PublishPage() {
   const [dictionaries, setDictionaries] = useState<PublishDictionary[]>([]);
   const [qqAccount, setQQAccount] = useState(''),
     [qqPassword, setQQPassword] = useState('');
-  const [rentalPrices, setRentalPrices] = useState<Partial<Record<RentalQuote['unit'], string>>>(
-    {},
-  );
+  const [rentalPrices, setRentalPrices] = useState<RentalQuote[]>([]);
   const [preview, setPreview] = useState(false);
   const [product, setProduct] = useState<Product | null>(null);
   const latest = useRef<Product | null>(null);
@@ -78,18 +70,7 @@ export function PublishPage() {
     setPrice(next.price == null ? '' : String(next.price));
     setTags(snapshot.tags.join('、'));
     setTagsEdited(false);
-    setRentalPrices(
-      Object.fromEntries(
-        (next.rentalQuotes?.length
-          ? next.rentalQuotes
-          : next.mode === 'rent' &&
-              next.price != null &&
-              ['hour', 'day', 'week', 'month'].includes(next.unit)
-            ? [{ unit: next.unit, amount: String(next.price) }]
-            : []
-        ).map((q) => [q.unit, q.amount]),
-      ),
-    );
+    setRentalPrices(quotesFromProduct(next));
     setQQAccount('');
     setQQPassword('');
     dirtyRef.current = false;
@@ -131,18 +112,7 @@ export function PublishPage() {
         setDictionaries(config);
         setQQAccount('');
         setQQPassword('');
-        setRentalPrices(
-          Object.fromEntries(
-            (value?.rentalQuotes?.length
-              ? value.rentalQuotes
-              : value?.mode === 'rent' &&
-                  value.price !== null &&
-                  ['hour', 'day', 'week', 'month'].includes(value.unit)
-                ? [{ unit: value.unit, amount: String(value.price) }]
-                : []
-            ).map((q) => [q.unit, q.amount]),
-          ),
-        );
+        setRentalPrices(quotesFromProduct(value));
         latest.current = value;
         setProduct(value);
         const source: ProductWrite = value
@@ -154,7 +124,6 @@ export function PublishPage() {
               server: value.server,
               gender: value.gender,
               level: value.level,
-              kind: value.kind,
               tags: Array.isArray(value.attributes?.custom_tags)
                 ? value.attributes.custom_tags
                 : [],
@@ -232,7 +201,7 @@ export function PublishPage() {
   const change = <K extends keyof ProductWrite>(key: K, value: ProductWrite[K]) => {
     setForm((previous) => {
       const attributes = { ...previous.attributes };
-      if (['server', 'gender', 'level', 'kind'].includes(key)) delete attributes[key];
+      if (['server', 'gender', 'level'].includes(key)) delete attributes[key];
       return { ...previous, attributes, [key]: value };
     });
     setDirty(true);
@@ -251,16 +220,7 @@ export function PublishPage() {
       throw new Error('演示模式不保存私密账号资料，请使用测试环境。');
     if ((qqAccount && !qqPassword) || (!qqAccount && qqPassword))
       throw new Error('QQ账号和密码请同时填写；不修改时两项都留空。');
-    const rentalQuotes: RentalQuote[] =
-      form.mode === 'rent'
-        ? Object.entries(rentalPrices).map(([unit, amount]) => {
-            if (!rentUnits.includes(unit as RentalQuote['unit']))
-              throw new Error('交易模板已停用部分租期，请移除停用报价后重新选择。');
-            if (!amount || !/^\d+(?:\.\d{1,2})?$/.test(amount) || !Number.isFinite(Number(amount)))
-              throw new Error('已选择的租赁单位需要填写有效报价，最多两位小数。');
-            return { unit: unit as RentalQuote['unit'], amount: Number(amount).toFixed(2) };
-          })
-        : [];
+    const rentalQuotes = form.mode === 'rent' ? validateRentalQuotes(rentalPrices, rentUnits) : [];
     return {
       ...form,
       attributes: { ...attributes, custom_tags: customTags },
@@ -363,19 +323,16 @@ export function PublishPage() {
   const groups = fixedPublishFields(dictionaries, categories);
   const fieldValue = (key: string): unknown =>
     form.attributes?.[key] ??
-    (
-      { server: form.server, gender: form.gender, level: form.level, kind: form.kind } as Record<
-        string,
-        unknown
-      >
-    )[key] ??
+    ({ server: form.server, gender: form.gender, level: form.level } as Record<string, unknown>)[
+      key
+    ] ??
     '';
   const setField = (group: FilterGroup, value: unknown) => {
-    if (['server', 'gender', 'level', 'kind'].includes(group.key))
+    if (['server', 'gender', 'level'].includes(group.key))
       change(group.key as 'server', value as string);
     else change('attributes', { ...form.attributes, [group.key]: value });
   };
-  const rentUnits = (['hour', 'day', 'week', 'month'] as const).filter(
+  const rentUnits = (['hour', 'day', 'week', 'month', 'period'] as const).filter(
     (unit) => !category?.priceUnits.length || category.priceUnits.includes(unit),
   );
   const locked =
@@ -565,70 +522,20 @@ export function PublishPage() {
                   ) : (
                     <div className="form-field span-2">
                       <span>租赁报价（可多选）</span>
-                      {form.unit === 'unknown' &&
-                        product?.legacyPrice &&
-                        !Object.keys(rentalPrices).length && (
-                          <small>
-                            原始参考价 {product.legacyPrice}
-                            ，单位待核对。未填写新报价时保留历史参考信息。
-                          </small>
-                        )}
-                      {Object.keys(rentalPrices)
-                        .filter((unit) => !rentUnits.includes(unit as RentalQuote['unit']))
-                        .map((unit) => (
-                          <p key={unit} className="form-error">
-                            {unitNames[unit as PriceUnit]} 已不在当前模板中。
-                            <button
-                              type="button"
-                              className="text-button"
-                              onClick={() => {
-                                setRentalPrices((old) => {
-                                  const next = { ...old };
-                                  delete next[unit as RentalQuote['unit']];
-                                  return next;
-                                });
-                                setDirty(true);
-                              }}
-                            >
-                              移除此报价
-                            </button>
-                          </p>
-                        ))}
-                      <div className="rental-quote-editor">
-                        {rentUnits.map((unit) => (
-                          <div className="rental-quote-option" key={unit}>
-                            <label className="quote-checkbox">
-                              <input
-                                type="checkbox"
-                                checked={rentalPrices[unit] !== undefined}
-                                onChange={(e) => {
-                                  setRentalPrices((old) => {
-                                    const next = { ...old };
-                                    if (e.target.checked) next[unit] = '';
-                                    else delete next[unit];
-                                    return next;
-                                  });
-                                  setDirty(true);
-                                }}
-                              />
-                              <span>{unitNames[unit]}</span>
-                            </label>
-                            {rentalPrices[unit] !== undefined && (
-                              <input
-                                aria-label={unitNames[unit] + '报价'}
-                                inputMode="decimal"
-                                value={rentalPrices[unit]}
-                                onChange={(e) => {
-                                  setRentalPrices((old) => ({ ...old, [unit]: e.target.value }));
-                                  setDirty(true);
-                                }}
-                                maxLength={14}
-                                placeholder="填写该单位报价"
-                              />
-                            )}
-                          </div>
-                        ))}
-                      </div>
+                      {form.unit === 'unknown' && product?.legacyPrice && !rentalPrices.length && (
+                        <small>
+                          原始参考价 {product.legacyPrice}
+                          ，单位待核对。未填写新报价时保留历史参考信息。
+                        </small>
+                      )}
+                      <RentalQuoteEditor
+                        quotes={rentalPrices}
+                        allowed={rentUnits}
+                        onChange={(next) => {
+                          setRentalPrices(next);
+                          setDirty(true);
+                        }}
+                      />
                     </div>
                   )}
                   {
@@ -811,10 +718,7 @@ export function PublishPage() {
           ]}
           quotes={
             form.mode === 'rent'
-              ? Object.entries(rentalPrices).map(([unit, amount]) => ({
-                  unit: unit as RentalQuote['unit'],
-                  amount: amount || '待填写',
-                }))
+              ? rentalPrices.map((q) => ({ ...q, amount: q.amount || '待填写' }))
               : []
           }
           price={price}

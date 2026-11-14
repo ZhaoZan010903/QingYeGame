@@ -37,6 +37,10 @@ func TestCoreCatalogImportAndAdministration(t *testing.T) {
 	if err != nil || count != 1 {
 		t.Fatalf("import: %d %v", count, err)
 	}
+	var periodEnabled bool
+	if err = a.DB.QueryRow(ctx, "SELECT price_units ? 'period' FROM categories WHERE id='qq-dance'").Scan(&periodEnabled); err != nil || !periodEnabled {
+		t.Fatalf("fresh import defaults lack period pricing: enabled=%v err=%v", periodEnabled, err)
+	}
 	id := deterministicID("legacy-product:legacy-check-1")
 	count, err = a.ImportLegacy(ctx, strings.NewReader(raw))
 	if err != nil || count != 0 {
@@ -142,7 +146,7 @@ func TestCoreCatalogImportAndAdministration(t *testing.T) {
 	h.call("PATCH", "/api/v1/admin/products/"+id, input, cookie, 200)
 	h.call("GET", "/api/v1/products/"+id, nil, nil, 404)
 	h.call("PATCH", "/api/v1/admin/products/"+id, input, cookie, 409)
-	h.call("POST", "/api/v1/admin/products/"+id+"/publish", map[string]any{"expected_version": 2}, cookie, 200)
+	h.call("POST", "/api/v1/admin/products/"+id+"/publish", map[string]any{"expected_version": 2, "rental_category": "week_month"}, cookie, 200)
 	h.call("GET", "/api/v1/products/"+id, nil, nil, 200)
 	// Category disable immediately blocks public detail and media, regardless of stored rank.
 	_, err = a.DB.Exec(ctx, "UPDATE categories SET enabled=false WHERE id='legacy-long-rent'")

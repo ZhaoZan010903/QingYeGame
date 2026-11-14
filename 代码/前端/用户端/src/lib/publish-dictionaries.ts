@@ -10,10 +10,9 @@ const fields = [
   ['server', '所在区服'],
   ['gender', '角色性别'],
   ['level', 'VIP等级'],
-  ['kind', '账号结构'],
 ] as const;
 
-/** All transaction types share the same four single-choice dictionaries. */
+/** All transaction types share the same single-choice dictionaries. */
 export function fixedPublishFields(
   dictionaries: PublishDictionary[],
   categories: Category[],
