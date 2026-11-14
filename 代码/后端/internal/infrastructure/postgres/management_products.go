@@ -118,6 +118,27 @@ func (s *ManagementStore) TransitionProduct(ctx context.Context, actor managemen
 	if version != in.ExpectedVersion {
 		return nil, fault.New(fault.Conflict, "VERSION_CONFLICT", "商品版本已变化")
 	}
+	// Review snapshots now lock their media references. Acquire quota and file
+	// rows before objects, matching purge/worker order even when another product's
+	// historical review still refers to a file that has been reassociated here.
+	var mediaIDs, owners []string
+	e = tx.QueryRow(ctx, `WITH media AS (
+ SELECT media_id FROM product_images WHERE product_id=$1
+ UNION SELECT media_id FROM media_objects WHERE product_id=$1
+ ) SELECT coalesce(array_agg(DISTINCT m.id ORDER BY m.id),'{}'),
+ coalesce(array_agg(DISTINCT m.owner_id ORDER BY m.owner_id) FILTER(WHERE m.owner_id IS NOT NULL),'{}')
+ FROM media_files m JOIN media ON media.media_id=m.id`, id).Scan(&mediaIDs, &owners)
+	if e != nil {
+		return nil, managementStoreError(e)
+	}
+	for _, owner := range owners {
+		if e = lockMemberQuota(ctx, tx, owner); e != nil {
+			return nil, managementStoreError(e)
+		}
+	}
+	if _, e = tx.Exec(ctx, `SELECT id FROM media_files WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE`, mediaIDs); e != nil {
+		return nil, managementStoreError(e)
+	}
 	if _, e = tx.Exec(ctx, `SELECT media_id FROM media_objects WHERE product_id=$1 ORDER BY media_id,variant FOR UPDATE`, id); e != nil {
 		return nil, managementStoreError(e)
 	}

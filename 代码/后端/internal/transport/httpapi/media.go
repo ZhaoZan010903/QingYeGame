@@ -45,7 +45,7 @@ func (a *App) mediaService() *service.Service {
 	// 所有适配都必须先经过 Service.Open 的用途与资源权限校验。
 	files := a.MediaFiles
 	if files == nil {
-		files = &mediafiles.Store{Root: a.Config.MediaDir}
+		files = &mediafiles.Store{Root: a.Config.MediaDir, ThumbnailCommit: (&postgres.MediaPermanentStore{DB: a.DB}).CommitThumbnail}
 	}
 	return service.New(&postgres.MediaStore{DB: a.DB, ManagedEnabled: a.Config.MediaR20.Enabled}, files, cache.Limiter{Client: a.Redis}, a.surface(), a.uploadMax(), imageProcessors, newID, randomToken, tokenHash)
 }

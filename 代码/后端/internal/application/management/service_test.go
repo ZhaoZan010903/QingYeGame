@@ -11,6 +11,15 @@ func TestManagementServiceRechecksRoleBeforeRepository(t *testing.T) {
 	service := New(nil, nil, nil)
 	actor := management.Actor{ID: "m", Role: "member"}
 	actions := []func() error{
+		func() error { _, e := service.TrashPreview(context.Background(), actor); return e },
+		func() error {
+			_, e := service.PurgeProduct(context.Background(), actor, "p", management.PurgeProductInput{})
+			return e
+		},
+		func() error {
+			_, e := service.PurgeTrash(context.Background(), actor, management.PurgeTrashInput{})
+			return e
+		},
 		func() error {
 			_, e := service.Dashboard(context.Background(), actor, management.DashboardQuery{Days: 7, RankBy: "views"})
 			return e
@@ -48,6 +57,14 @@ func TestManagementServicePreservesSelfProtection(t *testing.T) {
 func TestManagementValidationRunsBeforePersistence(t *testing.T) {
 	service := New(nil, nil, nil)
 	actor := management.Actor{ID: "admin", Role: "admin"}
+	_, purgeErr := service.PurgeProduct(context.Background(), actor, "p", management.PurgeProductInput{})
+	if f, ok := fault.As(purgeErr); !ok || f.Code != "INVALID_PURGE_INPUT" {
+		t.Fatalf("purge validation did not run before repository: %v", purgeErr)
+	}
+	_, bulkErr := service.PurgeTrash(context.Background(), actor, management.PurgeTrashInput{})
+	if f, ok := fault.As(bulkErr); !ok || f.Code != "INVALID_PURGE_INPUT" {
+		t.Fatalf("bulk validation did not run before repository: %v", bulkErr)
+	}
 	_, dashboardErr := service.Dashboard(context.Background(), actor, management.DashboardQuery{Days: 365, RankBy: "views"})
 	if f, ok := fault.As(dashboardErr); !ok || f.Code != "INVALID_DASHBOARD_QUERY" {
 		t.Fatalf("dashboard validation did not run before repository: %v", dashboardErr)

@@ -15,6 +15,9 @@ func (s *ManagementStore) TrashProduct(ctx context.Context, actor management.Act
 		return nil, managementStoreError(err)
 	}
 	defer tx.Rollback(ctx)
+	if err = lockProductTrash(ctx, tx); err != nil {
+		return nil, managementStoreError(err)
+	}
 	var version int
 	var deleted, adminDeleted bool
 	var status string

@@ -12,8 +12,8 @@ import (
 // quota/product lock; final promotion rechecks the desired state and generation.
 type lifecycleState struct {
 	medialifecycle.Object
-	Product, Status     string
-	Force, Due, Trashed bool
+	Product, Status                 string
+	Force, Due, Trashed, PurgeGuard bool
 }
 
 func lockLifecycleObject(ctx context.Context, tx pgx.Tx, id, variant string) (lifecycleState, error) {
@@ -39,7 +39,7 @@ func lockLifecycleObject(ctx context.Context, tx pgx.Tx, id, variant string) (li
 		return x, err
 	}
 	var actualProduct string
-	err := tx.QueryRow(ctx, `SELECT media_id,store,object_key,mime_type,sha256,byte_size,force_delete,coalesce(retain_until<=now(),false),coalesce(product_id,'') FROM media_objects WHERE media_id=$1 AND variant=$2 AND deleted_at IS NULL FOR UPDATE`, id, variant).Scan(&x.MediaID, &x.Store, &x.Key, &x.MIME, &x.SHA256, &x.Size, &x.Force, &x.Due, &actualProduct)
+	err := tx.QueryRow(ctx, `SELECT media_id,store,object_key,mime_type,sha256,byte_size,force_delete,coalesce(retain_until<=now(),false),coalesce(product_id,''),permanent_purge_guard FROM media_objects WHERE media_id=$1 AND variant=$2 AND deleted_at IS NULL FOR UPDATE`, id, variant).Scan(&x.MediaID, &x.Store, &x.Key, &x.MIME, &x.SHA256, &x.Size, &x.Force, &x.Due, &actualProduct, &x.PurgeGuard)
 	if err == nil && actualProduct != x.Product {
 		err = pgx.ErrNoRows
 	}
@@ -90,6 +90,19 @@ func (s *MediaLifecycleStore) Step(ctx context.Context, transfer medialifecycle.
 	}
 	if live {
 		return false, nil
+	}
+	if x.PurgeGuard && (x.Force || x.Due && x.Status != "publishing" && x.Status != "published") {
+		var referenced bool
+		if err = tx.QueryRow(ctx, `SELECT `+permanentMediaReferencedSQL, id, x.Key).Scan(&referenced); err != nil {
+			return false, err
+		}
+		if referenced {
+			_, err = tx.Exec(ctx, `UPDATE media_objects SET retry_at=now()+interval '1 hour' WHERE media_id=$1 AND variant=$2`, id, variant)
+			if err == nil {
+				err = tx.Commit(ctx)
+			}
+			return true, err
+		}
 	}
 	destination := desiredStore(x)
 	if err = cancelMediaMoves(ctx, tx, id, variant, destination); err != nil {

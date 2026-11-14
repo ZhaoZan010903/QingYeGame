@@ -39,6 +39,23 @@ func (r *Runtime) Serve(parent context.Context) error {
 	start := func(fn func()) { jobs.Add(1); go func() { defer jobs.Done(); fn() }() }
 	// 双进程共用数据库，只有public进程运行周期任务，避免重复重算。
 	if r.HTTP.Config.Surface == "public" {
+		if r.Purge != nil {
+			start(func() {
+				for ctx.Err() == nil {
+					done, err := r.Purge.RunOnce(ctx)
+					if err != nil && ctx.Err() == nil {
+						slog.Warn("permanent media cleanup failed; will retry")
+					}
+					if !done || err != nil {
+						select {
+						case <-ctx.Done():
+							return
+						case <-time.After(2 * time.Second):
+						}
+					}
+				}
+			})
+		}
 		if r.Media != nil {
 			start(func() {
 				runJob(ctx, 5*time.Minute, time.Minute, true, func(job context.Context) error {

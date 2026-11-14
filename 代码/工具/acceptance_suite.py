@@ -362,7 +362,78 @@ class Suite:
         self.call("other", "GET", "/api/v1/me", status=401)
         self.login("other")
         self.dashboard_functional()
+        self.purge_functional()
         self.state["functional_complete"] = True
+
+    def purge_fixture(self, name, image=False):
+        product = self.call("admin", "POST", "/api/v1/admin/products", self.product_input(self.state["run_id"] + " " + name)).data
+        mid = None
+        if image:
+            mid = self.upload("admin", raw=png_bytes((71, 124, 194)))
+            product = self.call("admin", "POST", f"/api/v1/admin/products/{product['id']}/images",
+                                {"media_ids": [mid], "expected_version": product["version"], "request_id": str(uuid.uuid4())}).data
+            product = self.call("admin", "POST", f"/api/v1/admin/products/{product['id']}/publish", {"expected_version": product["version"]}).data
+            product = self.wait_published(product['id'], product)
+            self.fixtures['purged_oss_media_id'] = mid
+        result = self.call("admin", "DELETE", f"/api/v1/admin/products/{product['id']}",
+                           {"expected_version": product["version"], "reason": "Isolated purge acceptance fixture"}).data
+        return product["id"], result["version"], mid
+
+    def purge_functional(self):
+        # All destructive fixture checks are confined to the suite's isolated ports.
+        pid, version, mid = self.purge_fixture("permanent deletion", image=True)
+        path = f"/api/v1/admin/products/{pid}/purge"
+        body = {"expected_version": version, "confirmation": "永久删除", "reason": "Isolated acceptance", "request_id": str(uuid.uuid4())}
+        self.call("admin", "POST", path, dict(body, confirmation="delete"), status=(400, 422))
+        before = self.call("admin", "GET", "/api/v1/admin/products/trash/preview").data
+        self.check("purge preview counts current trashed products and images", before["total"] >= 1 and before["image_count"] >= 1 and len(before["snapshot"]) == 64)
+        self.call("admin", "POST", path, dict(body, expected_version=version-1), status=409)
+        deleted = self.call("admin", "POST", path, body).data
+        replay = self.call("admin", "POST", path, body).data
+        self.check("permanent deletion result is replayed without another deletion", deleted == replay and deleted["purged_count"] == 1)
+        self.call("admin", "POST", path, dict(body, reason="Different request body"), status=409)
+        self.call("admin", "POST", f"/api/v1/admin/products/{pid}/restore", {"expected_version": version+1, "reason": "Must not restore"}, status=404)
+        self.call("admin", "GET", f"/api/v1/admin/products/{pid}", status=404)
+        self.call("admin", "GET", f"/api/v1/media/{mid}/file", status=404)
+        first, first_version, _ = self.purge_fixture("batch first")
+        preview = self.call("admin", "GET", "/api/v1/admin/products/trash/preview").data
+        second, second_version, _ = self.purge_fixture("batch added after preview")
+        batch = {"snapshot": preview["snapshot"], "confirmation": "清空回收站", "reason": "Isolated batch acceptance", "request_id": str(uuid.uuid4())}
+        self.call("admin", "POST", "/api/v1/admin/products/trash/purge", batch, status=409)
+        restored = self.call("admin", "POST", f"/api/v1/admin/products/{first}/restore", {"expected_version": first_version, "reason": "Verify conflict did not delete"}).data
+        self.check("restored product remains available after stale clear request", self.admin_product(first)["status"] == "draft")
+        self.call("admin", "DELETE", f"/api/v1/admin/products/{first}", {"expected_version": restored["version"], "reason": "Return isolated fixture"})
+        fresh = self.call("admin", "GET", "/api/v1/admin/products/trash/preview").data
+        batch = dict(batch, snapshot=fresh["snapshot"], request_id=str(uuid.uuid4()))
+        cleared = self.call("admin", "POST", "/api/v1/admin/products/trash/purge", batch).data
+        self.check("clear removes exactly the confirmed full recycle bin", cleared["purged_count"] == fresh["total"] and fresh["total"] >= 2)
+        self.check("clear result survives response retry", self.call("admin", "POST", "/api/v1/admin/products/trash/purge", batch).data == cleared)
+        self.check("recycle bin is empty after clear", self.call("admin", "GET", "/api/v1/admin/products/trash/preview").data["total"] == 0)
+        self.call("admin", "GET", f"/api/v1/admin/products/{second}", status=404)
+        self.call("anonymous", "GET", f"/api/v1/products/{self.fixtures['product_id']}")
+
+    def purge_concurrency(self):
+        pid, version, _ = self.purge_fixture("parallel idempotent purge")
+        path = f"/api/v1/admin/products/{pid}/purge"
+        body = {"expected_version": version, "confirmation": "永久删除", "reason": "Concurrent acceptance", "request_id": str(uuid.uuid4())}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            replies = list(executor.map(lambda _: self.clients["admin"].request("POST", path, body), range(16)))
+        self.check("concurrent purge retries all return the same committed result", all(r.status == 200 and r.data == replies[0].data for r in replies) and replies[0].data["purged_count"] == 1)
+
+    def purge_security(self):
+        preview = "/api/v1/admin/products/trash/preview"
+        purge = "/api/v1/admin/products/trash/purge"
+        admin = self.clients["admin"]
+        self.expect("trash preview requires administrator session", admin.request("GET", preview, cookie=""), 401)
+        self.call("member", "GET", preview, status=404)
+        self.call("member", "POST", purge, {}, status=404)
+        for origin in (self.args.public_origin, "null", ""):
+            self.expect("permanent deletion rejects wrong or missing origin", admin.request("POST", purge, {}, origin=origin), 403)
+        pid = self.fixtures["platform_product_id"]
+        product = self.admin_product(pid)
+        body = {"expected_version": product["version"], "confirmation": "永久删除", "reason": "Must reject live listing", "request_id": str(uuid.uuid4())}
+        self.call("admin", "POST", f"/api/v1/admin/products/{pid}/purge", body, status=409)
+        self.check("rejected purge keeps a normal product untouched", self.admin_product(pid)["version"] == product["version"])
 
     def dashboard_contract(self, reply, days=7, rank_by="views"):
         """Check one snapshot without logging titles, user details or raw bodies."""
@@ -508,6 +579,7 @@ class Suite:
             replies = list(executor.map(lambda _: self.clients["admin"].request("POST", f"/api/v1/admin/products/{race_id}/review", {"expected_version": pending["version"], "decision": "approve"}), range(20)))
         statuses = [r.status for r in replies]
         self.check("concurrent reviews publish once", statuses.count(200) == 1 and statuses.count(409) == 19, successes=statuses.count(200), conflicts=statuses.count(409))
+        self.purge_concurrency()
         self.state["concurrency_complete"] = True
 
     def rental_quotes_workflow(self, prefix):
@@ -589,6 +661,7 @@ class Suite:
         self.expect("forged cross-surface logout cannot revoke admin", self.clients["anonymous"].request("POST", "/api/v1/auth/logout", cookie="qingye_session=" + admin_token))
         self.call("admin", "GET", "/api/v1/me")
         self.dashboard_security()
+        self.purge_security()
         self.dashboard_contract(self.call("admin", "GET", "/api/v1/admin/dashboard?days=30&rank_by=consultations"), 30, "consultations")
         # Bounded password failures are deliberately last, so this phase does not
         # interfere with functional or concurrency evidence through shared limits.

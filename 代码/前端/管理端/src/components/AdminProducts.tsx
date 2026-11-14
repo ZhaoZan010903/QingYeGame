@@ -26,6 +26,7 @@ import type { Product, ProductPage } from "../types";
 import { Price, StateView } from "./shared";
 import { AdminProductEditor, statusNames } from "./AdminProductEditor";
 import { GuideButton } from "./AdminGuide";
+import { AdminTrashPurge, type PurgeTarget } from "./AdminTrashPurge";
 import "../products.css";
 
 type Action = "publish" | "offline" | "trash" | "restore";
@@ -54,6 +55,7 @@ export function ProductListRow({
   returnTo,
   edit,
   act,
+  purge,
 }: {
   product: Product;
   trash: boolean;
@@ -62,6 +64,7 @@ export function ProductListRow({
   returnTo: string;
   edit: () => void;
   act: (kind: Action) => void;
+  purge: () => void;
 }) {
   const cover = p.images[0];
   const [failed, setFailed] = useState(false);
@@ -230,6 +233,15 @@ export function ProductListRow({
               </div>
             </>
           )}
+          {trash && (
+            <button
+              className="product-delete product-purge"
+              disabled={disabled}
+              onClick={purge}
+            >
+              永久删除
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -263,6 +275,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
   const [rentalCategory, setRentalCategory] = useState("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [purgeTarget, setPurgeTarget] = useState<PurgeTarget | null>(null);
   const sequence = useRef(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const jump = useRef<HTMLInputElement>(null);
@@ -272,6 +285,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
   const totalPages = Math.max(1, Math.ceil(data.total / size));
   const status = review ? "pending" : params.get("status") || "";
   useEffect(() => setQ(params.get("q") || ""), [params.get("q")]);
+  useEffect(() => setPurgeTarget(null), [params.toString()]);
   useEffect(() => {
     const current = ++sequence.current;
     setLoading(true);
@@ -517,9 +531,25 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
               </button>
             </div>
             {trash && (
-              <p className="product-trash-note">
-                这里保留已删除商品的资料和图片。恢复后进入草稿，请检查后再上架。
-              </p>
+              <div className="product-trash-tools">
+                <div>
+                  <p>
+                    这里保留已删除商品的资料和图片。恢复后进入草稿，请检查后再上架。
+                  </p>
+                  <small>
+                    永久删除不可恢复；清空范围是整个回收站，需先核对服务器预览。
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  className="product-danger-outline"
+                  disabled={busy || loading}
+                  onClick={() => setPurgeTarget({ kind: "all" })}
+                >
+                  <Trash2 size={15} />
+                  清空回收站
+                </button>
+              </div>
             )}
             {notice && (
               <p className="admin-success" role="status">
@@ -569,6 +599,9 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                           disabled={loading || busy}
                           edit={() => select(p.id)}
                           act={(kind) => setAction({ product: p, kind })}
+                          purge={() =>
+                            setPurgeTarget({ kind: "single", product: p })
+                          }
                         />
                       ))}
                     </tbody>
@@ -583,7 +616,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                   <StateView
                     empty={
                       trash
-                        ? "回收站为空。"
+                        ? "回收站中没有符合当前条件的商品。清空预览将检查整个回收站。"
                         : "没有符合条件的商品，请调整搜索或筛选条件。"
                     }
                   />
@@ -660,6 +693,29 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
             </nav>
           </div>
         </section>
+      )}
+      {purgeTarget && trash && !selected && (
+        <AdminTrashPurge
+          target={purgeTarget}
+          onBusyChange={setBusy}
+          onClose={(refresh) => {
+            setPurgeTarget(null);
+            if (refresh) {
+              setLoading(true);
+              setRevision((value) => value + 1);
+            }
+          }}
+          onSuccess={(result) => {
+            setPurgeTarget(null);
+            setBusy(false);
+            setData({ items: [], total: 0, nextCursor: null });
+            setLoading(true);
+            setNotice(
+              `已永久删除 ${result.purged_count} 个商品。独占图片正在后台清理，其他引用及必要记录保留。`,
+            );
+            setRevision((value) => value + 1);
+          }}
+        />
       )}
       <dialog
         ref={dialog}

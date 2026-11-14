@@ -24,8 +24,9 @@ import (
 var ImageProcessors = make(chan struct{}, 1)
 
 type Store struct {
-	Root         string
-	MinFreeBytes int64
+	Root            string
+	MinFreeBytes    int64
+	ThumbnailCommit func(context.Context, string, func() error) error
 }
 
 func hash(value string) string {

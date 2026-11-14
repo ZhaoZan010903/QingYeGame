@@ -14,6 +14,9 @@ type Repository interface {
 	SaveProduct(ctx context.Context, actor management.Actor, id string, in catalog.ProductInput) (map[string]any, error)
 	TransitionProduct(ctx context.Context, actor management.Actor, id, operation string, in management.TransitionInput) (map[string]any, error)
 	TrashProduct(ctx context.Context, actor management.Actor, id string, restore bool, in management.TransitionInput) (map[string]any, error)
+	TrashPreview(context.Context) (map[string]any, error)
+	PurgeProduct(context.Context, management.Actor, string, management.PurgeProductInput) (map[string]any, error)
+	PurgeTrash(context.Context, management.Actor, management.PurgeTrashInput) (map[string]any, error)
 	FeatureProduct(ctx context.Context, actor management.Actor, id string, rank *int) (map[string]any, error)
 	SaveCategory(ctx context.Context, actor management.Actor, id string, create bool, in management.CategoryInput) (map[string]any, error)
 	SaveContact(ctx context.Context, actor management.Actor, id string, in management.ContactInput) (map[string]any, error)
@@ -30,6 +33,33 @@ type Service struct {
 	store                  Repository
 	validateRecommendation func([]byte) error
 	defaultRecommendation  func() any
+}
+
+func (s *Service) TrashPreview(ctx context.Context, actor management.Actor) (map[string]any, error) {
+	if err := management.ValidateActor(actor); err != nil {
+		return nil, err
+	}
+	return s.store.TrashPreview(ctx)
+}
+
+func (s *Service) PurgeProduct(ctx context.Context, actor management.Actor, id string, in management.PurgeProductInput) (map[string]any, error) {
+	if err := management.ValidateActor(actor); err != nil {
+		return nil, err
+	}
+	if err := management.ValidatePurgeProduct(id, in); err != nil {
+		return nil, err
+	}
+	return s.store.PurgeProduct(ctx, actor, id, in)
+}
+
+func (s *Service) PurgeTrash(ctx context.Context, actor management.Actor, in management.PurgeTrashInput) (map[string]any, error) {
+	if err := management.ValidateActor(actor); err != nil {
+		return nil, err
+	}
+	if err := management.ValidatePurgeTrash(in); err != nil {
+		return nil, err
+	}
+	return s.store.PurgeTrash(ctx, actor, in)
 }
 
 func (s *Service) Dashboard(ctx context.Context, actor management.Actor, in management.DashboardQuery) (map[string]any, error) {

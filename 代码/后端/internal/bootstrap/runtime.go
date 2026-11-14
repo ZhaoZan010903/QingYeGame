@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	chatapp "qingye/backend/internal/application/chat"
 	mediaapp "qingye/backend/internal/application/medialifecycle"
+	purgeapp "qingye/backend/internal/application/mediapurge"
 	recommendationapp "qingye/backend/internal/application/recommendation"
 	registrationapp "qingye/backend/internal/application/registration"
 	securityapp "qingye/backend/internal/application/security"
@@ -30,6 +31,7 @@ type Runtime struct {
 	Chat            *chatapp.Service
 	Recommendations *recommendationapp.Service
 	Media           *mediaapp.Worker
+	Purge           *purgeapp.Worker
 	mediaDB         *pgxpool.Pool
 	db              *pgxpool.Pool
 	redis           *redis.Client
@@ -67,6 +69,9 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 		return nil, errors.New("Redis unavailable at startup")
 	}
 	r := &Runtime{HTTP: &httpapi.App{DB: db, Redis: client, Config: c}, Maintenance: &maintenance.Service{DB: db, MediaDir: c.MediaDir}, db: db, redis: client}
+	if c.Surface == "public" {
+		r.Purge = &purgeapp.Worker{Repository: &postgres.MediaPermanentStore{DB: db, NewID: security.NewID}, Local: &mediafiles.Store{Root: c.MediaDir}}
+	}
 	if c.MediaSafety.Enabled {
 		store := &cache.MediaReadStore{Client: client, Policy: c.MediaSafety.Policy}
 		r.HTTP.ReadSafety = &securityapp.ReadService{Store: store, Audit: postgres.MediaReadAudit{DB: db}, NewID: security.NewID}
@@ -93,7 +98,12 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 			r.Close()
 			return nil, err
 		}
-		r.HTTP.MediaFiles = &mediaobject.Files{ProtectedReads: c.MediaSafety.Enabled, Local: &mediafiles.Store{Root: c.MediaDir, MinFreeBytes: mc.MinFreeBytes}, Staging: stage, Published: published, Repository: &postgres.MediaLifecycleStore{DB: db, NewID: security.NewID}, Environment: mc.Environment, TempDir: temp, NewID: security.NewID}
+		legacy, err := mediaobject.NewLegacyOSS(mediaobject.Config{Environment: mc.Environment, Endpoint: mc.OSSEndpoint, Bucket: mc.OSSBucket, AccessKeyID: mc.OSSAccessKeyID, AccessKeySecret: mc.OSSAccessKeySecret, TempDir: temp})
+		if err != nil {
+			r.Close()
+			return nil, err
+		}
+		r.HTTP.MediaFiles = &mediaobject.Files{ProtectedReads: c.MediaSafety.Enabled, Local: &mediafiles.Store{Root: c.MediaDir, MinFreeBytes: mc.MinFreeBytes, ThumbnailCommit: (&postgres.MediaPermanentStore{DB: db}).CommitThumbnail}, Staging: stage, Published: published, Repository: &postgres.MediaLifecycleStore{DB: db, NewID: security.NewID}, Environment: mc.Environment, TempDir: temp, NewID: security.NewID}
 		if c.Surface == "public" {
 			workerConfig := poolConfig.Copy()
 			workerConfig.MaxConns = 2
@@ -103,6 +113,8 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 				return nil, errors.New("media worker database initialization failed")
 			}
 			r.Media = &mediaapp.Worker{Repository: &postgres.MediaLifecycleStore{DB: r.mediaDB, NewID: security.NewID}, Staging: stage, Published: published}
+			r.Purge.Repository = &postgres.MediaPermanentStore{DB: r.mediaDB, NewID: security.NewID}
+			r.Purge.Legacy = legacy
 		}
 	}
 	return r, nil

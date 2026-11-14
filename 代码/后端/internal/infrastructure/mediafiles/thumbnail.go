@@ -96,7 +96,13 @@ func (s *Store) Thumbnail(ctx context.Context, source, id string) (string, bool)
 	if err != nil || closeErr != nil {
 		return "", false
 	}
-	if err = os.Rename(temp, target); err != nil {
+	commit := func() error { return os.Rename(temp, target) }
+	if s.ThumbnailCommit != nil {
+		err = s.ThumbnailCommit(ctx, id, commit)
+	} else {
+		err = commit()
+	}
+	if err != nil {
 		return "", false
 	}
 	return target, true

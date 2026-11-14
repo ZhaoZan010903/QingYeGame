@@ -6,6 +6,12 @@ import {
   type DashboardDays,
   type RankingMetric,
 } from "./dashboard";
+import {
+  readTrashPreview,
+  readPurgeResult,
+  type SinglePurgeInput,
+  type TrashPurgeInput,
+} from "./trash-purge";
 
 export type AdminRecord = Record<string, any>;
 const unwrap = (response: AdminRecord): AdminRecord =>
@@ -118,6 +124,28 @@ export const adminApi = {
     return request(`${path(id)}/restore`, "POST", {
       expected_version: version,
     });
+  },
+  async trashPreview(signal?: AbortSignal) {
+    return readTrashPreview(
+      unwrap(
+        await request(
+          "/admin/products/trash/preview",
+          "GET",
+          undefined,
+          signal,
+        ),
+      ),
+    );
+  },
+  async purgeProduct(id: string, input: SinglePurgeInput) {
+    return readPurgeResult(
+      unwrap(await request(`${path(id)}/purge`, "POST", input)),
+    );
+  },
+  async purgeTrash(input: TrashPurgeInput) {
+    return readPurgeResult(
+      unwrap(await request("/admin/products/trash/purge", "POST", input)),
+    );
   },
   async privateCredentials(
     id: string,
