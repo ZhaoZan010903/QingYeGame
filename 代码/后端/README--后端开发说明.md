@@ -32,6 +32,10 @@ go build -tags=nomsgpack -trimpath -ldflags="-s -w" -o qingye ./cmd/qingye
 
 ## 环境配置
 
+R24新增`RESPONSE_CRYPTO_ENABLED`和`MEDIA_DELIVERY_ENABLED`，示例均默认关闭；部署启用时须同步发布支持协议的双端前端。前者将HTTP业务正文与实时聊天下行统一包装为AES-256-GCM，每会话密钥签发后3600秒轮换，旧密钥额外保留120秒。后者在原鉴权和预算基础上为公开商品图片签发5秒OSS链接，要求同时启用响应加密和媒体保护。可信本地图片正文通过内部来源标记免AES，OSS回源短时落盘不属于本地图。
+
+业务请求先通过`GET /api/v1/response-crypto/init`取得当前上下文与密钥，再携带`X-QY-Protocol`、`X-QY-Context`、`X-QY-Key-Id`、`X-QY-Request-Id`；初始化使用`X-QY-Init: 1`，仅该控制响应直接由HTTPS保护。完整范围、失败处理、图片权限与测试边界见[R24设计](../../文档/开发产出文档/SECURITY-R24--响应加密与图片混合分发设计.md)。隔离HTTP验收使用`acceptance_suite.py --response-crypto`，该模式需要Python的`cryptography`包，仍禁止指向业务端口。
+
 | 字段 | 作用与默认值 |
 | --- | --- |
 | `APP_SURFACE` | `public`（默认）或 `admin`；决定路由、会话身份范围及后台任务归属。 |

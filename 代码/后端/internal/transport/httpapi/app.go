@@ -10,6 +10,7 @@ import (
 	registrationapp "qingye/backend/internal/application/registration"
 	securityapp "qingye/backend/internal/application/security"
 	configuration "qingye/backend/internal/config"
+	"qingye/backend/internal/infrastructure/responsecrypto"
 	"qingye/backend/internal/infrastructure/security"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 
 type Config = configuration.Config
 type App struct {
+	ResponseKeys responsecrypto.Store
 	Registration *registrationapp.Service
 	ReadSafety   *securityapp.ReadService
 	HumanSafety  *securityapp.HumanService
@@ -54,6 +56,7 @@ func (a *App) Routes() http.Handler {
 	a.registerAuthMember(mux)
 	a.registerMediaSafety(mux)
 	a.registerChat(mux)
+	mux.HandleFunc("GET "+responseInitPath, a.responseInit)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -69,7 +72,7 @@ func (a *App) Routes() http.Handler {
 	if a.surface() == "admin" {
 		handler = a.adminSurfaceGate(handler)
 	}
-	return a.middleware(a.requestLimits(handler))
+	return a.middleware(a.requestLimits(a.responseCryptoMiddleware(handler)))
 }
 func (a *App) surface() string {
 	if a.Config.Surface == "admin" {
@@ -79,7 +82,7 @@ func (a *App) surface() string {
 }
 func (a *App) adminSurfaceGate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/login" || (r.Method == http.MethodGet || r.Method == http.MethodHead) && r.URL.Path == "/healthz" {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/auth/login" || (r.Method == http.MethodGet || r.Method == http.MethodHead) && (r.URL.Path == "/healthz" || r.URL.Path == responseInitPath) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -107,11 +110,12 @@ func (a *App) middleware(next http.Handler) http.Handler {
 			}
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Expose-Headers", "X-QY-Protocol,X-QY-Context,X-QY-Key-Id,X-QY-Request-Id,X-QY-Nonce,X-QY-Content-Type,X-QY-Content-Encoding,X-QY-Protocol-Error,X-QY-Response-Mode,Retry-After")
 			w.Header().Set("Vary", "Origin")
 		}
 		if r.Method == "OPTIONS" {
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type,X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type,X-CSRF-Token,X-QY-Init,X-QY-Protocol,X-QY-Context,X-QY-Key-Id,X-QY-Request-Id,X-QY-Accept-Encoding")
 			w.WriteHeader(204)
 			return
 		}

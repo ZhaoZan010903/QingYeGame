@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	service "qingye/backend/internal/application/media"
+	securityapp "qingye/backend/internal/application/security"
 	domain "qingye/backend/internal/domain/media"
 	securitydomain "qingye/backend/internal/domain/security"
 	"qingye/backend/internal/infrastructure/cache"
@@ -53,6 +54,7 @@ func (a *App) mediaActor(u *User) domain.Actor {
 	return domain.Actor{ID: u.ID, Role: u.Role, Surface: a.surface()}
 }
 func (a *App) registerMedia(mux routeRegistrar) {
+	mux.HandleFunc("POST /api/v1/media/access-plan", a.mediaAccessPlan)
 	mux.HandleFunc("POST /api/v1/uploads", a.memberMutation(a.createUpload))
 	mux.HandleFunc("PUT /api/v1/uploads/{id}/content", a.memberMutation(a.receiveUpload))
 	mux.HandleFunc("POST /api/v1/uploads/{id}/complete", a.memberMutation(a.completeUpload))
@@ -112,7 +114,16 @@ func (a *App) completeUpload(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) serveMedia(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	item, itemErr := mediaItemFromRequest(r)
+	if itemErr != nil {
+		writeAppError(w, itemErr)
+		return
+	}
+	checkVersion := func() error {
+		return a.mediaService().CheckProductVersion(r.Context(), id, item.ProductID, item.ProductVersion)
+	}
 	var before func(domain.Upload) error
+	before = func(domain.Upload) error { return checkVersion() }
 	var expand func(int64) (securitydomain.ReadDecision, error)
 	var decision securitydomain.ReadDecision
 	denied := errors.New("media access denied")
@@ -130,14 +141,30 @@ func (a *App) serveMedia(w http.ResponseWriter, r *http.Request) {
 		acquired := false
 		defer func() {
 			if acquired {
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				defer cancel()
-				_ = a.ReadSafety.Store.Finish(ctx, who, lease, measured.Bytes)
+				finish := func(sent int64) {
+					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+					defer cancel()
+					_ = a.ReadSafety.Store.Finish(ctx, who, lease, sent)
+				}
+				if !afterResponseWrite(r, finish) {
+					finish(measured.Bytes)
+				}
 			}
 		}()
 		before = func(m domain.Upload) error {
+			if err := checkVersion(); err != nil {
+				return err
+			}
 			var e error
-			decision, e = a.ReadSafety.Store.Begin(r.Context(), who, lease, m.Size)
+			if grant := r.URL.Query().Get("grant"); grant != "" {
+				store, ok := a.ReadSafety.Store.(securityapp.DeliveryStore)
+				if !ok {
+					return securitydomain.ErrUnavailable
+				}
+				decision, e = store.BeginGrant(r.Context(), who, grant, a.mediaPlanDescriptor(who, item, m), lease)
+			} else {
+				decision, e = a.ReadSafety.Store.Begin(r.Context(), who, lease, m.Size)
+			}
 			if e != nil {
 				return e
 			}
@@ -195,7 +222,11 @@ func (a *App) serveMedia(w http.ResponseWriter, r *http.Request) {
 			a.mediaSafetyError(w, securitydomain.ErrUnavailable)
 			return
 		}
-		d, e := expand(size)
+		reservedSize := size
+		if a.Config.ResponseCrypto.Enabled && !file.ServerLocal {
+			reservedSize += 16
+		}
+		d, e := expand(reservedSize)
 		if e != nil {
 			a.mediaSafetyError(w, e)
 			return
@@ -213,6 +244,9 @@ func (a *App) serveMedia(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", id))
+	if file.ServerLocal {
+		markServerLocalImage(r)
+	}
 	http.ServeContent(measured, r, id, file.Modified, file.Reader)
 }
 

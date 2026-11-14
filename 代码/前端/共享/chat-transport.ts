@@ -1,9 +1,12 @@
+import { responseCrypto, type ChatCrypto } from "./response-crypto";
+
 // One authenticated command protocol, WebTransport first and same-origin WebSocket fallback.
 export type TransportKind = "webtransport" | "websocket";
 export type TransportTicket = {
   url: string;
   ticket: string;
   certificate_sha256?: string;
+  response_crypto?: ChatCrypto;
 };
 export type TransportState =
   "connecting" | "connected" | "reconnecting" | "unavailable";
@@ -24,6 +27,7 @@ type Pending = {
 };
 type Writer = { write: (bytes: Uint8Array) => Promise<void> };
 const FRAME_LIMIT = 1048576;
+const ENCRYPTED_FRAME_LIMIT = Math.ceil(((FRAME_LIMIT + 16) * 4) / 3) + 2048;
 
 export class ChatTransport {
   private writer: Writer | null = null;
@@ -154,15 +158,24 @@ export class ChatTransport {
     void attempt();
   }
 
-  private runChannel(
+  private async runChannel(
     kind: TransportKind,
     config: TransportTicket,
     generation: number,
     receive: (frame: Frame) => void,
   ): Promise<void> {
+    const encryption = await responseCrypto.validateChat(
+      config.response_crypto,
+    );
+    if (generation !== this.generation) return;
     return new Promise((resolve, reject) => {
       let finished = false;
       let buffer = "";
+      let input = Promise.resolve();
+      let queued = 0;
+      let queuedBytes = 0;
+      const seen = new Set<string>();
+      const limit = encryption.enabled ? ENCRYPTED_FRAME_LIMIT : FRAME_LIMIT;
       let close = () => {};
       const finish = (error?: Error) => {
         if (finished) return;
@@ -177,22 +190,52 @@ export class ChatTransport {
         kind === "webtransport" ? 4500 : 10000,
       );
       this.closeConnection = () => finish();
+      const accept = (value: unknown) => {
+        if (finished || generation !== this.generation) return;
+        const frame = value as Frame;
+        if (
+          !frame ||
+          typeof frame.type !== "string" ||
+          frame.type === "encrypted"
+        )
+          throw new Error("无效的咨询响应");
+        if (frame.type === "ready") clearTimeout(watchdog);
+        receive(frame);
+      };
       const push = (text: string) => {
         if (finished || generation !== this.generation) return;
         buffer += text;
         let newline: number;
         while ((newline = buffer.indexOf("\n")) !== -1) {
-          if (newline > FRAME_LIMIT) throw new Error("咨询服务响应过大");
+          if (newline > limit) throw new Error("咨询服务响应过大");
           const raw = buffer.slice(0, newline);
           buffer = buffer.slice(newline + 1);
           if (!raw) continue;
-          const frame = JSON.parse(raw) as Frame;
-          if (!frame || typeof frame.type !== "string")
-            throw new Error("无效的咨询响应");
-          if (frame.type === "ready") clearTimeout(watchdog);
-          receive(frame);
+          if (new TextEncoder().encode(raw).byteLength > limit)
+            throw new Error("咨询服务响应过大");
+          const frame: unknown = JSON.parse(raw);
+          if (!encryption.enabled) {
+            accept(frame);
+            continue;
+          }
+          if (
+            ++queued > 64 ||
+            (queuedBytes += raw.length) > 3 * ENCRYPTED_FRAME_LIMIT
+          )
+            throw new Error("咨询服务响应较多，请重新连接。");
+          // WebCrypto is asynchronous: preserve wire order, including ready and acknowledgements.
+          input = input
+            .then(async () => {
+              if (finished || generation !== this.generation) return;
+              accept(await responseCrypto.decodeChat(frame, encryption, seen));
+            })
+            .catch((error: Error) => finish(error))
+            .finally(() => {
+              queued--;
+              queuedBytes -= raw.length;
+            });
         }
-        if (buffer.length > FRAME_LIMIT) throw new Error("咨询服务响应过大");
+        if (buffer.length > limit) throw new Error("咨询服务响应过大");
       };
       try {
         if (kind === "websocket") {
@@ -237,7 +280,7 @@ export class ChatTransport {
             try {
               if (
                 typeof event.data !== "string" ||
-                new TextEncoder().encode(event.data).byteLength > FRAME_LIMIT
+                new TextEncoder().encode(event.data).byteLength > limit
               )
                 throw new Error("无效的咨询响应");
               push(event.data);

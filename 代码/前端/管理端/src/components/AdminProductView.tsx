@@ -120,6 +120,8 @@ export function AdminProductView({ id }: { id: string }) {
             >
               <ProtectedImage
                 src={current.url}
+                productId={product.id}
+                productVersion={product.version}
                 alt={current.alt || product.title}
               />
             </button>
@@ -157,6 +159,8 @@ export function AdminProductView({ id }: { id: string }) {
                 {image.url && (
                   <ProtectedImage
                     src={image.thumbnailUrl || image.url}
+                    productId={product.id}
+                    productVersion={product.version}
                     loading="lazy"
                     alt=""
                   />
@@ -270,7 +274,12 @@ export function AdminProductView({ id }: { id: string }) {
           <X />
         </button>
         {current?.url && (
-          <ProtectedImage src={current.url} alt={current.alt || "商品原图"} />
+          <ProtectedImage
+            src={current.url}
+            productId={product.id}
+            productVersion={product.version}
+            alt={current.alt || "商品原图"}
+          />
         )}
         <div className="admin-product-image-tools">
           <button

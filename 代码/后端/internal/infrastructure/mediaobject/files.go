@@ -147,7 +147,13 @@ func (s *Files) Open(ctx context.Context, key, id string, thumbnail bool) (*medi
 	if o.Store == "oss" {
 		store = s.Published
 	}
-	return privateRead(ctx, s.TempDir, o.Size, o.SHA256, o.MIME, func() (io.ReadCloser, error) { return store.Open(ctx, o.Key) })
+	file, err := privateRead(ctx, s.TempDir, o.Size, o.SHA256, o.MIME, func() (io.ReadCloser, error) { return store.Open(ctx, o.Key) })
+	if err == nil && o.Store == "staging" {
+		if local, ok := store.(interface{ ServerLocalSource() bool }); ok {
+			file.ServerLocal = local.ServerLocalSource()
+		}
+	}
+	return file, err
 }
 
 // The shared bound covers both R20 and historical reads. The slot remains held

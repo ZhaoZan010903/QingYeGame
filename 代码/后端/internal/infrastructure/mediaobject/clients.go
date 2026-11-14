@@ -39,7 +39,8 @@ func NewS3(c Config) (*Store, error) {
 	transport.MaxIdleConnsPerHost = 4
 	transport.ResponseHeaderTimeout = 15 * time.Second
 	client := s3.New(s3.Options{Region: "us-east-1", BaseEndpoint: aws.String(c.Endpoint), UsePathStyle: true, Credentials: awscredentials.NewStaticCredentialsProvider(c.AccessKeyID, c.AccessKeySecret, ""), RetryMaxAttempts: 2, HTTPClient: &http.Client{Transport: transport, Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired, ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired})
-	return &Store{backend: &s3Backend{client: client, bucket: c.Bucket}, environment: c.Environment, temp: c.TempDir, minFree: c.MinFreeBytes, capacityPath: c.CapacityPath}, nil
+	local := u.Hostname() == "localhost" || net.ParseIP(u.Hostname()).IsLoopback()
+	return &Store{backend: &s3Backend{client: client, bucket: c.Bucket}, environment: c.Environment, temp: c.TempDir, minFree: c.MinFreeBytes, capacityPath: c.CapacityPath, serverLocal: local}, nil
 }
 
 type s3Backend struct {

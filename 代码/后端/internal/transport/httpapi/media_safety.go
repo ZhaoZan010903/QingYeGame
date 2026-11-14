@@ -212,7 +212,11 @@ func (a *App) mediaAccessRecords(w http.ResponseWriter, r *http.Request) {
 		a.mediaSafetyError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"data": map[string]any{"items": records, "metrics": metrics, "coverage": "同源媒体入口；R20对象经受保护代理读取", "retention": "最近活跃访问主体，最多200条；运行计数有时效", "policy": a.Config.MediaSafety.Policy}})
+	coverage := "同源媒体入口；R20对象经受保护代理读取"
+	if a.Config.MediaDeliveryEnabled {
+		coverage = "逐图授权与签发预算；Go实际传输单独计数，OSS签发数不等于OSS实际下载数"
+	}
+	writeJSON(w, 200, map[string]any{"data": map[string]any{"items": records, "metrics": metrics, "coverage": coverage, "retention": "最近活跃访问主体，最多200条；运行计数有时效", "policy": a.Config.MediaSafety.Policy}})
 }
 func (a *App) controlMediaAccess(w http.ResponseWriter, r *http.Request) {
 	if !a.safetyReady(w) {

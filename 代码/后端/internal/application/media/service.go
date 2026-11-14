@@ -332,19 +332,34 @@ func (s *Service) Open(ctx context.Context, id string, thumbnail bool, resolve f
 
 // 先确认原有用途和资源权限，再申请下载预算；远端读取也不得先于准入。
 func (s *Service) OpenChecked(ctx context.Context, id string, thumbnail bool, resolve func(context.Context) (domain.Actor, error), before func(domain.Upload) error) (*domain.File, error) {
-	if err := validID(id); err != nil {
-		return nil, err
-	}
-	upload, err := s.repo.Lookup(ctx, id)
+	upload, err := s.Authorize(ctx, id, resolve)
 	if err != nil {
 		return nil, err
 	}
+	if before != nil {
+		if err := before(upload); err != nil {
+			return nil, err
+		}
+	}
+	return s.files.Open(ctx, upload.Key, id, thumbnail)
+}
+
+// Authorize checks current resource visibility without downloading an object.
+// URL issuance and the subsequent Go transfer must each pass this check.
+func (s *Service) Authorize(ctx context.Context, id string, resolve func(context.Context) (domain.Actor, error)) (domain.Upload, error) {
+	if err := validID(id); err != nil {
+		return domain.Upload{}, err
+	}
+	upload, err := s.repo.Lookup(ctx, id)
+	if err != nil {
+		return domain.Upload{}, err
+	}
 	if upload.State != "ready" {
-		return nil, fault.New(fault.NotFound, "MEDIA_NOT_READY", "图片暂不可用")
+		return domain.Upload{}, fault.New(fault.NotFound, "MEDIA_NOT_READY", "图片暂不可用")
 	}
 	if !upload.Public {
-		hidden := func() (*domain.File, error) {
-			return nil, fault.New(fault.NotFound, "NOT_FOUND", "图片不存在或尚未公开")
+		hidden := func() (domain.Upload, error) {
+			return domain.Upload{}, fault.New(fault.NotFound, "NOT_FOUND", "图片不存在或尚未公开")
 		}
 		actor, err := resolve(ctx)
 		if err != nil || !s.validActor(actor) {
@@ -354,7 +369,7 @@ func (s *Service) OpenChecked(ctx context.Context, id string, thumbnail bool, re
 		if upload.Purpose == "chat" || upload.Purpose == "avatar" {
 			permitted, err = s.repo.ScopedAccess(ctx, id, actor)
 			if err != nil {
-				return nil, err
+				return domain.Upload{}, err
 			}
 		} else {
 			permitted = actor.Role == "admin" || actor.ID == upload.Owner
@@ -362,18 +377,12 @@ func (s *Service) OpenChecked(ctx context.Context, id string, thumbnail bool, re
 		if !permitted && upload.Purpose != "chat" && upload.Purpose != "avatar" {
 			permitted, err = s.repo.OwnedProduct(ctx, id, actor.ID)
 			if err != nil {
-				return nil, err
+				return domain.Upload{}, err
 			}
 		}
 		if !permitted {
 			return hidden()
 		}
 	}
-	// 缩略图命中缓存也必须先通过相同权限检查。
-	if before != nil {
-		if err := before(upload); err != nil {
-			return nil, err
-		}
-	}
-	return s.files.Open(ctx, upload.Key, id, thumbnail)
+	return upload, nil
 }

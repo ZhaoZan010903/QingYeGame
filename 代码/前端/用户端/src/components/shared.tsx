@@ -111,6 +111,8 @@ export function Artwork({
       {src && !failed ? (
         <ProtectedImage
           src={src}
+          productId={p.id}
+          productVersion={p.version}
           alt={p.title}
           loading="lazy"
           decoding="async"

@@ -13,6 +13,8 @@ import (
 )
 
 type Config struct {
+	ResponseCrypto                                                      ResponseCryptoConfig
+	MediaDeliveryEnabled                                                bool
 	Registration                                                        RegistrationConfig
 	MediaSafety                                                         MediaSafetyConfig
 	MediaR20                                                            MediaR20Config
@@ -46,6 +48,15 @@ func Load() (Config, error) {
 	}
 	c := Config{Surface: surface, Environment: env("APP_ENV", "test"), Addr: env("QINGYE_ADDR", env("HTTP_ADDR", addr)), DatabaseURL: os.Getenv("DATABASE_URL"), RedisURL: env("REDIS_URL", "redis://127.0.0.1:6381/0"), MediaDir: env("MEDIA_DIR", "./data/media"), PublicBaseURL: os.Getenv("PUBLIC_BASE_URL"), SessionSecret: os.Getenv("SESSION_SECRET"), AllowedOrigins: strings.Split(env("ALLOWED_ORIGINS", origin), ",")}
 	c.ProductCredentialKey = os.Getenv("PRODUCT_CREDENTIAL_KEY")
+	var responseErr error
+	c.ResponseCrypto, responseErr = loadResponseCrypto()
+	if responseErr != nil {
+		return c, responseErr
+	}
+	c.MediaDeliveryEnabled, responseErr = strconv.ParseBool(env("MEDIA_DELIVERY_ENABLED", "false"))
+	if responseErr != nil {
+		return c, errors.New("MEDIA_DELIVERY_ENABLED must be boolean")
+	}
 	var registrationErr error
 	c.Registration, registrationErr = loadRegistration()
 	if registrationErr != nil {
@@ -130,6 +141,9 @@ func (c Config) Defaults() Config {
 }
 
 func (c Config) Validate() error {
+	if c.MediaDeliveryEnabled && (!c.ResponseCrypto.Enabled || !c.MediaSafety.Enabled) {
+		return errors.New("MEDIA_DELIVERY_ENABLED requires response encryption and media protection")
+	}
 	if c.Environment != "test" && c.Environment != "acceptance" && c.Environment != "production" {
 		return errors.New("APP_ENV must be test, acceptance or production")
 	}

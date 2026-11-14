@@ -265,5 +265,5 @@ func (s *Store) Open(ctx context.Context, key, id string, thumbnail bool) (*medi
 		f.Close()
 		return nil, fault.New(fault.UnsupportedMedia, "INVALID_IMAGE_TYPE", "该媒体不是受支持的图片")
 	}
-	return &media.File{Reader: f, MIME: mime, Modified: info.ModTime()}, nil
+	return &media.File{Reader: f, MIME: mime, Modified: info.ModTime(), ServerLocal: true}, nil
 }

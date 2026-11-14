@@ -75,6 +75,8 @@ function MemberArt({ product }: { product: Product }) {
       {first?.url && !failed ? (
         <ProtectedImage
           src={first.thumbnailUrl ?? first.url}
+          productId={product.id}
+          productVersion={product.version}
           alt={first.alt || product.title}
           loading="lazy"
           onError={() => setFailed(true)}

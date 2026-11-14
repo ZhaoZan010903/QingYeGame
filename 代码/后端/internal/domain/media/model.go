@@ -25,6 +25,7 @@ type Upload struct {
 	Size                                   int64
 	Valid                                  bool
 	Public                                 bool
+	PublishedProduct, SingleProductImage   bool
 	Purpose                                string
 	Resumable                              bool
 	Offset, SecurityVersion                int64
@@ -51,6 +52,9 @@ type File struct {
 	Reader      io.ReadSeekCloser
 	MIME        string
 	Modified    time.Time
+	// ServerLocal is asserted by the storage adapter, never by a request flag
+	// or the presence of a temporary downloaded file.
+	ServerLocal bool
 }
 
 // Mutation 只暴露当前媒介的状态写入，事务连接不离开持久化层。

@@ -1,3 +1,5 @@
+import { responseCrypto } from "./response-crypto";
+
 export const CHAT_IMAGE_LIMIT = 9;
 export const CHAT_IMAGE_BYTES = 10 * 1024 * 1024;
 type Request = (
@@ -53,23 +55,31 @@ export async function uploadChatImage(
     !url.pathname.startsWith("/api/v1/uploads/")
   )
     throw new Error("上传地址无效，请重试。");
+  const context = await responseCrypto.prepare(url.href, "PUT", {
+    "Content-Type": file.type,
+  });
   await new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const abort = () => xhr.abort();
     const clean = () => signal.removeEventListener("abort", abort);
     xhr.open("PUT", url.href);
+    xhr.responseType = "arraybuffer";
     xhr.withCredentials = true;
     xhr.timeout = 120000;
-    xhr.setRequestHeader("Content-Type", file.type);
+    context.headers.forEach((value, key) => xhr.setRequestHeader(key, value));
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable)
         progress(Math.min(95, Math.round((e.loaded / e.total) * 95)));
     };
-    xhr.onload = () => {
+    xhr.onload = async () => {
       clean();
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(new Error("图片上传失败，请重试。"));
+      try {
+        const response = await responseCrypto.decodeXHR(xhr, context);
+        if (!response.ok) throw new Error("图片上传失败，请重试。");
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
     };
     xhr.onerror = xhr.ontimeout = () => {
       clean();

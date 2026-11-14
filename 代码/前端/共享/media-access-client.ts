@@ -1,3 +1,5 @@
+import { responseCrypto } from "./response-crypto";
+
 export type AccessState = {
   enabled: boolean;
   state: "allowed" | "challenge" | "limited" | "restricted";
@@ -18,6 +20,7 @@ let generation = 0;
 let lastProbe = 0;
 let lastStatus: AccessState | undefined;
 export const accessSnapshot = () => view;
+export const mediaIdentityGeneration = () => generation;
 export function subscribeAccess(fn: () => void) {
   listeners.add(fn);
   return () => {
@@ -48,7 +51,7 @@ export async function safetyRequest<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   const timeout = AbortSignal.timeout(15000);
-  const response = await fetch(`/api/v1/security/${path}`, {
+  const response = await responseCrypto.fetch(`/api/v1/security/${path}`, {
     method: body === undefined ? "GET" : "POST",
     credentials: "same-origin",
     cache: "no-store",
@@ -57,7 +60,10 @@ export async function safetyRequest<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
+  const epoch = responseCrypto.epoch();
   const data = await response.json();
+  if (epoch !== responseCrypto.epoch())
+    throw new DOMException("登录状态已变更", "AbortError");
   if (!response.ok)
     throw new Error(data.message || "图片服务暂不可用，请稍后重试。");
   return data as T;

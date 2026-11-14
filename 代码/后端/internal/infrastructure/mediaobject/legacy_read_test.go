@@ -70,7 +70,7 @@ func TestLegacyPrivateReadOriginalAndPreviewWithoutLocalOriginal(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if f.Reader == nil || f.RedirectURL != "" || f.MIME != o.MIME || !f.Modified.Equal(o.Modified) {
+		if f.Reader == nil || f.RedirectURL != "" || f.MIME != o.MIME || !f.Modified.Equal(o.Modified) || f.ServerLocal {
 			t.Fatal("legacy read bypassed private response")
 		}
 		if _, err = f.Reader.Seek(8, io.SeekStart); err != nil {

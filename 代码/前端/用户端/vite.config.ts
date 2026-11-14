@@ -16,5 +16,6 @@ export default defineConfig(({ mode }) => {
     server: { port: Number(env.QINGYE_WEB_PORT) || 5173, proxy },
     preview: { port: Number(env.QINGYE_WEB_PORT) || 4173, proxy },
     build: { sourcemap: false },
+    test: { setupFiles: ['./src/test-transport.ts'] },
   };
 });

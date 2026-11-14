@@ -18,6 +18,7 @@ import type {
 import { ApiError, toApiQuery } from './query';
 import { readHomePresentation } from './home-content';
 import { readLevel } from '../../../共享/level';
+import { responseCrypto, ResponseCryptoError } from '../../../共享/response-crypto';
 
 // The fixture module is loaded only by explicit demo branches, never as an API fallback.
 const loadDemoCatalog = () => import('./demo-catalog');
@@ -73,7 +74,7 @@ export async function request(
 ): Promise<Envelope> {
   let response: Response;
   try {
-    response = await fetch(`${base}${path}`, {
+    response = await responseCrypto.fetch(`${base}${path}`, {
       method,
       credentials: 'include',
       headers: {
@@ -85,13 +86,22 @@ export async function request(
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (error instanceof ResponseCryptoError)
+      throw new ApiError(error.message, 0, 'RESPONSE_SECURITY');
     throw new ApiError('无法连接服务，请检查网络后重试。', 0, 'NETWORK_ERROR');
   }
-  if (response.status === 204) return {};
+  if (response.status === 204) {
+    if (path === '/auth/logout') responseCrypto.reset(true, false);
+    return {};
+  }
   let value: Envelope;
+  const responseEpoch = responseCrypto.epoch();
   try {
     value = await response.json();
-  } catch {
+    if (responseEpoch !== responseCrypto.epoch())
+      throw new DOMException('登录状态已变更', 'AbortError');
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
     throw new ApiError(
       '服务返回了无法识别的响应，请稍后重试。',
       response.status,
@@ -113,6 +123,14 @@ export async function request(
       value.code,
       value.fields,
     );
+  const identity = value.data ?? value;
+  if (
+    path === '/auth/logout' ||
+    (/^\/auth\/(?:login|register)$/.test(path) &&
+      (typeof identity.id === 'string' ||
+        (identity.status === 'authenticated' && typeof identity.user?.id === 'string')))
+  )
+    responseCrypto.reset(true, false);
   return value;
 }
 const unwrap = (e: Envelope) => e.data ?? e;
@@ -413,22 +431,31 @@ async function xhrUpload(
   onProgress?: (percent: number) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  const context = await responseCrypto.prepare(url, method, headers);
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const abort = () => xhr.abort();
     const cleanup = () => signal?.removeEventListener('abort', abort);
     xhr.open(method, url);
-    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    xhr.responseType = 'arraybuffer';
+    context.headers.forEach((v, k) => xhr.setRequestHeader(k, v));
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100));
     };
-    xhr.onload = () => {
+    xhr.onload = async () => {
       cleanup();
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(
-            new ApiError(`图片上传失败（${xhr.status}），可重试。`, xhr.status, 'UPLOAD_FAILED'),
+      try {
+        const response = await responseCrypto.decodeXHR(xhr, context);
+        if (!response.ok)
+          throw new ApiError(
+            `图片上传失败（${xhr.status}），可重试。`,
+            xhr.status,
+            'UPLOAD_FAILED',
           );
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
     };
     xhr.onerror = () => {
       cleanup();

@@ -123,7 +123,7 @@ class Client:
         with self.lock:
             return "; ".join(f"{key}={value}" for key, value in self.cookies.items())
 
-    def request(self, method, path, body=None, *, origin=None, cookie=None, content_type=None):
+    def request(self, method, path, body=None, *, origin=None, cookie=None, content_type=None, extra_headers=None):
         # Upload URLs from the server must stay on this same isolated API origin.
         url = urllib.parse.urljoin(self.base + "/", path)
         target = urllib.parse.urlsplit(url)
@@ -131,6 +131,7 @@ class Client:
             raise CheckFailure("server returned a URL outside the selected isolated API")
         raw = body if isinstance(body, bytes) else (json.dumps(body, ensure_ascii=False).encode() if body is not None else None)
         headers = {"Content-Type": content_type or "application/json"}
+        headers.update(extra_headers or {})
         request_origin = self.origin if origin is None else origin
         if request_origin:
             headers["Origin"] = request_origin
@@ -176,11 +177,15 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
         if len(admins) != 1 or len(members) < 2:
             raise CheckFailure("account file must contain one admin and at least two members with role, phone and password")
         self.credentials = {"admin": admins[0], "member": members[0], "other": members[1]}
+        client_type = Client
+        if getattr(args, "response_crypto", False):
+            from response_crypto_acceptance import encrypted_client
+            client_type = encrypted_client(Client, Reply, CheckFailure)
         self.clients = {
-            "admin": Client(args.admin_url, args.admin_origin),
-            "member": Client(args.public_url, args.public_origin),
-            "other": Client(args.public_url, args.public_origin),
-            "anonymous": Client(args.public_url, args.public_origin),
+            "admin": client_type(args.admin_url, args.admin_origin),
+            "member": client_type(args.public_url, args.public_origin),
+            "other": client_type(args.public_url, args.public_origin),
+            "anonymous": client_type(args.public_url, args.public_origin),
         }
         self.report = {"phase": args.phase, "started_at": utcnow(), "targets": expected_targets,
                        "checks": [], "metrics": {}, "status": "running"}
@@ -206,6 +211,19 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
         result = self.call(actor, "POST", "/api/v1/auth/login", {"method": "password", "phone": entry["phone"], "password": entry["password"]}, name=f"{actor} password login")
         self.check(f"{actor} role is correct", result.data.get("role") == ("admin" if actor == "admin" else "member"))
         self.fixtures[f"{actor}_user_id"] = result.data["id"]
+
+    def revoked_identity(self, client, name):
+        reply = client.request("GET", "/api/v1/me")
+        if getattr(self.args, "response_crypto", False) and reply.status == 409:
+            headers = {key.lower(): value for key, value in reply.headers.items()}
+            self.check(name + " invalidates the previous crypto context",
+                       headers.get("x-qy-protocol-error") == "1"
+                       and reply.json.get("code") == "RESPONSE_CONTEXT_CHANGED"
+                       and not reply.data)
+            # Explicit new read proves business auth also rejects the revoked
+            # session; a transport error alone cannot satisfy that assertion.
+            reply = client.request("GET", "/api/v1/me")
+        self.expect(name, reply, 401)
 
     def save(self):
         self.state["fixtures"] = self.fixtures
@@ -356,8 +374,10 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
             for items in (home.get(key, []) for key in ("featured", "hot", "recommended", "newest"))))
         other_id = self.fixtures["other_user_id"]
         self.call("admin", "PATCH", f"/api/v1/admin/users/{other_id}", {"enabled": False})
-        self.call("other", "GET", "/api/v1/me", status=401)
-        self.call("admin", "PATCH", f"/api/v1/admin/users/{other_id}", {"enabled": True})
+        try:
+            self.revoked_identity(self.clients["other"], "disabled member session is rejected")
+        finally:
+            self.call("admin", "PATCH", f"/api/v1/admin/users/{other_id}", {"enabled": True})
         self.call("other", "GET", "/api/v1/me", status=401)
         self.login("other")
         self.call("other", "POST", "/api/v1/auth/logout")
@@ -695,6 +715,12 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
             for actor in ("admin", "member", "other"):
                 self.login(actor)
             getattr(self, self.args.phase)()
+            if getattr(self.args, "response_crypto", False):
+                from security_r24_acceptance import SecurityR24Checks
+                # Reuse the same guarded targets, identities and fixture state.
+                for name in ("r24_raw", "r24_plan"):
+                    setattr(self, name, getattr(SecurityR24Checks, name).__get__(self))
+                getattr(SecurityR24Checks, "r24_" + self.args.phase)(self)
             self.report["status"] = "passed"
         except CheckFailure as exc:
             self.report["status"] = "failed"
@@ -725,6 +751,7 @@ def parser():
     p.add_argument("--output", required=True)
     p.add_argument("--phase", choices=("functional", "concurrency", "security"), required=True)
     p.add_argument("--max-upload-bytes", type=int, default=10 * 1024 * 1024)
+    p.add_argument("--response-crypto", action="store_true", help="require the R24 encrypted response protocol")
     return p
 
 

@@ -31,7 +31,12 @@ type Store struct {
 	environment, temp string
 	minFree           int64
 	capacityPath      string
+	serverLocal       bool
 }
+
+// Only a configured loopback staging backend can assert server-local storage.
+// An OSS object read into the private spool must never gain this classification.
+func (s *Store) ServerLocalSource() bool { return s.serverLocal }
 
 func ValidateKey(environment, key string) error {
 	p := strings.Split(key, "/")

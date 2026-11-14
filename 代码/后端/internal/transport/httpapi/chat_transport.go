@@ -16,6 +16,7 @@ import (
 	"net/url"
 	domain "qingye/backend/internal/domain/chat"
 	"qingye/backend/internal/domain/fault"
+	"qingye/backend/internal/infrastructure/responsecrypto"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +31,7 @@ import (
 
 const chatFrameLimit = 16 << 10
 
-type chatTicket struct{ User, Session, Surface, Origin, Transport string }
+type chatTicket struct{ User, Session, Surface, Origin, Transport, ResponseContext, ResponseChannel string }
 type chatCommand struct {
 	ID           string          `json:"id"`
 	Op           string          `json:"op"`
@@ -132,13 +133,25 @@ func (a *App) chatTransportTicket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ticket := randomToken()
-	data, _ := json.Marshal(chatTicket{u.ID, a.requestSessionHash(r), a.surface(), r.Header.Get("Origin"), in.Transport})
+	binding := chatTicket{User: u.ID, Session: a.requestSessionHash(r), Surface: a.surface(), Origin: r.Header.Get("Origin"), Transport: in.Transport}
+	cryptoInfo := map[string]any{"enabled": false}
+	if a.Config.ResponseCrypto.Enabled {
+		response, ok := r.Context().Value(responseRequestKey{}).(responseRequest)
+		if !ok || response.ContextID != a.responseMAC("session:"+binding.Session) {
+			fail(w, 409, "RESPONSE_CONTEXT_CHANGED", "请刷新后重新连接")
+			return
+		}
+		binding.ResponseContext = response.ContextID
+		binding.ResponseChannel = responsecrypto.RandomID()
+		cryptoInfo = map[string]any{"enabled": true, "context_id": binding.ResponseContext, "channel_id": binding.ResponseChannel}
+	}
+	data, _ := json.Marshal(binding)
 	if e := a.Redis.Set(r.Context(), "qingye:chat:ticket:"+a.surface()+":"+tokenHash(ticket), data, 30*time.Second).Err(); e != nil {
 		fail(w, 503, "CHAT_UNAVAILABLE", "在线咨询暂不可用")
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"data": map[string]any{"url": endpoint, "ticket": ticket, "certificate_sha256": pin, "expires_in": 30}})
+	writeJSON(w, 200, map[string]any{"data": map[string]any{"url": endpoint, "ticket": ticket, "certificate_sha256": pin, "expires_in": 30, "response_crypto": cryptoInfo}})
 }
 
 func (a *App) NewChatTransport() (*webtransport.Server, error) {
@@ -200,6 +213,11 @@ func (a *App) acceptChatTicket(w http.ResponseWriter, r *http.Request, transport
 	if transport == "websocket" && a.requestSessionHash(r) != binding.Session {
 		cancel()
 		fail(w, 401, "SESSION_MISMATCH", "请重新连接")
+		return chatTicket{}, "", "", false
+	}
+	if a.Config.ResponseCrypto.Enabled && (binding.ResponseContext != a.responseMAC("session:"+binding.Session) || !responsecrypto.ValidID(binding.ResponseChannel, 32, 32)) {
+		cancel()
+		fail(w, 401, "INVALID_TICKET", "连接协议已更新，请重新连接")
 		return chatTicket{}, "", "", false
 	}
 	u, err := a.currentUserBySession(ctx, binding.Session)
@@ -300,7 +318,25 @@ func (a *App) serveChatStream(ctx context.Context, cancel context.CancelFunc, st
 		writeMu.Lock()
 		defer writeMu.Unlock()
 		_ = stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		e := json.NewEncoder(stream).Encode(frame)
+		var wire any = frame
+		var e error
+		if a.Config.ResponseCrypto.Enabled {
+			var k responsecrypto.Key
+			k, e = a.responseKeys().Current(ctx, binding.ResponseContext)
+			if e == nil {
+				var plain []byte
+				plain, e = json.Marshal(frame)
+				if e == nil && len(plain) > (1<<20)+4096 {
+					e = errors.New("chat response exceeds envelope limit")
+				}
+				if e == nil {
+					wire, e = responsecrypto.SealChat(k, a.surface(), binding.ResponseChannel, plain)
+				}
+			}
+		}
+		if e == nil {
+			e = json.NewEncoder(stream).Encode(wire)
+		}
 		if e != nil {
 			cancel()
 		}

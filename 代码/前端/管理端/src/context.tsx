@@ -1,4 +1,5 @@
 import {
+  Fragment,
   createContext,
   useCallback,
   useContext,
@@ -9,6 +10,9 @@ import {
 } from "react";
 import { api } from "./lib/api";
 import type { User } from "./types";
+import { responseCrypto } from "../../共享/response-crypto";
+import { resetMediaIdentity } from "../../共享/media-access-client";
+import { chatTransport } from "./lib/chat-api";
 type LoginNotice =
   "password-changed" | "password-uncertain" | "session-expired" | null;
 const Session = createContext<{
@@ -23,6 +27,7 @@ const Session = createContext<{
 export const useSession = () => useContext(Session);
 export function Providers({ children }: { children: ReactNode }) {
   const generation = useRef(0);
+  const [identityEpoch, setIdentityEpoch] = useState(0);
   const [profileRevision, setProfileRevision] = useState(0);
   const [loginNotice, setLoginNotice] = useState<LoginNotice>(null);
   const [user, setUser] = useState<User | null>(null),
@@ -47,14 +52,36 @@ export function Providers({ children }: { children: ReactNode }) {
   }, []);
   const invalidate = useCallback((notice: LoginNotice = null) => {
     generation.current++;
+    // A password-result warning deliberately stays signed out until an explicit login.
+    responseCrypto.reset(true, false);
+    chatTransport.disconnect();
+    resetMediaIdentity();
     setLoginNotice(notice);
     setUser(null);
     setError(undefined);
     setLoading(false);
     setProfileRevision((value) => value + 1);
+    setIdentityEpoch((value) => value + 1);
   }, []);
+  useEffect(
+    () =>
+      responseCrypto.subscribeIdentity(() => {
+        generation.current++;
+        chatTransport.disconnect();
+        resetMediaIdentity();
+        setUser(null);
+        setError(undefined);
+        setLoading(true);
+        setIdentityEpoch((value) => value + 1);
+        void refresh();
+      }),
+    [refresh],
+  );
   useEffect(() => {
     void refresh();
+    return () => {
+      generation.current++;
+    };
   }, [refresh]);
   return (
     <Session.Provider
@@ -68,7 +95,7 @@ export function Providers({ children }: { children: ReactNode }) {
         loginNotice,
       }}
     >
-      {children}
+      <Fragment key={identityEpoch}>{children}</Fragment>
     </Session.Provider>
   );
 }

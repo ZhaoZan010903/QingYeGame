@@ -33,7 +33,11 @@ func (a *App) requestLimits(next http.Handler) http.Handler {
 			defer func() { <-slots }()
 		default:
 			w.Header().Set("Retry-After", "1")
-			fail(w, 503, "SERVER_BUSY", "服务繁忙，请稍后重试")
+			if c.ResponseCrypto.Enabled {
+				responseProtocolError(w, 503, "RESPONSE_BUSY")
+			} else {
+				fail(w, 503, "SERVER_BUSY", "服务繁忙，请稍后重试")
+			}
 			return
 		}
 		// 文件请求保留较长处理窗口，仍为数据库等待设上限；网络读取另有Server超时。

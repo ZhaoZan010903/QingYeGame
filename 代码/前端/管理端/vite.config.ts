@@ -15,5 +15,6 @@ export default defineConfig(({ mode }) => {
     server: { port: Number(env.QINGYE_ADMIN_PORT) || 5181, proxy },
     preview: { port: Number(env.QINGYE_ADMIN_PORT) || 5181, proxy },
     build: { sourcemap: false },
+    test: { setupFiles: ["./src/test-transport.ts"] },
   };
 });

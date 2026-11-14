@@ -1,10 +1,22 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { api, isDemo } from './lib/api';
 import type { User } from './types';
 import { Modal, StateView } from './components/shared';
 import { useLoad } from './lib-use';
 import { ContactDetails } from './components/ContactDetails';
 import { contactsForChannel } from './lib/contact-options';
+import { responseCrypto } from '../../共享/response-crypto';
+import { resetMediaIdentity } from '../../共享/media-access-client';
+import { chatTransport } from './lib/chat-api';
 const Session = createContext<{
   user: User | null;
   loading: boolean;
@@ -95,6 +107,8 @@ function ContactDialog({
   );
 }
 export function Providers({ children }: { children: ReactNode }) {
+  const generation = useRef(0);
+  const [identityEpoch, setIdentityEpoch] = useState(0);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>();
@@ -103,17 +117,40 @@ export function Providers({ children }: { children: ReactNode }) {
     null,
   );
   const refresh = useCallback(async () => {
+    const current = ++generation.current;
     setError(undefined);
     try {
-      setUser(await api.me());
+      const latest = await api.me();
+      if (current === generation.current) setUser(latest);
     } catch (e) {
-      setError(e);
+      if (current === generation.current) {
+        setUser(null);
+        setError(e);
+      }
     } finally {
-      setLoading(false);
+      if (current === generation.current) setLoading(false);
     }
   }, []);
+  useEffect(
+    () =>
+      responseCrypto.subscribeIdentity(() => {
+        generation.current++;
+        chatTransport.disconnect();
+        resetMediaIdentity();
+        setUser(null);
+        setSupport(null);
+        setError(undefined);
+        setLoading(true);
+        setIdentityEpoch((value) => value + 1);
+        void refresh();
+      }),
+    [refresh],
+  );
   useEffect(() => {
     void refresh();
+    return () => {
+      generation.current++;
+    };
   }, [refresh]);
   useEffect(() => {
     if (!message) return;
@@ -125,7 +162,7 @@ export function Providers({ children }: { children: ReactNode }) {
       <Ui.Provider
         value={{ notify, contact: (id, purpose, channel) => setSupport({ id, purpose, channel }) }}
       >
-        {children}
+        <Fragment key={identityEpoch}>{children}</Fragment>
         {support && <ContactDialog {...support} notify={notify} onClose={() => setSupport(null)} />}
         <div className={`toast ${message ? 'visible' : ''}`} role="status">
           {message}

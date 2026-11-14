@@ -18,6 +18,7 @@ import (
 	"qingye/backend/internal/infrastructure/mediafiles"
 	"qingye/backend/internal/infrastructure/mediaobject"
 	"qingye/backend/internal/infrastructure/postgres"
+	"qingye/backend/internal/infrastructure/responsecrypto"
 	"qingye/backend/internal/infrastructure/security"
 	"qingye/backend/internal/infrastructure/sms"
 	"qingye/backend/internal/maintenance"
@@ -69,6 +70,9 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 		return nil, errors.New("Redis unavailable at startup")
 	}
 	r := &Runtime{HTTP: &httpapi.App{DB: db, Redis: client, Config: c}, Maintenance: &maintenance.Service{DB: db, MediaDir: c.MediaDir}, db: db, redis: client}
+	if c.ResponseCrypto.Enabled {
+		r.HTTP.ResponseKeys = &responsecrypto.RedisStore{Client: client, Namespace: "qingye:r24:response:" + c.Surface + ":"}
+	}
 	if c.Surface == "public" && c.MediaWorkersEnabled {
 		r.Purge = &purgeapp.Worker{Repository: &postgres.MediaPermanentStore{DB: db, NewID: security.NewID}, Local: &mediafiles.Store{Root: c.MediaDir}}
 	}

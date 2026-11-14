@@ -83,6 +83,8 @@ export function ProductListRow({
             {cover && !failed && (cover.thumbnailUrl || cover.url) ? (
               <ProtectedImage
                 src={cover.thumbnailUrl || cover.url}
+                productId={p.id}
+                productVersion={p.version}
                 alt=""
                 loading="lazy"
                 onError={() => setFailed(true)}

@@ -13,6 +13,7 @@ import {
   inspectMediaFailure,
   isProtectedMedia,
   mediaVerificationComplete,
+  mediaIdentityGeneration,
   openMediaVerification,
   queueMediaRetry,
   resetMediaIdentity,
@@ -20,6 +21,13 @@ import {
   subscribeAccess,
 } from "./media-access-client";
 import "./media-security.css";
+import { responseCrypto } from "./response-crypto";
+import {
+  acquireMediaSlot,
+  resolveMediaImage,
+  type DeliveredImage,
+  type ProductMediaScope,
+} from "./media-delivery";
 
 const placeholder =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"%3E%3Crect width="640" height="360" fill="%238e8e9314"/%3E%3C/svg%3E';
@@ -27,15 +35,21 @@ export function ProtectedImage({
   src,
   onError,
   onLoad,
+  productId,
+  productVersion,
   ...props
-}: ImgHTMLAttributes<HTMLImageElement>) {
+}: ImgHTMLAttributes<HTMLImageElement> & ProductMediaScope) {
   const protectedSource = isProtectedMedia(src);
   const [ready, setReady] = useState(!protectedSource);
   const [pending, setPending] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [delivered, setDelivered] = useState<DeliveredImage>();
+  const [visible, setVisible] = useState(props.loading !== "lazy");
   const image = useRef<HTMLImageElement>(null);
   const release = useRef<(() => void) | null>(null);
   const retries = useRef(0);
+  const ossRefreshes = useRef(0);
+  const deliveryRelease = useRef<(() => void) | null>(null);
   const current = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const view = useSyncExternalStore(
@@ -44,11 +58,32 @@ export function ProtectedImage({
     accessSnapshot,
   );
   const seen = useRef(view.revision);
+  const identityEpoch = mediaIdentityGeneration();
+  useEffect(() => {
+    const element = image.current;
+    if (
+      !protectedSource ||
+      !element ||
+      typeof IntersectionObserver === "undefined"
+    ) {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        setVisible(entries.some((entry) => entry.isIntersecting));
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [src, protectedSource]);
   useEffect(() => {
     const version = ++current.current;
     setPending(false);
     setAttempt(0);
     retries.current = 0;
+    ossRefreshes.current = 0;
     setReady(!protectedSource);
     if (protectedSource)
       void ensureMediaSession()
@@ -61,7 +96,85 @@ export function ProtectedImage({
       clearTimeout(timer.current);
       release.current?.();
     };
-  }, [src, protectedSource]);
+  }, [src, protectedSource, identityEpoch, productId, productVersion]);
+  useEffect(() => {
+    if (!protectedSource || !src || !ready || !visible || pending) {
+      setDelivered(undefined);
+      return;
+    }
+    const controller = new AbortController();
+    const version = current.current;
+    let disposed = false;
+    let loaded: DeliveredImage | undefined;
+    let releaseSlot: (() => void) | undefined;
+    let started = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    setDelivered(undefined);
+    const start = () => {
+      if (started || disposed) return;
+      started = true;
+      void (async () => {
+        releaseSlot = await acquireMediaSlot(controller.signal);
+        if (disposed) {
+          releaseSlot();
+          return;
+        }
+        timeout = setTimeout(() => {
+          controller.abort(new DOMException("图片读取超时", "TimeoutError"));
+          releaseSlot?.();
+          if (!disposed && version === current.current && loaded)
+            image.current?.dispatchEvent(new Event("error"));
+        }, 20000);
+        deliveryRelease.current = () => {
+          clearTimeout(timeout);
+          releaseSlot?.();
+        };
+        loaded = await resolveMediaImage(src, controller.signal, {
+          productId,
+          productVersion,
+        });
+        if (disposed || version !== current.current) {
+          loaded.dispose();
+          return;
+        }
+        if (loaded.mode === "oss" && loaded.expiresAt! <= performance.now()) {
+          clearTimeout(timeout);
+          releaseSlot();
+          if (ossRefreshes.current < 1) {
+            ossRefreshes.current++;
+            setAttempt((value) => value + 1);
+            return;
+          }
+          throw new Error("图片访问凭据已过期，请稍后重试。");
+        }
+        setDelivered(loaded);
+      })().catch(() => {
+        clearTimeout(timeout);
+        releaseSlot?.();
+        if (!disposed && version === current.current)
+          image.current?.dispatchEvent(new Event("error"));
+      });
+    };
+    start();
+    return () => {
+      disposed = true;
+      controller.abort();
+      clearTimeout(timeout);
+      releaseSlot?.();
+      loaded?.dispose();
+      deliveryRelease.current = null;
+    };
+  }, [
+    src,
+    protectedSource,
+    ready,
+    attempt,
+    visible,
+    pending,
+    identityEpoch,
+    productId,
+    productVersion,
+  ]);
   function retry() {
     if (!pending || retries.current >= 3) return;
     clearTimeout(timer.current);
@@ -108,8 +221,18 @@ export function ProtectedImage({
     return () => observer.disconnect();
   }, [view.revision, pending]);
   async function failed(event: SyntheticEvent<HTMLImageElement>) {
+    deliveryRelease.current?.();
     release.current?.();
     release.current = null;
+    if (
+      protectedSource &&
+      delivered?.mode === "oss" &&
+      ossRefreshes.current < 1
+    ) {
+      ossRefreshes.current++;
+      setAttempt((value) => value + 1);
+      return;
+    }
     if (!protectedSource || pending) {
       if (!pending) onError?.(event);
       return;
@@ -156,9 +279,9 @@ export function ProtectedImage({
       if (version === current.current) onError?.(callbackEvent);
     }
   }
-  let effective = src;
-  if (protectedSource && attempt && src) {
-    const url = new URL(src, window.location.href);
+  let effective = protectedSource ? delivered?.url : src;
+  if (protectedSource && delivered?.mode === "legacy" && attempt && effective) {
+    const url = new URL(effective, window.location.href);
     url.searchParams.set("_media_retry", String(attempt));
     effective = url.pathname + url.search;
   }
@@ -172,6 +295,7 @@ export function ProtectedImage({
       onError={failed}
       onLoad={(event) => {
         if (pending) return;
+        deliveryRelease.current?.();
         release.current?.();
         release.current = null;
         onLoad?.(event);
@@ -237,6 +361,7 @@ export function MediaVerificationDialog({
   const container = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (identity !== "loading") responseCrypto.setIdentity(identity);
     resetMediaIdentity();
     return () => resetMediaIdentity();
   }, [identity]);

@@ -1,3 +1,5 @@
+import { responseCrypto } from "./response-crypto";
+
 export const PRODUCT_UPLOAD_BATCH_MAX = 99;
 export const PRODUCT_UPLOAD_CONCURRENCY_MAX = 4;
 
@@ -157,7 +159,7 @@ export function createProductUploader<T>(
   };
 }
 
-export function transferProductChunk(
+export async function transferProductChunk(
   url: string,
   bytes: Blob,
   headers: Record<string, string>,
@@ -170,6 +172,7 @@ export function transferProductChunk(
     !/^\/api\/v1\/uploads\/[^/]+\//.test(target.pathname)
   )
     return Promise.reject(new Error("上传地址无效，请重新登录后再试。"));
+  const context = await responseCrypto.prepare(target.href, "PUT", headers);
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new DOMException("已暂停", "AbortError"));
@@ -179,19 +182,24 @@ export function transferProductChunk(
     const abort = () => xhr.abort();
     const clean = () => signal?.removeEventListener("abort", abort);
     xhr.open("PUT", target.href);
+    xhr.responseType = "arraybuffer";
     xhr.withCredentials = true;
     xhr.timeout = 120000;
-    for (const [key, value] of Object.entries(headers))
-      xhr.setRequestHeader(key, value);
+    context.headers.forEach((value, key) => xhr.setRequestHeader(key, value));
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable)
         progress?.((event.loaded / event.total) * 100);
     };
-    xhr.onload = () => {
+    xhr.onload = async () => {
       clean();
-      xhr.status >= 200 && xhr.status < 300
-        ? resolve()
-        : reject(new Error(`图片上传未完成（${xhr.status}），请继续或重试。`));
+      try {
+        const response = await responseCrypto.decodeXHR(xhr, context);
+        if (!response.ok)
+          throw new Error(`图片上传未完成（${xhr.status}），请继续或重试。`);
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
     };
     xhr.onerror = xhr.ontimeout = () => {
       clean();
