@@ -54,7 +54,7 @@ OSS容量只有40G。已撤回整套第二份历史图复制，`copy_production_
 
 管理员凭据仅从仓库外私有文件读取，输入后未截图、记录正文或打印值；会话已退出并复查401。浏览器报告SHA256为`ffd1a8e925ec611b273ca44e4e16ea34ab1c452de01dcd118679b9af17e7a24b`，真实图抽样回执SHA256为`84e4c39ee12067bdfe5c5dafa359aebf6c9f28af2638324c8225b950dc4f380e`，最终运行回执SHA256为`3503a4d6e78863ebba30343f2eafb9e021610b4e2324b109030cbdd61d9c0f31`。
 
-Cloudflare重新安装并授权后连接仍返回`Reauthentication required`及`challenge-widgets.read` scope错误，没有可用重授权URL；不能据此断言用户没有勾选权限。生产IP尚未加入现有widget，外部配置仍未完成，真实验证码、短信收信和注册不得标记通过。
+2026年11月15日已通过用户授权的Cloudflare桌面操作，为现有`QingYeGame test R20-1`组件添加并保存生产主机名`8.140.230.149`；列表显示4个主机，重新进入编辑页确认`127.0.0.1`、`152.136.252.204`、`8.140.230.149`、`localhost`均保留。sitekey、密钥、Managed模式和no preclearance保持不变。短信注册及短信登录仍关闭；真实验证码、短信发送/收信与注册端到端尚未验收，不能标为通过。此前连接器重授权/scope错误保留为历史，不影响本次主机名配置已保存并回读确认的结论。服务器只读核对确认两份环境的sitekey与现有组件一致、TURNSTILE_HOSTNAMES为8.140.230.149、媒体保护开启、两项SMS关闭；私有回执记录时间为北京时间2026-11-15 00:45:16（非精确点击时间），SHA256为`3dd28185985150bd7cc0350bf271acf65ea7f2439def064cb71040e2f7cbe50b`。
 
 部署和恢复规则见[生产部署说明](../../代码/部署/qingye-production/README--生产环境部署说明.md)、[数据包说明](../../代码/工具/README-PRODUCTION-DATA--生产首批数据包说明.md)及[媒体接管说明](../../代码/工具/README-PRODUCTION-MEDIA--生产历史图片副本说明.md)。数据库、私有密钥、映射材料和原图需分别保管，OSS图片不能代替完整业务数据库备份。
 
