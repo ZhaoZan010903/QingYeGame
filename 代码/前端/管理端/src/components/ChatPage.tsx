@@ -113,7 +113,7 @@ export function ChatPage() {
     viewport?.addEventListener("resize", resize);
     return () => viewport?.removeEventListener("resize", resize);
   }, []);
-  const { user } = useSession();
+  const { user, profileRevision } = useSession();
   const {
     list,
     revision,
@@ -163,7 +163,7 @@ export function ChatPage() {
     return () => {
       active = false;
     };
-  }, [user?.id]);
+  }, [user?.id, profileRevision]);
   const [gallery, setGallery] = useState<{
     images: ChatImage[];
     index: number;

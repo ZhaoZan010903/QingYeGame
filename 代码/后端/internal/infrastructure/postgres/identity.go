@@ -35,8 +35,30 @@ func (s IdentityStore) Session(ctx context.Context, hash, surface, role string) 
 	}
 	return &u, nil
 }
-func (s IdentityStore) CreateSession(ctx context.Context, hash, user, surface string, expires time.Time) error {
-	_, err := s.DB.Exec(ctx, `INSERT INTO sessions(token_hash,user_id,expires_at,audience) VALUES($1,$2,$3,$4)`, hash, user, expires, surface)
+func (s IdentityStore) CreateSession(ctx context.Context, hash string, verified identity.User, verifiedHash, surface string, expires time.Time) error {
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var current identity.User
+	var currentHash string
+	err = tx.QueryRow(ctx, `SELECT id,role,enabled,password_hash FROM users WHERE id=$1 FOR UPDATE`, verified.ID).Scan(&current.ID, &current.Role, &current.Enabled, &currentHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return application.ErrCredentialsChanged
+	}
+	if err != nil {
+		return err
+	}
+	// Serialize session issuance with disable/password reset. Verification outside
+	// this transaction cannot authorize an insertion after credentials changed.
+	if !current.CanAccess(surface) || current.Role != verified.Role || currentHash != verifiedHash {
+		return application.ErrCredentialsChanged
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO sessions(token_hash,user_id,expires_at,audience) VALUES($1,$2,$3,$4)`, hash, verified.ID, expires, surface)
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
 	return err
 }
 func (s IdentityStore) DeleteSession(ctx context.Context, hash, surface string) error {

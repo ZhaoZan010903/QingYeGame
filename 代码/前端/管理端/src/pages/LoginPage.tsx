@@ -4,8 +4,15 @@ import { api } from "../lib/api";
 import { useSession } from "../context";
 import { StateView } from "../components/shared";
 export function LoginPage() {
-  const { user, loading, refresh } = useSession();
+  const { user, loading, refresh, loginNotice } = useSession();
   const navigate = useNavigate();
+  const notice =
+    loginNotice &&
+    {
+      "password-changed": "密码已修改，请使用新密码重新登录。",
+      "password-uncertain": "登录已失效；如果上次修改已完成，请用新密码登录。",
+      "session-expired": "登录已失效，请重新登录。",
+    }[loginNotice];
   const [phone, setPhone] = useState(""),
     [password, setPassword] = useState(""),
     [error, setError] = useState(""),
@@ -31,6 +38,11 @@ export function LoginPage() {
       <p className="admin-login-kicker">清叶管理台</p>
       <h1>管理员登录</h1>
       <p className="muted">使用已开通的管理员账户进入独立管理环境。</p>
+      {notice && (
+        <p className="admin-success" role="status">
+          {notice}
+        </p>
+      )}
       <form className="member-form" onSubmit={submit}>
         <fieldset disabled={busy}>
           <label className="form-field">

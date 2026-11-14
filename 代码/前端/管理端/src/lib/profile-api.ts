@@ -32,8 +32,9 @@ export const profileAdminApi = {
       { decision, note },
     );
   },
-  async avatars(): Promise<AvatarLibraryItem[]> {
-    return (await request("/admin/avatar-library")).data;
+  async avatars(signal?: AbortSignal): Promise<AvatarLibraryItem[]> {
+    return (await request("/admin/avatar-library", "GET", undefined, signal))
+      .data;
   },
   async createAvatar(input: {
     name: string;

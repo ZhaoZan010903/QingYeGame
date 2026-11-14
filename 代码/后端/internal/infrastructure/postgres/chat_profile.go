@@ -10,6 +10,9 @@ import (
 
 func (s *ChatStore) Profile(ctx context.Context, actor chat.Actor, in *chat.ProfileInput) (map[string]any, error) {
 	if in != nil {
+		if actor.Surface == "admin" {
+			return nil, fault.New(fault.Invalid, "ADMIN_MANAGEMENT_REQUIRED", "请通过管理员管理修改头像")
+		}
 		tx, err := s.DB.Begin(ctx)
 		if err != nil {
 			return nil, err
@@ -21,7 +24,7 @@ func (s *ChatStore) Profile(ctx context.Context, actor chat.Actor, in *chat.Prof
 		}
 		if *in.AvatarID != "" {
 			var mid string
-			err = tx.QueryRow(ctx, `SELECT m.id FROM avatar_library a JOIN media_files m ON m.id=a.media_id WHERE m.id=$1 AND a.enabled AND m.purpose='avatar' AND m.status='ready' AND m.deleted_at IS NULL FOR SHARE OF a,m`, *in.AvatarID).Scan(&mid)
+			err = tx.QueryRow(ctx, `SELECT m.id FROM avatar_library a JOIN media_files m ON m.id=a.media_id WHERE m.id=$1 AND a.enabled AND m.purpose='avatar' AND m.status='ready' AND m.deleted_at IS NULL FOR SHARE OF a FOR UPDATE OF m`, *in.AvatarID).Scan(&mid)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil, fault.New(fault.Invalid, "INVALID_AVATAR", "请选择头像库中可用的头像")
 			}

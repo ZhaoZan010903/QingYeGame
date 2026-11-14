@@ -13,6 +13,7 @@ import (
 )
 
 var ErrNotFound = errors.New("identity not found")
+var ErrCredentialsChanged = errors.New("credentials changed during verification")
 var ErrVerificationBusy = errors.New("password verification capacity exhausted")
 
 // 与建号成本一致的固定散列，使不存在的账号也经过密码比较。
@@ -21,7 +22,7 @@ const DummyPasswordHash = "$2a$12$TlUW/qGz0irw3rm5.GkCDeUp7g/NPfVdsplL993IqESbWN
 type Repository interface {
 	Credentials(context.Context, string) (domain.User, string, error)
 	Session(context.Context, string, string, string) (*domain.User, error)
-	CreateSession(context.Context, string, string, string, time.Time) error
+	CreateSession(context.Context, string, domain.User, string, string, time.Time) error
 	DeleteSession(context.Context, string, string) error
 	UpdateNickname(context.Context, string, string) error
 }
@@ -95,7 +96,10 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 		return result, invalid()
 	}
 	result = Session{User: u, Token: s.token(), Expires: time.Now().Add(7 * 24 * time.Hour)}
-	if err = s.store.CreateSession(ctx, s.hash(result.Token), u.ID, s.surface, result.Expires); err != nil {
+	if err = s.store.CreateSession(ctx, s.hash(result.Token), u, hash, s.surface, result.Expires); err != nil {
+		if errors.Is(err, ErrCredentialsChanged) {
+			return Session{}, invalid()
+		}
 		return Session{}, fault.Wrap(fault.Unavailable, "SESSION_UNAVAILABLE", "登录服务暂不可用", err)
 	}
 	return result, nil

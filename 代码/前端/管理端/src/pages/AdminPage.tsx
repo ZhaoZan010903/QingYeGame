@@ -10,6 +10,7 @@ import {
   Headphones,
   ListFilter,
   Users,
+  ShieldCheck,
   FileText,
   CircleHelp,
   ArrowUpRight,
@@ -23,6 +24,7 @@ import {
   AdminUsers,
 } from "../components/AdminOperations";
 import { AdminDashboard } from "../components/AdminDashboard";
+import { AdminAdministrators } from "../components/AdminAdministrators";
 import { AdminProductView } from "../components/AdminProductView";
 import { adminProductID } from "../lib/product-links";
 import { ChatPage } from "../components/ChatPage";
@@ -83,6 +85,7 @@ export function AdminPage() {
         ["categories", "区服与账号字典", ListFilter],
         ["pages", "说明与协议", FileText],
         ["users", "会员管理", Users],
+        ["administrators", "管理员管理", ShieldCheck],
         ["nickname-reviews", "昵称审核", ClipboardCheck],
         ["avatar-library", "头像库", Users],
         ["security/media-access", "图片访问保护", CircleHelp],
@@ -141,6 +144,8 @@ export function AdminPage() {
             <AdminProducts key={tab} review={tab === "reviews"} />
           ) : tab === "users" ? (
             <AdminUsers />
+          ) : tab === "administrators" ? (
+            <AdminAdministrators />
           ) : tab === "nickname-reviews" ? (
             <AdminNicknameReviews />
           ) : tab === "avatar-library" ? (

@@ -22,11 +22,20 @@
   }
   .home-product-grid .asset-open,
   .catalog-redesign .asset-grid .asset-open {
-    padding: 7px;
+    padding: 0;
+  }
+  .home-product-grid .asset-image,
+  .catalog-redesign .asset-grid .asset-image {
+    aspect-ratio: 4 / 3;
+    border-radius: 0;
+  }
+  .home-product-grid .asset-image::after,
+  .catalog-redesign .asset-grid .asset-image::after {
+    background: none;
   }
   .home-product-grid .asset-body,
   .catalog-redesign .asset-grid .asset-body {
-    padding: 12px 3px 5px;
+    padding: 12px 10px;
     min-width: 0;
   }
   .home-product-grid .asset-title,

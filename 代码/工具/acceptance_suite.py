@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import zlib
+from admin_accounts_acceptance import AdminAccountsChecks
 
 
 class CheckFailure(Exception):
@@ -159,7 +160,7 @@ class Client:
             return Reply(response.status, payload, dict(response.headers), (time.perf_counter() - start) * 1000)
 
 
-class Suite:
+class Suite(AdminAccountsChecks):
     def __init__(self, args):
         self.args = args
         self.state = json.loads(Path(args.state).read_text(encoding="utf-8")) if Path(args.state).exists() else {}
@@ -220,9 +221,9 @@ class Suite:
     def admin_product(self, product_id):
         return self.call("admin", "GET", f"/api/v1/admin/products/{product_id}").data
 
-    def upload(self, actor="member", raw=None, *, filename="acceptance.png", mime="image/png", complete_status=200):
+    def upload(self, actor="member", raw=None, *, filename="acceptance.png", mime="image/png", complete_status=200, purpose="product"):
         raw = png_bytes() if raw is None else raw
-        ticket = self.call(actor, "POST", "/api/v1/uploads", {"filename": filename, "mime_type": mime, "byte_size": len(raw)}, status=(200, 201)).data
+        ticket = self.call(actor, "POST", "/api/v1/uploads", {"filename": filename, "mime_type": mime, "byte_size": len(raw), "purpose": purpose}, status=(200, 201)).data
         self.call(actor, "PUT", ticket["upload_url"], raw, content_type=mime, name=f"{actor} upload bytes")
         result = self.call(actor, "POST", f"/api/v1/uploads/{ticket['media_id']}/complete", status=complete_status)
         if complete_status == 200:
@@ -363,6 +364,7 @@ class Suite:
         self.login("other")
         self.dashboard_functional()
         self.purge_functional()
+        self.r22_functional()
         self.state["functional_complete"] = True
 
     def purge_fixture(self, name, image=False):
@@ -580,6 +582,7 @@ class Suite:
         statuses = [r.status for r in replies]
         self.check("concurrent reviews publish once", statuses.count(200) == 1 and statuses.count(409) == 19, successes=statuses.count(200), conflicts=statuses.count(409))
         self.purge_concurrency()
+        self.r22_concurrency()
         self.state["concurrency_complete"] = True
 
     def rental_quotes_workflow(self, prefix):
@@ -663,6 +666,7 @@ class Suite:
         self.dashboard_security()
         self.purge_security()
         self.dashboard_contract(self.call("admin", "GET", "/api/v1/admin/dashboard?days=30&rank_by=consultations"), 30, "consultations")
+        self.r22_security()
         # Bounded password failures are deliberately last, so this phase does not
         # interfere with functional or concurrency evidence through shared limits.
         entry = self.credentials["other"]

@@ -18,6 +18,9 @@ type ManagementStore struct {
 }
 
 func managementStoreError(err error) error {
+	if err == nil {
+		return nil
+	}
 	if f, ok := fault.As(err); ok {
 		return f
 	}
@@ -216,13 +219,10 @@ func (s *ManagementStore) SaveSetting(ctx context.Context, actor management.Acto
 	return out, nil
 }
 
-func (s *ManagementStore) Users(ctx context.Context, actor management.Actor, q string, limit, offset int) (map[string]any, error) {
+func (s *ManagementStore) Users(ctx context.Context, actor management.Actor, q, role string, limit, offset int) (map[string]any, error) {
 	var total int
-	e := s.DB.QueryRow(ctx, "SELECT count(*) FROM users WHERE nickname ILIKE '%'||$1||'%' OR phone=$1", q).Scan(&total)
-	if e != nil {
-		return nil, managementStoreError(e)
-	}
-	rows, e := s.jsonRows(ctx, `SELECT jsonb_build_object('id',id,'nickname',nickname,'phone_masked',left(phone,3)||'****'||right(phone,4),'role',role,'enabled',enabled,'created_at',created_at) FROM users WHERE nickname ILIKE '%'||$1||'%' OR phone=$1 ORDER BY created_at DESC,id LIMIT $2 OFFSET $3`, q, limit, offset)
+	var rows []map[string]any
+	e := s.DB.QueryRow(ctx, `WITH matching AS MATERIALIZED (SELECT * FROM users WHERE (nickname ILIKE '%'||$1||'%' OR phone=$1) AND ($4='' OR role=$4)), page AS (SELECT id,nickname,phone,left(phone,3)||'****'||right(phone,4) AS phone_masked,role,enabled,created_at FROM matching ORDER BY created_at DESC,id LIMIT $2 OFFSET $3) SELECT coalesce((SELECT jsonb_agg(to_jsonb(page) ORDER BY created_at DESC,id) FROM page),'[]'::jsonb),(SELECT count(*) FROM matching)`, q, limit, offset, role).Scan(&rows, &total)
 	if e != nil {
 		return nil, managementStoreError(e)
 	}
@@ -234,27 +234,12 @@ func (s *ManagementStore) UpdateUser(ctx context.Context, actor management.Actor
 		return nil, managementStoreError(e)
 	}
 	defer tx.Rollback(ctx)
-	_, e = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(1834181)")
+	target, e := lockAccountMutation(ctx, tx, actor.ID, id)
 	if e != nil {
 		return nil, managementStoreError(e)
 	}
-	var role string
-	e = tx.QueryRow(ctx, "SELECT role FROM users WHERE id=$1 FOR UPDATE", id).Scan(&role)
-	if errors.Is(e, pgx.ErrNoRows) {
-		return nil, fault.New(fault.NotFound, "NOT_FOUND", "用户不存在")
-	}
-	if e != nil {
-		return nil, managementStoreError(e)
-	}
-	if role == "admin" && !*in.Enabled {
-		var other int
-		e = tx.QueryRow(ctx, "SELECT count(*) FROM users WHERE role='admin' AND enabled AND id<>$1", id).Scan(&other)
-		if e != nil {
-			return nil, managementStoreError(e)
-		}
-		if other == 0 {
-			return nil, fault.New(fault.Conflict, "LAST_ADMIN", "需保留至少一位可用管理员")
-		}
+	if target.Role != "member" {
+		return nil, fault.New(fault.Conflict, "ADMIN_MANAGEMENT_REQUIRED", "请通过管理员管理修改管理员状态")
 	}
 	_, e = tx.Exec(ctx, "UPDATE users SET enabled=$2,updated_at=now() WHERE id=$1", id, *in.Enabled)
 	if e == nil && !*in.Enabled {

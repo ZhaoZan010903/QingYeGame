@@ -87,8 +87,15 @@ export const adminApi = {
       ),
     ) as DictionaryGroup;
   },
-  async users(params: URLSearchParams) {
-    const response = await request(`/admin/users?${params}`);
+  async users(params: URLSearchParams, signal?: AbortSignal) {
+    const query = new URLSearchParams(params);
+    query.set("role", "member");
+    const response = await request(
+      `/admin/users?${query}`,
+      "GET",
+      undefined,
+      signal,
+    );
     return {
       items: rows(response),
       total: response.total ?? 0,

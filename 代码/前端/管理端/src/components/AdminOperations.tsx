@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useSession } from "../context";
 import { adminApi, type AdminRecord } from "../lib/admin-api";
 import { StateView } from "./shared";
 import { Link } from "react-router-dom";
 import { RefreshCw, TrendingUp } from "lucide-react";
 import { useUnsavedChanges } from "../lib/admin-ux";
 import { UploadRestrictionPanel } from "./UploadRestrictionPanel";
+import "../accounts.css";
 
 const message = (error: unknown) =>
   error instanceof Error ? error.message : "操作失败，请重试。";
@@ -16,9 +16,51 @@ const date = (value: unknown) => {
     ? "时间格式无效"
     : parsed.toLocaleString("zh-CN");
 };
+export function MemberAccountCard({
+  member,
+  disabled,
+  onToggle,
+  onRestriction,
+}: {
+  member: AdminRecord;
+  disabled: boolean;
+  onToggle: () => void;
+  onRestriction: () => void;
+}) {
+  return (
+    <article className="account-card">
+      <div className="account-identity">
+        <div>
+          <strong>{member.nickname}</strong>
+          <p>{member.phone || "未填写手机号"}</p>
+        </div>
+      </div>
+      <span className={`account-state${member.enabled ? "" : " disabled"}`}>
+        {member.enabled ? "可用" : "已停用"}
+      </span>
+      <div className="account-actions">
+        <button
+          className="button-outline"
+          disabled={disabled}
+          onClick={onToggle}
+        >
+          {member.enabled ? "停用账户" : "启用账户"}
+        </button>
+        <button
+          className="button-outline"
+          disabled={disabled}
+          onClick={onRestriction}
+        >
+          上传权限
+        </button>
+      </div>
+    </article>
+  );
+}
 export function AdminUsers() {
   const requestSequence = useRef(0);
-  const { user } = useSession();
+  const controller = useRef<AbortController | null>(null);
+  const mutationLock = useRef(false);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<AdminRecord[]>([]);
@@ -30,30 +72,66 @@ export function AdminUsers() {
   const [restrictionMember, setRestrictionMember] =
     useState<AdminRecord | null>(null);
   async function load(more = false) {
+    if (mutationLock.current) return;
+    controller.current?.abort();
+    const requestController = new AbortController();
+    controller.current = requestController;
     const sequence = ++requestSequence.current;
     setBusy(true);
     setError("");
+    if (!more) {
+      setItems([]);
+      setTotal(0);
+      setCursor(null);
+    }
     try {
-      const params = new URLSearchParams({ q: query, limit: "20" });
+      const params = new URLSearchParams({
+        q: query,
+        limit: "20",
+        role: "member",
+      });
       if (more && cursor) params.set("cursor", cursor);
-      const page = await adminApi.users(params);
-      if (sequence !== requestSequence.current) return;
-      setItems((old) => (more ? [...old, ...page.items] : page.items));
+      const page = await adminApi.users(params, requestController.signal);
+      if (
+        requestController.signal.aborted ||
+        sequence !== requestSequence.current
+      )
+        return;
+      setItems((old) =>
+        more
+          ? [
+              ...old,
+              ...page.items.filter(
+                (item) => !old.some((existing) => existing.id === item.id),
+              ),
+            ]
+          : page.items,
+      );
       setTotal(page.total);
       setCursor(page.nextCursor);
     } catch (e) {
-      if (sequence === requestSequence.current) setError(message(e));
+      if (
+        !requestController.signal.aborted &&
+        sequence === requestSequence.current
+      )
+        setError(message(e));
     } finally {
-      if (sequence === requestSequence.current) setBusy(false);
+      if (
+        !requestController.signal.aborted &&
+        sequence === requestSequence.current
+      )
+        setBusy(false);
     }
   }
   useEffect(() => {
     void load();
     return () => {
       requestSequence.current++;
+      controller.current?.abort();
     };
   }, [query]);
   async function toggle(member: AdminRecord) {
+    if (mutationLock.current || busy) return;
     if (
       member.enabled &&
       !window.confirm(
@@ -61,6 +139,7 @@ export function AdminUsers() {
       )
     )
       return;
+    mutationLock.current = true;
     setBusy(true);
     setError("");
     setNotice("");
@@ -79,16 +158,17 @@ export function AdminUsers() {
     } catch (e) {
       setError(message(e));
     } finally {
+      mutationLock.current = false;
       setBusy(false);
     }
   }
   return (
-    <section>
+    <section className="admin-accounts">
       <div className="admin-heading">
         <div>
           <span className="eyebrow">账户维护</span>
           <h1>会员管理</h1>
-          <p>共 {total} 个账户 · 手机号脱敏展示</p>
+          <p>共 {total} 位会员 · 完整手机号仅在管理端展示</p>
         </div>
       </div>
       <div className="location-note">
@@ -101,7 +181,9 @@ export function AdminUsers() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            setQuery(search.trim());
+            if (mutationLock.current) return;
+            if (search.trim() === query) void load();
+            else setQuery(search.trim());
           }}
         >
           <input
@@ -110,7 +192,9 @@ export function AdminUsers() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="昵称或完整手机号"
           />
-          <button className="button-outline">查询</button>
+          <button className="button-outline" disabled={busy}>
+            查询
+          </button>
         </form>
       </div>
       {error && (
@@ -126,51 +210,16 @@ export function AdminUsers() {
           {notice}
         </p>
       )}
-      <div className="admin-table-wrap">
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>账户</th>
-              <th>身份</th>
-              <th>状态</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((member) => (
-              <tr key={member.id}>
-                <td>
-                  <strong>{member.nickname}</strong>
-                  <span>{member.phone_masked}</span>
-                </td>
-                <td>{member.role === "admin" ? "管理员" : "会员"}</td>
-                <td>{member.enabled ? "可用" : "已停用"}</td>
-                <td>
-                  {member.id === user?.id ? (
-                    "当前登录账户"
-                  ) : (
-                    <button
-                      className="button-outline"
-                      disabled={busy}
-                      onClick={() => void toggle(member)}
-                    >
-                      {member.enabled ? "停用账户" : "启用账户"}
-                    </button>
-                  )}
-                  {member.role === "member" && (
-                    <button
-                      className="button-outline"
-                      disabled={busy}
-                      onClick={() => setRestrictionMember(member)}
-                    >
-                      上传权限
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="account-list">
+        {items.map((member) => (
+          <MemberAccountCard
+            key={member.id}
+            member={member}
+            disabled={busy}
+            onToggle={() => void toggle(member)}
+            onRestriction={() => setRestrictionMember(member)}
+          />
+        ))}
       </div>
       {restrictionMember && (
         <UploadRestrictionPanel
@@ -180,7 +229,7 @@ export function AdminUsers() {
         />
       )}
       {busy && <p role="status">正在处理…</p>}
-      {!busy && !items.length && (
+      {!busy && !error && !items.length && (
         <p className="admin-empty">没有匹配的账户。</p>
       )}
       {cursor && (

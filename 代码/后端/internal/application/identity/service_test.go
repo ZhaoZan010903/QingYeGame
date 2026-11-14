@@ -15,6 +15,8 @@ type fakeStore struct {
 	err            error
 	reads, created int
 	audience       string
+	createErr      error
+	verifiedHash   string
 }
 
 func (s *fakeStore) Credentials(context.Context, string) (domain.User, string, error) {
@@ -25,10 +27,11 @@ func (s *fakeStore) Session(_ context.Context, _, surface, _ string) (*domain.Us
 	s.audience = surface
 	return &s.u, s.err
 }
-func (s *fakeStore) CreateSession(_ context.Context, _, _, surface string, _ time.Time) error {
+func (s *fakeStore) CreateSession(_ context.Context, _ string, _ domain.User, verifiedHash, surface string, _ time.Time) error {
 	s.created++
 	s.audience = surface
-	return nil
+	s.verifiedHash = verifiedHash
+	return s.createErr
 }
 func (s *fakeStore) DeleteSession(_ context.Context, _, surface string) error {
 	s.audience = surface
@@ -134,5 +137,15 @@ func TestInvalidTextNeverReachesPostgres(t *testing.T) {
 		}
 		_, err = s.UpdateNickname(context.Background(), r.u, value)
 		assertCode(t, err, "INVALID_NICKNAME")
+	}
+}
+
+func TestCredentialsChangedDuringVerificationCannotIssueSession(t *testing.T) {
+	s, r, _, _ := fixture()
+	r.createErr = ErrCredentialsChanged
+	_, err := s.Login(context.Background(), LoginInput{Phone: "member", Password: "valid"})
+	assertCode(t, err, "INVALID_CREDENTIALS")
+	if r.verifiedHash != DummyPasswordHash {
+		t.Fatal("verified credential snapshot not passed to session creation")
 	}
 }

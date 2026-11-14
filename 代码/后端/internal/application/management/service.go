@@ -22,7 +22,7 @@ type Repository interface {
 	SaveContact(ctx context.Context, actor management.Actor, id string, in management.ContactInput) (map[string]any, error)
 	SavePage(ctx context.Context, actor management.Actor, slug string, in management.PageInput) (map[string]any, error)
 	SaveSetting(ctx context.Context, actor management.Actor, key string, in management.SettingInput) (map[string]any, error)
-	Users(ctx context.Context, actor management.Actor, q string, limit, offset int) (map[string]any, error)
+	Users(ctx context.Context, actor management.Actor, q, role string, limit, offset int) (map[string]any, error)
 	UpdateUser(ctx context.Context, actor management.Actor, id string, in management.UserInput) (map[string]any, error)
 	Categories(context.Context) ([]map[string]any, error)
 	Contacts(context.Context) ([]map[string]any, error)
@@ -133,7 +133,7 @@ func (s *Service) SaveSetting(ctx context.Context, actor management.Actor, key s
 	}
 	return s.store.SaveSetting(ctx, actor, key, in)
 }
-func (s *Service) Users(ctx context.Context, actor management.Actor, q string, limit, offset int) (map[string]any, error) {
+func (s *Service) Users(ctx context.Context, actor management.Actor, q, role string, limit, offset int) (map[string]any, error) {
 	if err := management.ValidateActor(actor); err != nil {
 		return nil, err
 	}
@@ -143,7 +143,10 @@ func (s *Service) Users(ctx context.Context, actor management.Actor, q string, l
 	if len(q) > 100 {
 		return nil, fault.New(fault.Invalid, "INVALID_QUERY", "查询过长")
 	}
-	return s.store.Users(ctx, actor, q, limit, offset)
+	if role != "" && role != "member" {
+		return nil, fault.New(fault.Invalid, "INVALID_ROLE", "用户筛选角色无效")
+	}
+	return s.store.Users(ctx, actor, q, role, limit, offset)
 }
 func (s *Service) UpdateUser(ctx context.Context, actor management.Actor, id string, in management.UserInput) (map[string]any, error) {
 	if err := management.ValidateActor(actor); err != nil {

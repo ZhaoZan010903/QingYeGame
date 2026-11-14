@@ -103,6 +103,7 @@ func (a *App) saveSetting(w http.ResponseWriter, r *http.Request) {
 	memberResponse(w, data, err)
 }
 func (a *App) adminUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	u, ok := a.requireAdmin(w, r)
 	if !ok {
 		return
@@ -112,7 +113,7 @@ func (a *App) adminUsers(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "INVALID_CURSOR", err.Error())
 		return
 	}
-	data, err := a.managementService().Users(r.Context(), managementActor(u), r.URL.Query().Get("q"), limit, offset)
+	data, err := a.managementService().Users(r.Context(), managementActor(u), r.URL.Query().Get("q"), r.URL.Query().Get("role"), limit, offset)
 	memberResponse(w, data, err)
 }
 func (a *App) updateUser(w http.ResponseWriter, r *http.Request) {
