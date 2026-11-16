@@ -1,5 +1,15 @@
 # AI-HANDOFF -- 跨机器接手说明
 
+## 当前生产入口：2026年11月16日 Nginx / TLS 升级
+
+8.140.230.149 于北京时间12:36:39切换至独立 `qingye-edge.service`，Nginx1.30.6 + 静态OpenSSL3.5.9；TCP80/443/5179/5181由一个入口管理，UDP5179/5181仍由原Go进程负责。配置 `/etc/qingye-edge/nginx.conf`，程序 `/opt/qingye-edge/current/sbin/nginx`，仓库模板 `代码/部署/qingye-edge/`。API和静态仍为既有R24，未改业务数据和图片。
+
+旧域名HTTPS及新站IP入口可用。新域名 `qingyegame.com`、`www.qingyegame.com`、`admin.qingyegame.com` 已解析，但用户确认未完成备案，公网阿里云403拦截；当前 `--without-domains`，无新域名证书，应用env/前端跳转仍用IP。备案通过后按[验收](../业务验收与审查记录/OPS-20261116--独立Nginx与TLS升级验收.md)完成证书、Origin、管理端跳转、真实验证码和双聊天入口复验，再启用域名timer。Cloudflare已保存www/admin两个新主机，原4个保留。
+
+宝塔Nginx/面板/FTP已停并masked，site_total/rpcbind已停并禁用；原清叶两个web unit已禁用。不得按下方历史材料恢复。原IP证书timer保持启用，hook已切至新edge并追加systemd写路径；真实dry-run通过。旧Certum证书到2027-04-14仍手动维护，不能把IP续期当旧域名续期。旧SaaS上游已切严格HTTPS，专用CA补链只在edge目录，不改系统信任库。
+
+私有证据与回退材料：`/root/qingye-private/domain-20261116/`。内部22/22、已启用公网19项、会话/WS13/13通过；3个未备案域名检查受阻。旧420文件SHA一致，Go二进制SHA仍为 `18c592c2cb7b418af74e3b26af27d07ed167833b1472b5ad3826b28ccbe05828`。152测试站及历史5178保持原状态；不提交凭据/证书私钥/业务数据。最终GitHub提交以私有receipt和远端为准。
+
 ## R24当前接手状态：测试与正式环境已发布（2026年11月15日）
 
 最终实现源码`59f8cfa71a0fed0b8c7d2997f15929363011a583`已推送并回读GitHub main，实际API SHA-256为`18c592c2cb7b418af74e3b26af27d07ed167833b1472b5ad3826b28ccbe05828`。北京时间06:08:00完成152测试发布，06:09:13完成8.140正式发布。当前版本以[R24验收](../业务验收与审查记录/SECURITY-R24--安全性更新与性能验收.md)和本节为准，下文首发与旧版本的状态描述仅为历史。

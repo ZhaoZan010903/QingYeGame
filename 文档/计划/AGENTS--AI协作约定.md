@@ -1,5 +1,15 @@
 # 项目协作约定
 
+## 生产入口更新：独立 Nginx / TLS（2026年11月16日）
+
+用户授权同机保留新旧站 HTTPS 并升级 TLS。北京时间12:36:39，8.140.230.149 已由 `qingye-edge.service` 统一承接 TCP80/443/5179/5181，实际为 Nginx1.30.6 / 静态 OpenSSL3.5.9。旧宝塔 Nginx、面板、FTP、统计服务已停用；原清叶两 web service 已禁用。后续发布应检查并 reload `qingye-edge.service`，不要照历史记录恢复宝塔或原两个 web service。API、前端产物、数据库和 OSS 仍为既有 R24，未升级系统全局 OpenSSL。
+
+旧站 `qingyeyouxi.com`、`www.qingyeyouxi.com` 的 HTTPS 与新站 IP5179/5181 已验证。新域名三条 A 记录正确，但用户确认尚未备案，公网被阿里云403拦截；当前生成器使用 `--without-domains`，新域名尚未签发证书、未上线，应用 Origin/跳转地址保持 IP。Cloudflare 已保存 www/admin 新主机，现共6个；这不等于新域名功能验收。
+
+IP证书原timer继续启用，部署hook已改为新edge并保留双API WebTransport证书刷新；相同证书不重载，12:39:49严格服务权限下模拟续期成功。新域名timer保持disabled；旧Certum证书到2027-04-14，仍须手动维护。旧SaaS API/CDN已使用严格HTTPS和独立补链CA，不能关闭校验，也不能恢复HTTP。
+
+内部入口22/22、现有公网入口相关19项、正式会话/WS13/13通过；公网另外3项是新域名备案拦截，不计通过。420份旧站文件SHA一致、两个Go进程未重启；未发短信、改商品、发送聊天或迁移图片。私有备份/回执位于 `/root/qingye-private/domain-20261116/`，不得提交Git。详细边界与备案后接续见[运维验收](../业务验收与审查记录/OPS-20261116--独立Nginx与TLS升级验收.md)及[独立入口说明](../../代码/部署/qingye-edge/README--独立HTTPS入口.md)。后续版本与最终Git提交须核对回执和远端，不用历史部署模板覆盖当前入口。
+
 ## R24当前状态：测试与正式环境已发布（2026年11月15日）
 
 北京时间06:08:00完成152测试发布，06:09:13完成8.140正式发布；最终实现源码`59f8cfa71a0fed0b8c7d2997f15929363011a583`已推送并回读GitHub main，实际API SHA-256为`18c592c2cb7b418af74e3b26af27d07ed167833b1472b5ad3826b28ccbe05828`。当前版本及验证范围以[R24验收](../业务验收与审查记录/SECURITY-R24--安全性更新与性能验收.md)为准；下文首发和旧版本段落保留历史证据，不覆盖本节。

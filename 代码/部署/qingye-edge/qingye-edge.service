@@ -1,0 +1,32 @@
+[Unit]
+Description=QingYe independent HTTPS entry for legacy and new sites
+After=network-online.target qingye-production-api.service qingye-production-admin-api.service
+Wants=network-online.target
+
+[Service]
+Type=forking
+PIDFile=/run/qingye-edge/nginx.pid
+RuntimeDirectory=qingye-edge
+RuntimeDirectoryMode=0755
+StateDirectory=qingye-edge
+StateDirectoryMode=0755
+LogsDirectory=qingye-edge
+LogsDirectoryMode=0755
+ExecStartPre=/opt/qingye-edge/current/sbin/nginx -t -p /var/lib/qingye-edge/ -c /etc/qingye-edge/nginx.conf
+ExecStart=/opt/qingye-edge/current/sbin/nginx -p /var/lib/qingye-edge/ -c /etc/qingye-edge/nginx.conf
+ExecReload=/opt/qingye-edge/current/sbin/nginx -t -p /var/lib/qingye-edge/ -c /etc/qingye-edge/nginx.conf
+ExecReload=/opt/qingye-edge/current/sbin/nginx -p /var/lib/qingye-edge/ -c /etc/qingye-edge/nginx.conf -s reload
+KillSignal=SIGQUIT
+KillMode=mixed
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/qingye-edge /var/lib/qingye-edge /var/log/qingye-edge
+NoNewPrivileges=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

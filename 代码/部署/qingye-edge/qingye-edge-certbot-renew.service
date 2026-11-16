@@ -1,0 +1,17 @@
+[Unit]
+Description=Renew issued QingYe domain certificate for the independent entry
+After=network-online.target qingye-edge.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/lib/qingye-edge/renew-domain-certificates.sh renew
+TimeoutStartSec=10min
+StateDirectory=qingye-edge/letsencrypt
+LogsDirectory=qingye-edge/letsencrypt
+PrivateTmp=true
+UMask=0077
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/qingye-edge /var/lib/qingye-edge /var/log/qingye-edge /run/qingye-edge /var/lib/qingye-production/acme
+NoNewPrivileges=true

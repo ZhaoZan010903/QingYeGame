@@ -1,0 +1,12 @@
+[Unit]
+Description=Check issued QingYe domain certificate twice daily
+# 仅在首次签发、域名入口启用与验收后 enable；配置准备阶段保持 disabled。
+
+[Timer]
+OnCalendar=*-*-* 03,15:25:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=qingye-edge-certbot-renew.service
+
+[Install]
+WantedBy=timers.target

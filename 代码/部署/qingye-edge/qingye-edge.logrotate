@@ -1,0 +1,17 @@
+# 仅轮换独立入口的日志；不清理宝塔历史日志、Certbot 日志或验收材料。
+/var/log/qingye-edge/*.log {
+    daily
+    rotate 14
+    maxsize 100M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    create 0640 www www
+    sharedscripts
+    postrotate
+        if /usr/bin/systemctl is-active --quiet qingye-edge.service; then
+            /usr/bin/systemctl kill --kill-who=main --signal=USR1 qingye-edge.service
+        fi
+    endscript
+}
