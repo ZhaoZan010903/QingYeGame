@@ -136,6 +136,18 @@ class EdgeConfigTests(unittest.TestCase):
             self.assertIn("location ^~ /.well-known/acme-challenge/", section)
         self.assertIn("return 308", block(config, "http-www.qingyeyouxi.com"))
 
+    def test_legacy_new_site_redirect_uses_public_entry_for_active_mode(self):
+        for without_domains, target in (
+            (True, "https://8.140.230.149:5179/"),
+            (False, "https://www.qingyegame.com/"),
+        ):
+            with self.subTest(without_domains=without_domains):
+                config = generate(without_domains=without_domains)
+                for path in ("/new", "/new/"):
+                    rule = f"location = {path} {{ return 302 {target}; }}"
+                    self.assertIn(rule, block(config, "legacy"))
+                    self.assertEqual(config.count(rule), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

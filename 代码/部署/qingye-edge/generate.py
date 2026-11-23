@@ -184,7 +184,8 @@ def app_server(surface: str, *, domain: bool, staging: bool) -> str:
     ''')
 
 
-def legacy_server(staging: bool) -> str:
+def legacy_server(staging: bool, without_domains: bool) -> str:
+    new_site = f"https://{IP}:5179/" if without_domains else f"https://{PUBLIC_HOST}/"
     # API/CDN 的 HTTPS 已核验；保留原路径与尾斜杠语义，固定上游身份并验证信任链。
     return tidy(r'''
         # begin legacy
@@ -217,6 +218,8 @@ def legacy_server(staging: bool) -> str:
             rewrite ^/(.*)/fenzhan/(.*)$ /$2.html;
 
             ACME_PLACEHOLDER
+            location = /new { return 302 NEW_SITE_PLACEHOLDER; }
+            location = /new/ { return 302 NEW_SITE_PLACEHOLDER; }
             location = /robots.txt {
                 default_type text/plain;
                 return 200 "User-Agent: *\nAllow: /";
@@ -260,7 +263,7 @@ def legacy_server(staging: bool) -> str:
         # end legacy
     ''').replace("LISTEN_PLACEHOLDER", listen(443, staging, "ssl")).replace(
         "CERT_PLACEHOLDER", certificates(LEGACY_CERT)
-    ).replace("ACME_PLACEHOLDER", acme_location())
+    ).replace("ACME_PLACEHOLDER", acme_location()).replace("NEW_SITE_PLACEHOLDER", new_site)
 
 
 def generate(staging: bool = False, without_domains: bool = False) -> str:
@@ -335,7 +338,7 @@ def generate(staging: bool = False, without_domains: bool = False) -> str:
             if domain and without_domains:
                 continue
             blocks.append(app_server(surface, domain=domain, staging=staging))
-    blocks.append(legacy_server(staging))
+    blocks.append(legacy_server(staging, without_domains))
     return normalize_indent(header + "\n\n" + "\n\n".join(indent(block) for block in blocks) + "\n}\n")
 
 
