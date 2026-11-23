@@ -19,6 +19,7 @@ const permanentMediaReferencedSQL = `EXISTS(SELECT 1 FROM product_images WHERE m
  OR EXISTS(SELECT 1 FROM avatar_library WHERE media_id=$1)
  OR EXISTS(SELECT 1 FROM contacts WHERE qr_media_id=$1)
  OR EXISTS(SELECT 1 FROM product_reviews WHERE snapshot->'images' @> jsonb_build_array(jsonb_build_object('id',$1::text)))
+ OR EXISTS(SELECT 1 FROM legacy_sync_media_holds WHERE media_id=$1 AND expires_at>now())
  OR EXISTS(SELECT 1 FROM media_files WHERE storage_key=$2 AND id<>$1 AND deleted_at IS NULL)`
 
 // The caller holds all target product rows, has removed every selected product's

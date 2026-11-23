@@ -17,6 +17,7 @@ func (a *App) adminOnly(h http.HandlerFunc) http.HandlerFunc {
 }
 func (a *App) registerAdmin(m routeRegistrar) {
 	a.registerAdminAccounts(m)
+	a.registerLegacySync(m)
 	m.HandleFunc("GET /api/v1/admin/dashboard", a.adminOnly(a.adminDashboard))
 	m.HandleFunc("GET /api/v1/admin/dictionaries", a.adminOnly(a.adminDictionaries))
 	m.HandleFunc("PUT /api/v1/admin/dictionaries/{key}", a.adminOnly(a.adminDictionaries))

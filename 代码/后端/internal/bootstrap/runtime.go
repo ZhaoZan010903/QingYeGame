@@ -8,6 +8,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"path/filepath"
 	chatapp "qingye/backend/internal/application/chat"
+	syncapp "qingye/backend/internal/application/legacysync"
 	mediaapp "qingye/backend/internal/application/medialifecycle"
 	purgeapp "qingye/backend/internal/application/mediapurge"
 	recommendationapp "qingye/backend/internal/application/recommendation"
@@ -15,6 +16,7 @@ import (
 	securityapp "qingye/backend/internal/application/security"
 	"qingye/backend/internal/config"
 	"qingye/backend/internal/infrastructure/cache"
+	"qingye/backend/internal/infrastructure/legacyfeed"
 	"qingye/backend/internal/infrastructure/mediafiles"
 	"qingye/backend/internal/infrastructure/mediaobject"
 	"qingye/backend/internal/infrastructure/postgres"
@@ -32,6 +34,7 @@ type Runtime struct {
 	Chat            *chatapp.Service
 	Recommendations *recommendationapp.Service
 	Media           *mediaapp.Worker
+	LegacySync      *syncapp.Service
 	Purge           *purgeapp.Worker
 	mediaDB         *pgxpool.Pool
 	db              *pgxpool.Pool
@@ -113,6 +116,11 @@ func New(ctx context.Context, c config.Config) (*Runtime, error) {
 			files.Legacy = &mediaobject.LegacyFiles{Repository: &postgres.MediaLifecycleStore{DB: db}, Store: reader, TempDir: temp}
 		}
 		r.HTTP.MediaFiles = files
+		r.LegacySync = &syncapp.Service{
+			Source: legacyfeed.NewSaaS(), Store: postgres.LegacySyncStore{DB: db}, Objects: published,
+			Images:      mediafiles.LegacyImages{Directory: filepath.Join(temp, "legacy-sync"), MinFree: mc.MinFreeBytes},
+			Environment: mc.Environment, NewID: security.NewID,
+		}
 		if c.Surface == "public" && c.MediaWorkersEnabled {
 			workerConfig := poolConfig.Copy()
 			workerConfig.MaxConns = 2

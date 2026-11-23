@@ -14,6 +14,7 @@ type lifecycleState struct {
 	medialifecycle.Object
 	Product, Status                 string
 	Force, Due, Trashed, PurgeGuard bool
+	SyncAsset                       bool
 }
 
 func lockLifecycleObject(ctx context.Context, tx pgx.Tx, id, variant string) (lifecycleState, error) {
@@ -39,7 +40,9 @@ func lockLifecycleObject(ctx context.Context, tx pgx.Tx, id, variant string) (li
 		return x, err
 	}
 	var actualProduct string
-	err := tx.QueryRow(ctx, `SELECT media_id,store,object_key,mime_type,sha256,byte_size,force_delete,coalesce(retain_until<=now(),false),coalesce(product_id,''),permanent_purge_guard FROM media_objects WHERE media_id=$1 AND variant=$2 AND deleted_at IS NULL FOR UPDATE`, id, variant).Scan(&x.MediaID, &x.Store, &x.Key, &x.MIME, &x.SHA256, &x.Size, &x.Force, &x.Due, &actualProduct, &x.PurgeGuard)
+	err := tx.QueryRow(ctx, `SELECT media_id,store,object_key,mime_type,sha256,byte_size,force_delete,coalesce(retain_until<=now(),false),coalesce(product_id,''),permanent_purge_guard,
+ EXISTS(SELECT 1 FROM legacy_sync_assets WHERE media_id=$1) FROM media_objects WHERE media_id=$1 AND variant=$2 AND deleted_at IS NULL FOR UPDATE`,
+		id, variant).Scan(&x.MediaID, &x.Store, &x.Key, &x.MIME, &x.SHA256, &x.Size, &x.Force, &x.Due, &actualProduct, &x.PurgeGuard, &x.SyncAsset)
 	if err == nil && actualProduct != x.Product {
 		err = pgx.ErrNoRows
 	}
@@ -91,6 +94,17 @@ func (s *MediaLifecycleStore) Step(ctx context.Context, transfer medialifecycle.
 	if live {
 		return false, nil
 	}
+	var heldUntil *time.Time
+	if err = tx.QueryRow(ctx, `SELECT max(expires_at) FROM legacy_sync_media_holds WHERE media_id=$1 AND expires_at>now()`, id).Scan(&heldUntil); err != nil {
+		return false, err
+	}
+	if heldUntil != nil && (x.Force || x.Due && x.Status != "published" && x.Status != "publishing") {
+		_, err = tx.Exec(ctx, `UPDATE media_objects SET retry_at=$3 WHERE media_id=$1 AND variant=$2`, id, variant, *heldUntil)
+		if err == nil {
+			err = tx.Commit(ctx)
+		}
+		return true, err
+	}
 	if x.PurgeGuard && (x.Force || x.Due && x.Status != "publishing" && x.Status != "published") {
 		var referenced bool
 		if err = tx.QueryRow(ctx, `SELECT `+permanentMediaReferencedSQL, id, x.Key).Scan(&referenced); err != nil {
@@ -105,10 +119,14 @@ func (s *MediaLifecycleStore) Step(ctx context.Context, transfer medialifecycle.
 		}
 	}
 	destination := desiredStore(x)
+	expiredSyncAsset := x.SyncAsset && x.Product == "" && x.Due
+	if expiredSyncAsset {
+		destination = ""
+	}
 	if err = cancelMediaMoves(ctx, tx, id, variant, destination); err != nil {
 		return false, err
 	}
-	if x.Force || x.Due && x.Store == "staging" && x.Status != "publishing" && x.Status != "published" && !x.Trashed && x.Status != "sold" && x.Status != "rented" {
+	if x.Force || expiredSyncAsset || x.Due && x.Store == "staging" && x.Status != "publishing" && x.Status != "published" && !x.Trashed && x.Status != "sold" && x.Status != "rented" {
 		if x.Product != "" && (x.Status == "publishing" || x.Status == "pending") {
 			_, err = tx.Exec(ctx, `UPDATE products SET status=CASE WHEN status='publishing' THEN 'offline' ELSE 'draft' END,version=version+1,approved_version=NULL,review_note='商品图片已失效，请重新整理图片后提交审核。',updated_at=now() WHERE id=$1 AND status IN ('publishing','pending')`, x.Product)
 			if err != nil {

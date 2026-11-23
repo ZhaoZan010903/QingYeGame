@@ -1,0 +1,24 @@
+[Unit]
+Description=QingYe legacy catalog sync
+After=network-online.target qingye-production-postgres.service qingye-production-redis.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=qingye-production
+Group=qingye-production
+WorkingDirectory=/opt/qingye-production/current
+EnvironmentFile=/etc/qingye-production/app.env
+Environment=GOMEMLIMIT=192MiB
+ExecStart=/usr/bin/env DB_MAX_CONNS=2 MEDIA_WORKERS_ENABLED=false /opt/qingye-production/current/qingye-api legacy-sync
+TimeoutStartSec=22min
+Nice=10
+CPUQuota=70%
+MemoryHigh=256M
+MemoryMax=384M
+UMask=0077
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/qingye-production/media
+NoNewPrivileges=true

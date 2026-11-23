@@ -8,25 +8,25 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"qingye/backend/internal/domain/catalog"
-	"qingye/backend/internal/infrastructure/security"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 	_ "golang.org/x/image/webp"
+	"qingye/backend/internal/domain/catalog"
+	"qingye/backend/internal/domain/legacycatalog"
+	"qingye/backend/internal/infrastructure/security"
 )
 
 type Service struct {
@@ -65,107 +65,6 @@ func (a *Service) SeedUser(ctx context.Context, reader io.Reader) (string, error
 	return id, e
 }
 
-type LegacyRecord struct {
-	ID       string      `json:"_id"`
-	Title    string      `json:"title"`
-	Code     string      `json:"product_id"`
-	Price    json.Number `json:"price"`
-	Category string      `json:"categorys_name"`
-	Status   string      `json:"status"`
-	Content  string      `json:"content"`
-	Deleted  bool        `json:"is_del"`
-	Created  time.Time   `json:"create_time"`
-	Updated  time.Time   `json:"update_time"`
-	Server   string      `json:"游戏区服"`
-	Gender   string      `json:"角色性别"`
-	Level    string      `json:"XVIP等级"`
-	Tags     []string    `json:"热门筛选"`
-	Labels   []string    `json:"labels"`
-}
-type LegacyCategory struct {
-	ID, Name, Trade string
-	PriceUnit       string
-	Units           []string
-}
-
-var LegacyCategories = []LegacyCategory{
-	{"legacy-sale", "QQ炫舞买号", "sale", "account", []string{"account"}},
-	{"legacy-short-rent", "时日租号", "rent", "day", []string{"day"}},
-	{"legacy-long-rent", "周月租号", "rent", "month", []string{"month"}},
-}
-
-// Legacy source values remain untouched. Only a known source category and an
-// exact, nonnegative decimal fitting numeric(12,2) become a comparable quote.
-func ConfirmedLegacyPrice(category *LegacyCategory, original string, allowedUnits []string) (string, *string) {
-	if category == nil || !catalog.MoneyPattern.MatchString(original) {
-		return "unknown", nil
-	}
-	if len(allowedUnits) > 0 {
-		allowed := false
-		for _, unit := range allowedUnits {
-			if unit == category.PriceUnit {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return "unknown", nil
-		}
-	}
-	return category.PriceUnit, &original
-}
-
-func DeterministicID(value string) string {
-	h := sha256.Sum256([]byte(value))
-	b := h[:16]
-	b[6] = (b[6] & 15) | 80
-	b[8] = (b[8] & 63) | 128
-	s := hex.EncodeToString(b)
-	return fmt.Sprintf("%s-%s-%s-%s-%s", s[:8], s[8:12], s[12:16], s[16:20], s[20:])
-}
-func LegacyMediaLocation(source string) (string, string, error) {
-	source = strings.TrimSpace(source)
-	if strings.HasPrefix(source, "//") {
-		source = "https:" + source
-	}
-	u, e := url.Parse(source)
-	if e != nil || u.Host == "" || u.Scheme != "https" && u.Scheme != "http" {
-		return "", "", errors.New("invalid legacy image URL")
-	}
-	h := sha256.Sum256([]byte(source))
-	return source, "legacy/" + hex.EncodeToString(h[:]), nil
-}
-func LegacyAttributes(p LegacyRecord) map[string]any {
-	gender := p.Gender
-	if gender == "女" {
-		gender = "female"
-	}
-	if gender == "男" {
-		gender = "male"
-	}
-	return map[string]any{"game": "QQ炫舞", "server": p.Server, "gender": gender, "level": p.Level, "tags": p.Tags, "legacy_labels": p.Labels}
-}
-
-// A comma may be part of an OSS image transform; only a following URL starts a new image.
-func LegacyImageURLs(content string) []string {
-	parts := []string{}
-	start := 0
-	for i := 0; i < len(content); i++ {
-		if content[i] != ',' {
-			continue
-		}
-		tail := content[i+1:]
-		if strings.HasPrefix(tail, "//") || strings.HasPrefix(tail, "https://") || strings.HasPrefix(tail, "http://") {
-			parts = append(parts, content[start:i])
-			start = i + 1
-		}
-	}
-	if strings.TrimSpace(content[start:]) != "" {
-		parts = append(parts, content[start:])
-	}
-	return parts
-}
-
 // ImportLegacy is append-only and idempotent by the original product id.
 // An existing product, including any administrator corrections, is never overwritten.
 func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, error) {
@@ -174,7 +73,7 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 	if e := decoder.Decode(&raw); e != nil {
 		return 0, e
 	}
-	records := make([]LegacyRecord, len(raw))
+	records := make([]legacycatalog.LegacyRecord, len(raw))
 	for i, b := range raw {
 		d := json.NewDecoder(strings.NewReader(string(b)))
 		d.UseNumber()
@@ -187,12 +86,12 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 	}
 	// Filter choices are derived from the snapshot, not guessed from prototype options.
 	filters := map[string]map[string]map[string]bool{}
-	for _, c := range LegacyCategories {
+	for _, c := range legacycatalog.LegacyCategories {
 		filters[c.Name] = map[string]map[string]bool{"server": {}, "gender": {}, "level": {}}
 	}
 	for _, p := range records {
 		if group := filters[p.Category]; group != nil {
-			attrs := LegacyAttributes(p)
+			attrs := legacycatalog.LegacyAttributes(p)
 			for key, values := range group {
 				v, _ := attrs[key].(string)
 				if v != "" {
@@ -201,7 +100,7 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 			}
 		}
 	}
-	for index, c := range LegacyCategories {
+	for index, c := range legacycatalog.LegacyCategories {
 		groups := []catalog.FilterGroup{}
 		for _, key := range []string{"server", "gender", "level"} {
 			values := []string{}
@@ -269,10 +168,10 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 		if p.Deleted {
 			continue
 		}
-		var category *LegacyCategory
-		for i := range LegacyCategories {
-			if LegacyCategories[i].Name == p.Category {
-				category = &LegacyCategories[i]
+		var category *legacycatalog.LegacyCategory
+		for i := range legacycatalog.LegacyCategories {
+			if legacycatalog.LegacyCategories[i].Name == p.Category {
+				category = &legacycatalog.LegacyCategories[i]
 			}
 		}
 		if category == nil {
@@ -282,8 +181,8 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 		if e != nil {
 			return imported, e
 		}
-		id := DeterministicID("legacy-product:" + p.ID)
-		attrs, _ := json.Marshal(LegacyAttributes(p))
+		id := legacycatalog.DeterministicID("legacy-product:" + p.ID)
+		attrs, _ := json.Marshal(legacycatalog.LegacyAttributes(p))
 		created, updated := p.Created, p.Updated
 		if created.IsZero() {
 			created = time.Now().UTC()
@@ -300,7 +199,7 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 			tx.Rollback(ctx)
 			return imported, e
 		}
-		unit, amount := ConfirmedLegacyPrice(category, p.Price.String(), allowedUnits)
+		unit, amount := legacycatalog.ConfirmedLegacyPrice(category, p.Price.String(), allowedUnits)
 		tag, e := tx.Exec(ctx, `INSERT INTO products(id,legacy_id,product_code,category_id,title,trade_type,price_unit,price_amount,attributes,description,status,source,version,approved_version,legacy_price,legacy_category,legacy_payload,verification_status,created_at,updated_at,published_at)
    VALUES($1,$2,$3,$4,$5,$6,$14,$15,$7,$5,$8,'legacy',1,1,$9,$10,$11,'unprovided',$12,$13,$12) ON CONFLICT(legacy_id) DO NOTHING`, id, p.ID, p.Code, category.ID, p.Title, category.Trade, attrs, status, p.Price.String(), p.Category, raw[index], created, updated, unit, amount)
 		if e != nil {
@@ -314,11 +213,11 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 		batch := &pgx.Batch{}
 		seen := map[string]bool{}
 		position := 0
-		for _, part := range LegacyImageURLs(p.Content) {
+		for _, part := range legacycatalog.LegacyImageURLs(p.Content) {
 			if strings.TrimSpace(part) == "" {
 				continue
 			}
-			source, key, err := LegacyMediaLocation(part)
+			source, key, err := legacycatalog.LegacyMediaLocation(part)
 			if err != nil {
 				tx.Rollback(ctx)
 				return imported, fmt.Errorf("product %s: %w", p.ID, err)
@@ -327,7 +226,7 @@ func (a *Service) ImportLegacy(ctx context.Context, reader io.Reader) (int, erro
 				continue
 			}
 			seen[source] = true
-			mediaID := DeterministicID("legacy-media:" + p.ID + ":" + source)
+			mediaID := legacycatalog.DeterministicID("legacy-media:" + p.ID + ":" + source)
 			position++
 			batch.Queue(`INSERT INTO media_files(id,filename,storage_key,source_url,status) VALUES($1,$2,$3,$4,'pending') ON CONFLICT(id) DO NOTHING`, mediaID, fmt.Sprintf("%s · 图片 %d", p.Code, position), key, source)
 			batch.Queue("INSERT INTO product_images(product_id,media_id,sort_order) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", id, mediaID, position)

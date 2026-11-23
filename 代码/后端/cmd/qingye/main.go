@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"qingye/backend/internal/application/legacysync"
 	"qingye/backend/internal/bootstrap"
 	"qingye/backend/internal/config"
+	"qingye/backend/internal/infrastructure/legacyfeed"
 )
 
 func main() {
@@ -31,6 +33,8 @@ func run() error {
 	products := flags.String("products", "", "path to private legacy product JSON")
 	file := flags.String("file", "", "private seed-user JSON file; omitted reads stdin")
 	limit := flags.Int("limit", 0, "maximum pending media records to reconcile, 0 means all")
+	manualPreview := flags.Bool("manual-preview", false, "collect an unscheduled legacy catalog preview")
+	checkSource := flags.Bool("check-source", false, "read the full legacy catalog without connecting to the new site")
 	if len(os.Args) > 2 {
 		if err := flags.Parse(os.Args[2:]); err != nil {
 			return err
@@ -38,6 +42,22 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if command == "legacy-sync" && *checkSource {
+		if *manualPreview {
+			return fmt.Errorf("--check-source cannot be combined with --manual-preview")
+		}
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+		source, err := legacyfeed.NewSaaS().Catalog(ctx)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("legacy source checked: %d products\n", len(source.Records))
+		if source.Latest != nil {
+			fmt.Printf("latest_source_update=%s\n", source.Latest.UTC().Format(time.RFC3339))
+		}
+		return nil
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -52,6 +72,20 @@ func run() error {
 		return a.Maintenance.Migrate(ctx)
 	case "refresh-itemcf":
 		return a.Recommendations.RefreshItemCF(ctx, time.Time{})
+	case "legacy-sync":
+		if a.LegacySync == nil {
+			return fmt.Errorf("legacy catalog sync requires managed OSS image storage")
+		}
+		var planned *time.Time
+		if !*manualPreview {
+			noon := legacysync.ScheduledNoon(time.Now())
+			planned = &noon
+		}
+		batch, err := a.LegacySync.Run(ctx, planned)
+		if batch.ID != "" {
+			fmt.Printf("legacy sync batch %s: %s\n", batch.ID, batch.Status)
+		}
+		return err
 	case "seed-user":
 		var input io.Reader = os.Stdin
 		if *file != "" {
@@ -90,6 +124,6 @@ func run() error {
 	case "serve":
 		return a.Serve(ctx)
 	default:
-		return fmt.Errorf("unknown command %q; use serve, migrate, seed-user, import-legacy, reconcile-media, refresh-itemcf", command)
+		return fmt.Errorf("unknown command %q; use serve, migrate, seed-user, import-legacy, reconcile-media, refresh-itemcf, legacy-sync", command)
 	}
 }

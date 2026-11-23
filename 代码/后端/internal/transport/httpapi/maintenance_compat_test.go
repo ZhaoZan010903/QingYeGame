@@ -1,12 +1,15 @@
 package httpapi
 
-import "qingye/backend/internal/maintenance"
+import (
+	"qingye/backend/internal/domain/legacycatalog"
+	"qingye/backend/internal/maintenance"
+)
 
-type legacyCategory = maintenance.LegacyCategory
+type legacyCategory = legacycatalog.LegacyCategory
 
-var legacyCategories = maintenance.LegacyCategories
-var confirmedLegacyPrice = maintenance.ConfirmedLegacyPrice
-var deterministicID = maintenance.DeterministicID
-var legacyMediaLocation = maintenance.LegacyMediaLocation
-var legacyImageURLs = maintenance.LegacyImageURLs
+var legacyCategories = legacycatalog.LegacyCategories
+var confirmedLegacyPrice = legacycatalog.ConfirmedLegacyPrice
+var deterministicID = legacycatalog.DeterministicID
+var legacyMediaLocation = legacycatalog.LegacyMediaLocation
+var legacyImageURLs = legacycatalog.LegacyImageURLs
 var regexpLegacyKey = maintenance.RegexpLegacyKey

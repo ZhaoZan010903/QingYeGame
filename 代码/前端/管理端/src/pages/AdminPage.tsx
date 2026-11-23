@@ -14,6 +14,7 @@ import {
   FileText,
   CircleHelp,
   ArrowUpRight,
+  RefreshCw,
 } from "lucide-react";
 import { useSession } from "../context";
 import { canManage } from "../lib/admin-api";
@@ -31,6 +32,7 @@ import { ChatPage } from "../components/ChatPage";
 import { useChat } from "../components/ChatNotifications";
 import { AdminHelp } from "../components/AdminGuide";
 import { AdminMediaSecurity } from "../components/AdminMediaSecurity";
+import { AdminLegacySync } from "../components/AdminLegacySync";
 import { DictionarySettings } from "../components/DictionarySettings";
 import {
   AdminNicknameReviews,
@@ -72,6 +74,7 @@ export function AdminPage() {
       items: [
         ["", "数据看板", LayoutDashboard],
         ["products", "商品管理", Package],
+        ["legacy-sync", "旧站同步", RefreshCw],
         ["reviews", "待审核", ClipboardCheck],
         ["chat", "在线咨询", MessageSquare],
       ],
@@ -138,6 +141,8 @@ export function AdminPage() {
             <AdminProductView key={detailID} id={detailID} />
           ) : tab === "security/media-access" ? (
             <AdminMediaSecurity />
+          ) : tab === "legacy-sync" ? (
+            <AdminLegacySync />
           ) : tab === "help" ? (
             <AdminHelp />
           ) : tab === "products" || tab === "reviews" ? (
