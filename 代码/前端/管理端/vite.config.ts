@@ -11,7 +11,9 @@ export default defineConfig(({ mode }) => {
   };
   return {
     plugins: [react()],
-    resolve: { dedupe: ["react", "react-dom"] },
+    resolve: {
+      dedupe: ["react", "react-dom", "@chatui/core", "lucide-react"],
+    },
     server: { port: Number(env.QINGYE_ADMIN_PORT) || 5181, proxy },
     preview: { port: Number(env.QINGYE_ADMIN_PORT) || 5181, proxy },
     build: { sourcemap: false },

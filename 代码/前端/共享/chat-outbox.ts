@@ -3,6 +3,7 @@ export type PendingMessage = {
   body: string;
   client: string;
   images: string[];
+  replyToID?: string;
 };
 
 /** Keep uncertain sends separate: visiting another conversation must not replace a retry key. */
@@ -14,14 +15,22 @@ export class ChatOutbox {
     body: string,
     createID: () => string,
     images: string[] = [],
+    replyToID?: string,
   ): PendingMessage {
     const previous = this.entries.get(id);
     if (
       previous?.body === body &&
+      previous.replyToID === replyToID &&
       JSON.stringify(previous.images) === JSON.stringify(images)
     )
       return previous;
-    const message = { id, body, client: createID(), images: [...images] };
+    const message = {
+      id,
+      body,
+      client: createID(),
+      images: [...images],
+      replyToID,
+    };
     this.entries.set(id, message);
     return message;
   }

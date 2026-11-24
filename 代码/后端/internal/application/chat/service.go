@@ -19,7 +19,7 @@ type Repository interface {
 	Detail(context.Context, domain.Actor, string) (map[string]any, error)
 	Messages(context.Context, domain.Actor, string, domain.MessagePage) (map[string]any, error)
 	Send(context.Context, domain.Actor, string, domain.SendInput) (map[string]any, error)
-	Read(context.Context, domain.Actor, string, int64) (map[string]any, error)
+	Read(context.Context, domain.Actor, string, int64) (domain.ReadResult, error)
 	Close(context.Context, domain.Actor, string) (map[string]any, error)
 	Presence(context.Context, domain.Actor) (map[string]any, error)
 	UpdatePresence(context.Context, domain.Actor, domain.PresenceInput) error
@@ -192,6 +192,12 @@ func (s *Service) Send(ctx context.Context, actor domain.Actor, id string, in do
 		}
 		seen[mid] = true
 	}
+	if in.ReplyToID != "" {
+		id, err := strconv.ParseInt(in.ReplyToID, 10, 64)
+		if err != nil || id < 1 || strconv.FormatInt(id, 10) != in.ReplyToID {
+			return nil, fault.New(fault.Invalid, "INVALID_REPLY", "引用的消息无效")
+		}
+	}
 	if err := s.allow(ctx, "chat-send:"+actor.ID, 60); err != nil {
 		return nil, err
 	}
@@ -231,14 +237,14 @@ func (s *Service) Read(ctx context.Context, actor domain.Actor, id string, in do
 	if err != nil || through < 1 {
 		return nil, fault.New(fault.Invalid, "INVALID_MESSAGE", "已读位置无效")
 	}
-	out, err := s.repo.Read(ctx, actor, id, through)
+	result, err := s.repo.Read(ctx, actor, id, through)
 	if err != nil {
 		return nil, databaseError(err)
 	}
-	if s.notifier != nil {
-		s.notifier.Notify(ctx, actor.ID)
+	if result.Advanced {
+		s.notifyConversation(ctx, id)
 	}
-	return out, nil
+	return map[string]any{"ok": true, "read_through": strconv.FormatInt(result.Through, 10)}, nil
 }
 func (s *Service) Close(ctx context.Context, actor domain.Actor, id string) (map[string]any, error) {
 	if err := s.authorize(actor); err != nil {

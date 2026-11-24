@@ -16,7 +16,11 @@
     "strict": true,
     "paths": {
       "react": ["./node_modules/@types/react"],
-      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"]
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
+      "@chatui/core/es/components/*": [
+        "./node_modules/@chatui/core/lib/components/*"
+      ],
+      "lucide-react": ["./node_modules/lucide-react"]
     }
   },
   "include": ["src", "vite.config.ts"]

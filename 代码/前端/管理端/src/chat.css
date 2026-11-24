@@ -9,6 +9,9 @@
   --chat-accent: var(--blue);
   --chat-mine: var(--surface-selected);
   --chat-peer: var(--surface-solid-white);
+  --chat-radius: var(--radius-cards);
+  --chat-control-radius: var(--radius-buttons);
+  --chat-accent-soft: var(--surface-selected);
 }
 .chat-admin :focus-visible {
   outline: 2px solid var(--color-fluent-blue);
@@ -24,6 +27,22 @@
 }
 .chat-admin .chat-workspace {
   grid-template-columns: clamp(184px, 26%, 272px) minmax(0, 1fr);
+}
+.chat-admin :is(.conversation-item, .chat-quote) {
+  border-radius: var(--radius-items);
+}
+.chat-admin
+  :is(
+    .chat-message-meta time,
+    .chat-context-bar b,
+    .chat-time-divider time,
+    .chat-compose-tools > small,
+    .conversation-copy time,
+    .chat-product-card b,
+    .chat-list-heading strong span
+  ) {
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
 }
 .chat-admin .chat-presence-dot.accepting {
   background: var(--color-success);

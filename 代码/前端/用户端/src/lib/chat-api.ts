@@ -44,11 +44,18 @@ export const chatApi = {
       `${prefix}/conversations/${encodeURIComponent(id)}/messages?${new URLSearchParams(page)}`,
     )) as unknown as MessagePage;
   },
-  async send(id: string, body: string, client_id: string, image_ids: string[] = []) {
+  async send(
+    id: string,
+    body: string,
+    client_id: string,
+    image_ids: string[] = [],
+    reply_to_id?: string,
+  ) {
     return chatTransport.command('send', id, {
       body,
       client_id,
       ...(image_ids.length ? { image_ids } : {}),
+      ...(reply_to_id ? { reply_to_id } : {}),
     });
   },
   async read(id: string, through: string) {

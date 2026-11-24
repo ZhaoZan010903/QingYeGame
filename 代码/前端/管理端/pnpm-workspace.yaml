@@ -1,7 +1,10 @@
 # Keep the browser compatibility database outside the package release-age quarantine.
 overrides:
   electron-to-chromium: 1.5.478
+  "@chatui/core>dompurify": 3.5.0
 
 # Reviewed install.js: prepares and checks the locked platform-specific build binary.
 allowBuilds:
+  core-js: false
+  core-js-pure: false
   esbuild@0.28.2: true

@@ -165,8 +165,12 @@ func (s *ChatStore) Detail(ctx context.Context, actor chat.Actor, id string) (ma
 	if err != nil {
 		return nil, err
 	}
-	sql := "SELECT " + chatProjection + " FROM chat_conversations c " + chatSummaryJoins +
-		" CROSS JOIN LATERAL (SELECT count(*) AS n FROM chat_messages x WHERE x.conversation_id=c.id AND x.sender_id<>$1 AND x.id>c." + chatReadColumn(actor) + ") unread WHERE c." + chatOwnerColumn(actor) + "=$1 AND c.id=$2"
+	readColumn, peerReadColumn := chatReadColumn(actor), "staff_read_id"
+	if actor.Surface == "admin" {
+		peerReadColumn = "member_read_id"
+	}
+	sql := "SELECT " + chatProjection + " || jsonb_build_object('read_through',c." + readColumn + "::text,'peer_read_through',c." + peerReadColumn + "::text) FROM chat_conversations c " + chatSummaryJoins +
+		" CROSS JOIN LATERAL (SELECT count(*) AS n FROM chat_messages x WHERE x.conversation_id=c.id AND x.sender_id<>$1 AND x.id>c." + readColumn + ") unread WHERE c." + chatOwnerColumn(actor) + "=$1 AND c.id=$2"
 	rows, e := s.chatJSONRows(ctx, sql, actor.ID, id)
 	if e != nil {
 		return nil, e
@@ -197,8 +201,12 @@ func (s *ChatStore) Messages(ctx context.Context, actor chat.Actor, id string, p
 	}
 	rows, e := s.chatJSONRows(ctx, `SELECT jsonb_build_object('id',x.id::text,'body',x.body,'kind',x.kind,'product',x.product_snapshot,'sender_role',x.sender_role,'mine',x.sender_id=$2,'created_at',x.created_at,'client_id',CASE WHEN x.sender_id=$2 THEN x.client_id ELSE '' END,
  'sender_name',u.nickname,'avatar_url',coalesce('/api/v1/media/'||u.avatar_media_id||'/file?variant=thumb',''),
+ 'reply',CASE WHEN q.id IS NOT NULL THEN jsonb_build_object('id',q.id::text,'kind',q.kind,'sender_name',qu.nickname,'sender_role',q.sender_role,'mine',q.sender_id=$2,
+ 'excerpt',left(CASE WHEN q.kind='product' THEN coalesce(q.product_snapshot->>'title','') ELSE q.body END,120)) END,
  'images',coalesce((SELECT jsonb_agg(jsonb_build_object('id',a.media_id,'url','/api/v1/media/'||a.media_id||'/file','thumbnail_url','/api/v1/media/'||a.media_id||'/file?variant=thumb') ORDER BY a.position) FROM chat_message_images a WHERE a.message_id=x.id),'[]'::jsonb))
- FROM chat_messages x JOIN users u ON u.id=x.sender_id JOIN chat_conversations c ON c.id=x.conversation_id WHERE c.id=$1 AND c.`+chatOwnerColumn(actor)+`=$2 AND `+predicate+` ORDER BY x.id `+order+` LIMIT 51`, id, actor.ID, cursor)
+ FROM chat_messages x JOIN users u ON u.id=x.sender_id JOIN chat_conversations c ON c.id=x.conversation_id
+ LEFT JOIN chat_messages q ON q.id=x.reply_to_id AND q.conversation_id=x.conversation_id LEFT JOIN users qu ON qu.id=q.sender_id
+ WHERE c.id=$1 AND c.`+chatOwnerColumn(actor)+`=$2 AND `+predicate+` ORDER BY x.id `+order+` LIMIT 51`, id, actor.ID, cursor)
 	if e != nil {
 		return nil, e
 	}
@@ -237,19 +245,28 @@ func (s *ChatStore) Send(ctx context.Context, actor chat.Actor, id string, in ch
 		return nil, e
 	}
 	var messageID int64
-	var oldBody string
-	e = tx.QueryRow(ctx, "SELECT id,body FROM chat_messages WHERE conversation_id=$1 AND sender_id=$2 AND client_id=$3", id, actor.ID, in.ClientID).Scan(&messageID, &oldBody)
+	var oldBody, oldReply string
+	e = tx.QueryRow(ctx, "SELECT id,body,coalesce(reply_to_id::text,'') FROM chat_messages WHERE conversation_id=$1 AND sender_id=$2 AND client_id=$3", id, actor.ID, in.ClientID).Scan(&messageID, &oldBody, &oldReply)
 	if e == nil {
 		var oldImages []string
 		if e = tx.QueryRow(ctx, `SELECT coalesce(array_agg(media_id ORDER BY position),'{}') FROM chat_message_images WHERE message_id=$1`, messageID).Scan(&oldImages); e != nil {
 			return nil, e
 		}
-		if oldBody != in.Body || !slices.Equal(oldImages, in.ImageIDs) {
+		if oldBody != in.Body || oldReply != in.ReplyToID || !slices.Equal(oldImages, in.ImageIDs) {
 			return nil, fault.New(fault.Conflict, "MESSAGE_REPLAY_CONFLICT", "重试标识已用于另一条消息")
 		}
 	} else if errors.Is(e, pgx.ErrNoRows) {
 		if status == "closed" {
 			return nil, fault.New(fault.Conflict, "CHAT_CLOSED", "咨询已结束，请从商品页重新发起")
+		}
+		if in.ReplyToID != "" {
+			var belongs bool
+			if e = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM chat_messages WHERE conversation_id=$1 AND id=$2::text::bigint)", id, in.ReplyToID).Scan(&belongs); e != nil {
+				return nil, e
+			}
+			if !belongs {
+				return nil, fault.New(fault.Invalid, "INVALID_REPLY", "引用的消息不存在或不在当前会话")
+			}
 		}
 		kind := "text"
 		if len(in.ImageIDs) > 0 {
@@ -273,7 +290,7 @@ func (s *ChatStore) Send(ctx context.Context, actor chat.Actor, id string, in ch
 				return nil, fault.New(fault.Invalid, "INVALID_IMAGES", "图片未上传完成、已发送或不属于本次咨询，请重新选择")
 			}
 		}
-		if e = tx.QueryRow(ctx, "INSERT INTO chat_messages(conversation_id,sender_id,sender_role,client_id,body,kind) VALUES($1,$2,$3,$4,$5,$6) RETURNING id", id, actor.ID, actor.Role, in.ClientID, in.Body, kind).Scan(&messageID); e != nil {
+		if e = tx.QueryRow(ctx, "INSERT INTO chat_messages(conversation_id,sender_id,sender_role,client_id,body,kind,reply_to_id) VALUES($1,$2,$3,$4,$5,$6,nullif($7,'')::bigint) RETURNING id", id, actor.ID, actor.Role, in.ClientID, in.Body, kind, in.ReplyToID).Scan(&messageID); e != nil {
 			return nil, e
 		}
 		for position, mid := range in.ImageIDs {
@@ -293,20 +310,34 @@ func (s *ChatStore) Send(ctx context.Context, actor chat.Actor, id string, in ch
 	return map[string]any{"data": map[string]any{"id": strconv.FormatInt(messageID, 10)}}, nil
 }
 
-func (s *ChatStore) Read(ctx context.Context, actor chat.Actor, id string, through int64) (map[string]any, error) {
+func (s *ChatStore) Read(ctx context.Context, actor chat.Actor, id string, through int64) (chat.ReadResult, error) {
+	var result chat.ReadResult
 	id, err := s.resolveConversation(ctx, actor, id)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-	// 已读位置不越过客户端实际展示的消息。
-	tag, e := s.DB.Exec(ctx, "UPDATE chat_conversations c SET "+chatReadColumn(actor)+"=GREATEST(c."+chatReadColumn(actor)+",coalesce((SELECT max(x.id) FROM chat_messages x WHERE x.conversation_id=c.id AND x.id<=$3),0)) WHERE c.id=$1 AND c."+chatOwnerColumn(actor)+"=$2", id, actor.ID, through)
+	column := chatReadColumn(actor)
+	owner := `c.id=$1 AND c.` + chatOwnerColumn(actor) + `=$2`
+	assign := column + `=target.id`
+	if actor.Surface == "admin" {
+		assign += `,staff_read_id=GREATEST(c.staff_read_id,target.id)`
+	}
+	// 向前推进时才写入并通知；会话排序仍按最后一次业务活动。
+	var current *int64
+	e := s.DB.QueryRow(ctx, `WITH target AS (
+ SELECT coalesce((SELECT id FROM chat_messages WHERE conversation_id=$1 AND id<=$3 ORDER BY id DESC LIMIT 1),0) AS id
+), advanced AS (
+ UPDATE chat_conversations c SET `+assign+` FROM target WHERE `+owner+` AND c.`+column+`<target.id RETURNING c.`+column+` AS id
+)
+SELECT coalesce((SELECT id FROM advanced),(SELECT c.`+column+` FROM chat_conversations c WHERE `+owner+`)),EXISTS(SELECT 1 FROM advanced)`, id, actor.ID, through).Scan(&current, &result.Advanced)
 	if e != nil {
-		return nil, e
+		return result, e
 	}
-	if tag.RowsAffected() == 0 {
-		return nil, fault.New(fault.NotFound, "CHAT_NOT_FOUND", "会话不存在或不属于当前账户")
+	if current == nil {
+		return result, fault.New(fault.NotFound, "CHAT_NOT_FOUND", "会话不存在或不属于当前账户")
 	}
-	return map[string]any{"ok": true}, nil
+	result.Through = *current
+	return result, nil
 }
 
 func (s *ChatStore) Close(ctx context.Context, actor chat.Actor, id string) (map[string]any, error) {

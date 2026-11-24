@@ -1,4 +1,6 @@
-import { ProtectedImage } from "../../../共享/MediaSecurity";
+import { Avatar } from "@chatui/core/es/components/Avatar";
+import { Button } from "@chatui/core/es/components/Button";
+import { ProtectedImage } from "./MediaSecurity";
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft,
@@ -7,13 +9,12 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import { request, createRequestId } from "../lib/api";
 import {
   CHAT_IMAGE_LIMIT,
   uploadChatImage,
   validateChatImage,
-} from "../../../共享/chat-upload";
-import type { ChatImage } from "../../../共享/chat-types";
+} from "./chat-upload";
+import type { ChatImage } from "./chat-types";
 
 export function ChatAvatar({
   src,
@@ -26,13 +27,13 @@ export function ChatAvatar({
 }) {
   const [failed, setFailed] = useState("");
   return (
-    <span className={`chat-avatar ${className}`} aria-label={name}>
+    <Avatar className={`chat-avatar ${className}`} shape="square">
       {src && failed !== src ? (
         <ProtectedImage src={src} alt="" onError={() => setFailed(src)} />
       ) : (
         <span>{Array.from(name || "清叶")[0]}</span>
       )}
-    </span>
+    </Avatar>
   );
 }
 
@@ -45,10 +46,15 @@ type DraftImage = {
   error?: string;
   controller: AbortController;
 };
+export interface ChatMediaServices {
+  request: Parameters<typeof uploadChatImage>[0];
+  createRequestId: () => string;
+}
 export function useChatImages(
   identity: string,
   selected: string,
   report: (error: string) => void,
+  { request, createRequestId }: ChatMediaServices,
 ) {
   const drafts = useRef(new Map<string, DraftImage[]>());
   const [, render] = useState(0);
@@ -179,7 +185,7 @@ export function ImagePicker({
   const input = useRef<HTMLInputElement>(null);
   return (
     <>
-      <button
+      <Button
         type="button"
         onClick={() => input.current?.click()}
         disabled={disabled || images.items.length >= CHAT_IMAGE_LIMIT}
@@ -187,7 +193,7 @@ export function ImagePicker({
       >
         <ImagePlus size={19} />
         <span>图片</span>
-      </button>
+      </Button>
       <input
         ref={input}
         hidden
@@ -216,16 +222,16 @@ export function ImageDrafts({
       {images.items.map((item) => (
         <div className="chat-draft-image" key={item.key}>
           <ProtectedImage src={item.preview} alt={item.file.name} />
-          <button
+          <Button
             type="button"
             disabled={disabled}
             aria-label={`移除图片 ${item.file.name}`}
             onClick={() => images.remove(item.key)}
           >
             <X size={12} />
-          </button>
+          </Button>
           {item.error ? (
-            <button
+            <Button
               className="chat-upload-state failed"
               title={item.error}
               type="button"
@@ -234,7 +240,7 @@ export function ImageDrafts({
             >
               <RotateCcw size={12} />
               重试
-            </button>
+            </Button>
           ) : !item.mediaID ? (
             <span className="chat-upload-state" role="status">
               {item.progress >= 95 ? "处理中" : `${item.progress}%`}
@@ -261,7 +267,7 @@ export function ChatImageGrid({
   return (
     <div className={`chat-image-grid ${images.length === 1 ? "single" : ""}`}>
       {images.map((image, index) => (
-        <button
+        <Button
           type="button"
           key={image.id}
           aria-label={`查看第 ${index + 1} 张聊天图片`}
@@ -273,7 +279,7 @@ export function ChatImageGrid({
             loading="lazy"
             onLoad={loaded}
           />
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -322,22 +328,22 @@ export function ChatLightbox({
             {index + 1} / {gallery.images.length}
           </b>
         </span>
-        <button type="button" aria-label="关闭图片预览" onClick={close}>
+        <Button type="button" aria-label="关闭图片预览" onClick={close}>
           <X />
-        </button>
+        </Button>
       </header>
       <div className="chat-lightbox-stage">
         {gallery.images.length > 1 && (
-          <button
+          <Button
             type="button"
             aria-label="上一张图片"
             onClick={() => move(-1)}
           >
             <ChevronLeft />
-          </button>
+          </Button>
         )}
         {failed ? (
-          <button
+          <Button
             type="button"
             onClick={() => {
               setFailed(false);
@@ -345,7 +351,7 @@ export function ChatLightbox({
             }}
           >
             图片读取失败，点击重试
-          </button>
+          </Button>
         ) : (
           <ProtectedImage
             key={`${image.id}:${retry}`}
@@ -355,9 +361,9 @@ export function ChatLightbox({
           />
         )}
         {gallery.images.length > 1 && (
-          <button type="button" aria-label="下一张图片" onClick={() => move(1)}>
+          <Button type="button" aria-label="下一张图片" onClick={() => move(1)}>
             <ChevronRight />
-          </button>
+          </Button>
         )}
       </div>
       <p>左右方向键切换 · Esc 关闭</p>

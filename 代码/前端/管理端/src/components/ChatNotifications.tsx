@@ -48,66 +48,78 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const seen = useRef(new Map<string, string>()),
     initialized = useRef(false),
     inFlight = useRef(false),
+    refreshQueued = useRef(false),
     generation = useRef(0),
     presenceLock = useRef(false);
-  const refresh = useCallback(async () => {
-    if (!user || inFlight.current) return;
-    const current = generation.current;
-    inFlight.current = true;
-    try {
-      const next = await chatApi.list();
-      if (current !== generation.current) return;
-      const changed = next.data.find(
-        (item) =>
-          !item.last_message_mine &&
-          item.unread > 0 &&
-          seen.current.get(item.id) !== item.last_message_id,
-      );
-      if (
-        initialized.current &&
-        changed &&
-        !(
-          document.visibilityState === "visible" &&
-          route.current.pathname === chatRoute &&
-          new URLSearchParams(route.current.search).get("conversation") ===
-            changed.id
-        )
-      ) {
-        setToast(changed);
+  const refresh = useCallback(
+    async function refreshInbox() {
+      if (!user) return;
+      if (inFlight.current) {
+        refreshQueued.current = true;
+        return;
+      }
+      refreshQueued.current = false;
+      const current = generation.current;
+      inFlight.current = true;
+      try {
+        const next = await chatApi.list();
+        if (current !== generation.current) return;
+        const changed = next.data.find(
+          (item) =>
+            !item.last_message_mine &&
+            item.unread > 0 &&
+            seen.current.get(item.id) !== item.last_message_id,
+        );
         if (
-          "Notification" in window &&
-          Notification.permission === "granted" &&
-          document.visibilityState !== "visible"
+          initialized.current &&
+          changed &&
+          !(
+            document.visibilityState === "visible" &&
+            route.current.pathname === chatRoute &&
+            new URLSearchParams(route.current.search).get("conversation") ===
+              changed.id
+          )
         ) {
-          try {
-            const notification = new Notification("清叶 · 新消息", {
-              body: "收到一条新的商品咨询消息，点击返回查看。",
-              tag: `qingye-chat-${changed.id}`,
-            });
-            notification.onclick = () => {
-              window.focus();
-              notification.close();
-            };
-          } catch {
-            /* Some mobile browsers require a service worker; keep in-site delivery active. */
+          setToast(changed);
+          if (
+            "Notification" in window &&
+            Notification.permission === "granted" &&
+            document.visibilityState !== "visible"
+          ) {
+            try {
+              const notification = new Notification("清叶 · 新消息", {
+                body: "收到一条新的商品咨询消息，点击返回查看。",
+                tag: `qingye-chat-${changed.id}`,
+              });
+              notification.onclick = () => {
+                window.focus();
+                notification.close();
+              };
+            } catch {
+              /* Some mobile browsers require a service worker; keep in-site delivery active. */
+            }
           }
         }
+        next.data.forEach((item) =>
+          seen.current.set(item.id, item.last_message_id),
+        );
+        initialized.current = true;
+        setList(next);
+        setError("");
+        setRevision((v) => v + 1);
+      } catch (e) {
+        if (current !== generation.current) return;
+        setError(e instanceof Error ? e.message : "消息读取失败，正在等待重试");
+        if ((e as { status?: number }).status === 401) void refreshSession();
+      } finally {
+        if (current === generation.current) {
+          inFlight.current = false;
+          if (refreshQueued.current) void refreshInbox();
+        }
       }
-      next.data.forEach((item) =>
-        seen.current.set(item.id, item.last_message_id),
-      );
-      initialized.current = true;
-      setList(next);
-      setError("");
-      setRevision((v) => v + 1);
-    } catch (e) {
-      if (current !== generation.current) return;
-      setError(e instanceof Error ? e.message : "消息读取失败，正在等待重试");
-      if ((e as { status?: number }).status === 401) void refreshSession();
-    } finally {
-      if (current === generation.current) inFlight.current = false;
-    }
-  }, [user?.id, refreshSession]);
+    },
+    [user?.id, refreshSession],
+  );
   const updatePresence = useCallback(
     async (accepting?: boolean) => {
       if (!chatAdmin || !user || presenceLock.current) return;
@@ -135,6 +147,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     generation.current++;
     inFlight.current = false;
+    refreshQueued.current = false;
     presenceLock.current = false;
     initialized.current = false;
     seen.current.clear();

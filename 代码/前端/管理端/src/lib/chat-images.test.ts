@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ChatOutbox } from "../../../共享/chat-outbox";
 import { validateChatImage, CHAT_IMAGE_BYTES } from "../../../共享/chat-upload";
 import { chatApi, chatTransport } from "./chat-api";
+import { isReadThrough } from "../../../共享/chat-types";
 
 describe("R19 图文消息", () => {
   it("重试保留图片顺序与消息标识，修改附件生成新意图", () => {
@@ -55,5 +56,47 @@ describe("R19 图文消息", () => {
     } finally {
       command.mockRestore();
     }
+  });
+  it("引用参与发送去重，改变引用会派发一个新意图", async () => {
+    const outbox = new ChatOutbox();
+    let sequence = 0;
+    const newID = () => String(++sequence);
+    const first = outbox.prepare(
+      "conversation",
+      "回复",
+      newID,
+      ["media"],
+      "30",
+    );
+    expect(outbox.prepare("conversation", "回复", newID, ["media"], "30")).toBe(
+      first,
+    );
+    const next = outbox.prepare("conversation", "回复", newID, ["media"], "31");
+    expect(next.client).not.toBe(first.client);
+    const command = vi
+      .spyOn(chatTransport, "command")
+      .mockResolvedValue({ data: { id: "42" } });
+    try {
+      await chatApi.send(
+        next.id,
+        next.body,
+        next.client,
+        next.images,
+        next.replyToID,
+      );
+      expect(command).toHaveBeenCalledWith("send", "conversation", {
+        body: "回复",
+        client_id: next.client,
+        image_ids: ["media"],
+        reply_to_id: "31",
+      });
+    } finally {
+      command.mockRestore();
+    }
+  });
+  it("使用无损整数比较 PostgreSQL 消息编号", () => {
+    expect(isReadThrough("9007199254740993", "9007199254740992")).toBe(false);
+    expect(isReadThrough("9007199254740992", "9007199254740993")).toBe(true);
+    expect(isReadThrough("1", undefined)).toBe(false);
   });
 });

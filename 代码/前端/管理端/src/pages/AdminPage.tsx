@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Link, useParams, useLocation } from "react-router-dom";
 import { useSession } from "../context";
 import { canManage } from "../lib/admin-api";
@@ -12,7 +12,6 @@ import { AdminDashboard } from "../components/AdminDashboard";
 import { AdminAdministrators } from "../components/AdminAdministrators";
 import { AdminProductView } from "../components/AdminProductView";
 import { adminProductID } from "../lib/product-links";
-import { ChatPage } from "../components/ChatPage";
 import { AdminWorkspace } from "../components/AdminWorkspace";
 import { AdminHelp } from "../components/AdminGuide";
 import { AdminMediaSecurity } from "../components/AdminMediaSecurity";
@@ -23,6 +22,13 @@ import {
   AdminAvatarLibrary,
 } from "../components/AdminProfiles";
 import "../admin.css";
+import { StateView } from "../components/shared";
+
+const ChatPage = lazy(() =>
+  import("../components/ChatPage").then((module) => ({
+    default: module.ChatPage,
+  })),
+);
 
 export function AdminGate({ children }: { children: React.ReactNode }) {
   const { user } = useSession();
@@ -53,7 +59,9 @@ export function AdminPage() {
         {tab === "" ? (
           <AdminDashboard />
         ) : tab === "chat" ? (
-          <ChatPage />
+          <Suspense fallback={<StateView loading />}>
+            <ChatPage />
+          </Suspense>
         ) : detailID ? (
           <AdminProductView key={detailID} id={detailID} />
         ) : tab === "security/media-access" ? (

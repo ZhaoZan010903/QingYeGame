@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  ArrowRight,
   ChevronRight,
   CircleHelp,
   ClipboardCheck,
@@ -13,19 +12,14 @@ import {
   MessageSquare,
   Package,
   PanelsTopLeft,
-  Plus,
   RefreshCw,
-  Settings2,
   ShieldCheck,
-  Trash2,
   TrendingUp,
   UserRound,
   Users,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { useChat } from "./ChatNotifications";
-import { GuideButton, guides, type DemoKind } from "./AdminGuide";
 import { productListReturn } from "../lib/product-links";
 import "../workspace.css";
 
@@ -67,88 +61,6 @@ const groups = [
 ] as const;
 
 type View = (typeof groups)[number]["links"][number][0];
-type Shortcut = readonly [to: string, label: string, icon: LucideIcon];
-
-const workflows: Record<View, readonly Shortcut[]> = {
-  "": [
-    ["/legacy-sync", "同步旧站商品", RefreshCw],
-    ["/products?trash=1", "查看商品回收站", Trash2],
-    ["/security/media-access", "查看图片访问保护", ShieldCheck],
-  ],
-  products: [
-    ["/products?new=1", "录入新商品", Plus],
-    ["/products?trash=1", "商品回收站", Trash2],
-    ["/reviews", "审核会员投稿", ClipboardCheck],
-  ],
-  "legacy-sync": [
-    ["/products?source=legacy", "查看旧站迁入商品", Package],
-    [
-      "/products?source=legacy&status=offline",
-      "查看迁入的已下架商品",
-      ListFilter,
-    ],
-  ],
-  reviews: [
-    ["/products?status=published", "查看已上架商品", Package],
-    ["/products?status=rejected", "查看已退回商品", ListFilter],
-  ],
-  chat: [
-    ["/products", "查找咨询商品", Package],
-    ["/contacts", "维护客服入口", Headphones],
-  ],
-  settings: [
-    ["/recommendations", "管理热门排序", TrendingUp],
-    ["/contacts", "维护客服入口", Headphones],
-  ],
-  recommendations: [
-    ["/products?status=published", "查看可见商品", Package],
-    ["/settings", "调整首页展示", PanelsTopLeft],
-  ],
-  contacts: [
-    ["/chat", "进入在线咨询", MessageSquare],
-    ["/settings", "查看首页装修", PanelsTopLeft],
-  ],
-  categories: [
-    ["/products?new=1", "查看录入表单", Plus],
-    ["/products", "查看商品列表", Package],
-  ],
-  pages: [
-    ["/settings", "查看首页装修", PanelsTopLeft],
-    ["/contacts", "维护客服入口", Headphones],
-  ],
-  users: [
-    ["/nickname-reviews", "审核会员昵称", ClipboardCheck],
-    ["/avatar-library", "维护会员头像库", UserRound],
-  ],
-  administrators: [
-    ["/users", "查看会员管理", Users],
-    ["/security/media-access", "查看图片访问保护", ShieldCheck],
-  ],
-  "nickname-reviews": [
-    ["/users", "查看会员列表", Users],
-    ["/avatar-library", "维护会员头像库", UserRound],
-  ],
-  "avatar-library": [
-    ["/users", "查看会员列表", Users],
-    ["/nickname-reviews", "审核会员昵称", ClipboardCheck],
-  ],
-  "security/media-access": [
-    ["/products", "查看商品图集", Package],
-    ["/administrators", "查看管理员", Users],
-  ],
-  help: [
-    ["/products", "返回商品管理", Package],
-    ["/", "返回数据看板", LayoutDashboard],
-  ],
-};
-
-const demonstrations: Partial<Record<View, DemoKind>> = {
-  products: "product",
-  reviews: "review",
-  chat: "chat",
-  settings: "home",
-  contacts: "contact",
-};
 function ManagementNav({
   active,
   unread,
@@ -185,128 +97,67 @@ function ManagementNav({
   );
 }
 
-function WorkspaceContext({
-  view,
-  parentHref,
-  onNavigate,
-}: {
-  view?: View;
-  parentHref?: string;
-  onNavigate?: () => void;
-}) {
-  const related: readonly Shortcut[] = parentHref
-    ? [
-        [
-          parentHref,
-          view === "reviews"
-            ? "返回待审核列表"
-            : view === "chat"
-              ? "返回在线咨询"
-              : "返回商品列表",
-          view === "chat" ? MessageSquare : Package,
-        ],
-        view === "products"
-          ? ["/reviews", "查看待审核商品", ClipboardCheck]
-          : ["/products", "查看商品列表", Package],
-      ]
-    : workflows[view ?? ""];
-  const guide = view === undefined ? undefined : demonstrations[view];
-  return (
-    <>
-      <section className="admin-context-card fluent-card" aria-label="快捷操作">
-        <h2>快捷操作</h2>
-        <nav className="admin-context-links" aria-label="快捷操作">
-          {related.map(([to, title, Icon]) => (
-            <Link key={to} to={to} onClick={onNavigate}>
-              <Icon size={16} aria-hidden="true" />
-              <span>{title}</span>
-              <ArrowRight size={14} aria-hidden="true" />
-            </Link>
-          ))}
-        </nav>
-      </section>
-      {guide ? (
-        <section className="admin-context-card fluent-card">
-          <h2>{guides[guide].title}</h2>
-          <GuideButton kind={guide} label="看操作演示" />
-        </section>
-      ) : view !== "help" ? (
-        <section className="admin-context-card fluent-card">
-          <Link className="admin-context-help" to="/help" onClick={onNavigate}>
-            <CircleHelp size={17} aria-hidden="true" />
-            操作演示
-            <ArrowRight size={14} aria-hidden="true" />
-          </Link>
-        </section>
-      ) : null}
-    </>
-  );
-}
-
-type Drawer = "navigation" | "context";
-const drawerTitles: Record<Drawer, string> = {
-  navigation: "管理菜单",
-  context: "相关操作",
-};
-
-function WorkspaceDrawer({
-  kind,
-  children,
+function WorkspaceMenu({
+  active,
+  unread,
   onClose,
 }: {
-  kind: Drawer;
-  children: (close: () => void) => ReactNode;
+  active?: View;
+  unread: number;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
-  const close = () => ref.current?.close();
+
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
-    const maxWidth = kind === "navigation" ? 760 : 1250;
-    const responsive = window.matchMedia("(max-width: " + maxWidth + "px)");
+    const mobile = window.matchMedia("(max-width: 760px)");
+    const resize = () => {
+      if (!mobile.matches) node.close();
+    };
     node.showModal();
     closeButton.current?.focus();
-    const resize = () => {
-      if (!responsive.matches) node.close();
-    };
-    responsive.addEventListener("change", resize);
+    mobile.addEventListener("change", resize);
     resize();
     return () => {
-      responsive.removeEventListener("change", resize);
+      mobile.removeEventListener("change", resize);
       node.close();
     };
-  }, [kind]);
+  }, []);
+
   return (
     <dialog
       ref={ref}
-      id={"admin-drawer-" + kind}
+      id="admin-drawer-navigation"
       className="admin-drawer fluent-flyout"
-      data-side={kind === "navigation" ? "left" : "right"}
       aria-labelledby="admin-drawer-title"
       onClose={() => {
-        // StrictMode can close and reopen a dialog before its close event runs.
+        // A StrictMode cleanup can queue a close event before reopening.
         if (!ref.current?.open) onClose();
       }}
       onClick={(event) => {
-        if (event.target === event.currentTarget) close();
+        if (event.target === event.currentTarget) ref.current?.close();
       }}
     >
       <div className="admin-drawer-body">
         <div className="admin-drawer-heading">
-          <h2 id="admin-drawer-title">{drawerTitles[kind]}</h2>
+          <h2 id="admin-drawer-title">管理菜单</h2>
           <button
             ref={closeButton}
             className="admin-icon-button"
             type="button"
-            aria-label={"关闭" + drawerTitles[kind]}
-            onClick={close}
+            aria-label="关闭管理菜单"
+            onClick={() => ref.current?.close()}
           >
             <X size={20} aria-hidden="true" />
           </button>
         </div>
-        {children(close)}
+        <ManagementNav
+          active={active}
+          unread={unread}
+          onNavigate={() => ref.current?.close()}
+        />
       </div>
     </dialog>
   );
@@ -323,7 +174,7 @@ export function AdminWorkspace({
 }) {
   const { list } = useChat();
   const { state } = useLocation();
-  const [drawer, setDrawer] = useState<Drawer | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const parentHref = detail
     ? (productListReturn(state?.returnTo) ?? "/chat")
     : undefined;
@@ -354,11 +205,9 @@ export function AdminWorkspace({
             type="button"
             aria-label="打开管理菜单"
             aria-haspopup="dialog"
-            aria-expanded={drawer === "navigation"}
-            aria-controls={
-              drawer === "navigation" ? "admin-drawer-navigation" : undefined
-            }
-            onClick={() => setDrawer("navigation")}
+            aria-expanded={menuOpen}
+            aria-controls={menuOpen ? "admin-drawer-navigation" : undefined}
+            onClick={() => setMenuOpen(true)}
           >
             <Menu size={20} aria-hidden="true" />
             <span>菜单</span>
@@ -382,44 +231,15 @@ export function AdminWorkspace({
               </span>
             )}
           </nav>
-          <button
-            className="admin-icon-button admin-context-trigger"
-            type="button"
-            aria-label="打开相关操作"
-            aria-haspopup="dialog"
-            aria-expanded={drawer === "context"}
-            aria-controls={
-              drawer === "context" ? "admin-drawer-context" : undefined
-            }
-            onClick={() => setDrawer("context")}
-          >
-            <Settings2 size={18} aria-hidden="true" />
-            <span>相关操作</span>
-          </button>
         </div>
         {children}
       </main>
-      <aside className="admin-context" aria-label="相关操作">
-        <WorkspaceContext view={active} parentHref={parentHref} />
-      </aside>
-      {drawer && (
-        <WorkspaceDrawer kind={drawer} onClose={() => setDrawer(null)}>
-          {(close) =>
-            drawer === "navigation" ? (
-              <ManagementNav
-                active={active}
-                unread={list.unread}
-                onNavigate={close}
-              />
-            ) : (
-              <WorkspaceContext
-                view={active}
-                parentHref={parentHref}
-                onNavigate={close}
-              />
-            )
-          }
-        </WorkspaceDrawer>
+      {menuOpen && (
+        <WorkspaceMenu
+          active={active}
+          unread={list.unread}
+          onClose={() => setMenuOpen(false)}
+        />
       )}
     </div>
   );

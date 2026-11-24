@@ -12,7 +12,9 @@ export default defineConfig(({ mode }) => {
   };
   return {
     plugins: [react(), tailwindcss()],
-    resolve: { dedupe: ['react', 'react-dom'] },
+    resolve: {
+      dedupe: ['react', 'react-dom', '@chatui/core', 'lucide-react'],
+    },
     server: { port: Number(env.QINGYE_WEB_PORT) || 5173, proxy },
     preview: { port: Number(env.QINGYE_WEB_PORT) || 4173, proxy },
     build: { sourcemap: false },

@@ -28,6 +28,8 @@ export interface Conversation {
   last_message_id: string;
   last_message_mine: boolean;
   unread: number;
+  read_through?: string;
+  peer_read_through?: string;
 }
 /** 商品卡片保存发送时的公开快照，切换咨询商品不会改写历史卡片。 */
 export interface ChatImage {
@@ -43,10 +45,37 @@ export interface ChatMessage {
   sender_name?: string;
   avatar_url?: string;
   product?: ChatProduct | null;
+  reply?: ChatQuote | null;
   mine: boolean;
   sender_role: "admin" | "member";
   created_at: string;
   client_id: string;
+}
+export interface ChatQuote {
+  id: string;
+  kind: ChatMessage["kind"];
+  sender_role: ChatMessage["sender_role"];
+  sender_name?: string;
+  mine: boolean;
+  excerpt: string;
+}
+
+export function isReadThrough(id: string, cursor?: string): boolean {
+  return cursor !== undefined && BigInt(id) <= BigInt(cursor);
+}
+
+export function quoteMessage(message: ChatMessage): ChatQuote {
+  const { id, kind, mine, sender_role, sender_name } = message;
+  const text =
+    kind === "product" ? (message.product?.title ?? "") : message.body;
+  return {
+    id,
+    kind,
+    mine,
+    sender_role,
+    sender_name,
+    excerpt: Array.from(text).slice(0, 120).join(""),
+  };
 }
 export interface ChatList {
   data: Conversation[];
