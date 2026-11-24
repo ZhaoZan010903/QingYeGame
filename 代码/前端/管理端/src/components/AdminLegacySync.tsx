@@ -450,11 +450,7 @@ export function AdminLegacySync() {
           disabled={!data?.can_start || running || pending !== null}
           onClick={() => void start()}
         >
-          <RefreshCw
-            size={16}
-            aria-hidden="true"
-            className={running || pending === "start" ? "legacy-sync-spin" : ""}
-          />
+          <RefreshCw size={16} aria-hidden="true" />
           {running ? "正在同步" : pending === "start" ? "正在启动" : "立即同步"}
         </button>
       </header>
@@ -479,7 +475,7 @@ export function AdminLegacySync() {
         </p>
       )}
 
-      <section className="legacy-sync-panel" aria-label="同步状态">
+      <section className="legacy-sync-panel fluent-card" aria-label="同步状态">
         <div className="legacy-sync-status-head">
           <div>
             <span>{running ? "当前任务" : "最近一次同步"}</span>
@@ -572,7 +568,7 @@ export function AdminLegacySync() {
 
       {selection && (
         <section
-          className="legacy-sync-panel legacy-sync-detail"
+          className="legacy-sync-panel legacy-sync-detail fluent-card"
           aria-labelledby="legacy-sync-detail-heading"
         >
           <div className="legacy-sync-status-head">
@@ -634,7 +630,7 @@ export function AdminLegacySync() {
 
       {data && (
         <section
-          className="legacy-sync-panel legacy-sync-schedule"
+          className="legacy-sync-panel legacy-sync-schedule fluent-card"
           aria-label="定时同步"
         >
           <Clock3 size={19} aria-hidden="true" />
@@ -662,7 +658,7 @@ export function AdminLegacySync() {
       )}
 
       <section
-        className="legacy-sync-panel"
+        className="legacy-sync-panel fluent-card"
         aria-labelledby="legacy-sync-history"
       >
         <div className="legacy-sync-status-head">

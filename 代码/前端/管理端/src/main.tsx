@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, type ReactNode, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { ArrowUp, ArrowUpRight, LogOut } from "lucide-react";
 import {
   createBrowserRouter,
   RouterProvider,
@@ -11,8 +12,9 @@ import {
   useLocation,
 } from "react-router-dom";
 import { Providers, useSession } from "./context";
-import { MediaVerificationDialog } from '../../共享/MediaSecurity';
+import { MediaVerificationDialog } from "../../共享/MediaSecurity";
 import { api } from "./lib/api";
+import { publicSite } from "./lib/admin-ux";
 import { StateView } from "./components/shared";
 import { LoginPage } from "./pages/LoginPage";
 import { ChatProvider, ChatNavLink } from "./components/ChatNotifications";
@@ -22,10 +24,14 @@ const AdminPage = lazy(() =>
 );
 function Protected({ children }: { children: ReactNode }) {
   const { user, loading, error, refresh } = useSession();
-  return loading ? (
-    <StateView loading />
-  ) : error ? (
-    <StateView error={error} onRetry={() => void refresh()} />
+  return loading || error ? (
+    <main id="admin-content" tabIndex={-1}>
+      <StateView
+        loading={loading}
+        error={error}
+        onRetry={() => void refresh()}
+      />
+    </main>
   ) : user?.role === "admin" ? (
     <>{children}</>
   ) : (
@@ -58,46 +64,77 @@ function Shell() {
     }
   }
   return (
-    <>
-      <MediaVerificationDialog identity={user?.id ?? 'anonymous'} routeKey={location.key} />
+    <div className="admin-app">
+      <MediaVerificationDialog
+        identity={user?.id ?? "anonymous"}
+        routeKey={location.key}
+      />
+      <a className="admin-skip-link" href="#admin-content">
+        跳到主要内容
+      </a>
       <header className="admin-topbar">
-        <Link className="admin-brand" to="/">
-          <svg viewBox="0 0 33 32" fill="none" aria-hidden="true">
-            <path d="M23 6H11L5 16l6 10h12l5-10-5-10Z" />
-            <path d="m11 19 5-9 5 9h-10Zm7 3 5 5" />
-          </svg>
-          <strong>清叶</strong>
-          <span>管理后台</span>
-        </Link>
-        {user && (
-          <div className="admin-session">
-            <ChatNavLink />
-            <span className="environment-badge">
-              {import.meta.env.VITE_ENVIRONMENT_LABEL || "管理环境"}
+        <div className="admin-topbar-inner">
+          <Link className="admin-brand" to="/">
+            <span className="admin-brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 33 32" fill="none">
+                <path d="M23 6H11L5 16l6 10h12l5-10-5-10Z" />
+                <path d="m11 19 5-9 5 9h-10Zm7 3 5 5" />
+              </svg>
             </span>
-            <Link className="topbar-help" to="/help">
-              操作指南
-            </Link>
-            <span>{user.nickname}</span>
-            <button
-              className="button-outline"
-              disabled={busy}
-              onClick={() => void logout()}
-            >
-              退出管理台
-            </button>
-          </div>
-        )}
+            <strong>清叶</strong>
+            <span className="admin-brand-label">管理后台</span>
+          </Link>
+          {user && (
+            <div className="admin-session">
+              <span className="environment-badge">
+                {import.meta.env.VITE_ENVIRONMENT_LABEL || "管理环境"}
+              </span>
+              <ChatNavLink />
+              <Link className="topbar-help" to="/help">
+                操作指南
+              </Link>
+              <span className="admin-account" title={user.nickname}>
+                <span className="admin-account-mark" aria-hidden="true">
+                  {Array.from(user.nickname?.trim() ?? "")[0] || "管"}
+                </span>
+                <span className="admin-account-name">{user.nickname}</span>
+              </span>
+              <button
+                className="button-outline admin-logout"
+                type="button"
+                aria-label="退出管理台"
+                disabled={busy}
+                onClick={() => void logout()}
+              >
+                <LogOut size={16} aria-hidden="true" />
+                <span>退出管理台</span>
+              </button>
+            </div>
+          )}
+        </div>
       </header>
       {error && (
         <p className="form-error" role="alert">
           {error}
         </p>
       )}
-      <main>
-        <Suspense fallback={<StateView loading />}>
+      <div className="admin-app-content">
+        <Suspense
+          fallback={
+            <main id="admin-content" tabIndex={-1}>
+              <StateView loading />
+            </main>
+          }
+        >
           <Routes>
-            <Route path="login" element={<LoginPage />} />
+            <Route
+              path="login"
+              element={
+                <main className="admin-auth" id="admin-content" tabIndex={-1}>
+                  <LoginPage />
+                </main>
+              }
+            />
             <Route
               path="*"
               element={
@@ -108,8 +145,29 @@ function Shell() {
             />
           </Routes>
         </Suspense>
-      </main>
-    </>
+      </div>
+      {user?.role === "admin" && (
+        <footer className="admin-footer">
+          <div className="admin-footer-inner">
+            <nav aria-label="页脚导航">
+              <Link to="/help">操作演示</Link>
+              {publicSite && (
+                <a href={publicSite} target="_blank" rel="noreferrer">
+                  查看用户网站 <ArrowUpRight size={14} aria-hidden="true" />
+                </a>
+              )}
+            </nav>
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => window.scrollTo({ top: 0 })}
+            >
+              <ArrowUp size={15} aria-hidden="true" /> 回到顶部
+            </button>
+          </div>
+        </footer>
+      )}
+    </div>
   );
 }
 class ErrorBoundary extends React.Component<

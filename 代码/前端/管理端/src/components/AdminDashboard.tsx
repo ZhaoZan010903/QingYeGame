@@ -93,7 +93,7 @@ export function DashboardTrend({
   ];
   return (
     <section
-      className="dashboard-panel dashboard-trend"
+      className="dashboard-panel dashboard-trend fluent-card"
       aria-labelledby={`${id}-heading`}
     >
       <div className="dashboard-section-title">
@@ -239,7 +239,7 @@ function DashboardDistributions({ data }: { data: DashboardData }) {
   const max = Math.max(1, ...Object.values(data.products.statuses));
   return (
     <section
-      className="dashboard-panel dashboard-distributions"
+      className="dashboard-panel dashboard-distributions fluent-card"
       aria-labelledby="dashboard-distribution-title"
     >
       <div className="dashboard-section-title">
@@ -295,7 +295,7 @@ function DashboardRanking({ data }: { data: DashboardData }) {
   const selected = data.ranking.by;
   return (
     <section
-      className="dashboard-panel dashboard-ranking"
+      className="dashboard-panel dashboard-ranking fluent-card"
       aria-labelledby="dashboard-ranking-title"
     >
       <div className="dashboard-section-title">
@@ -452,7 +452,11 @@ export function DashboardContent({
         </div>
         <div className="dashboard-snapshot-grid">
           {snapshots.map((item) => (
-            <Link className="dashboard-snapshot" key={item.label} to={item.to}>
+            <Link
+              className="dashboard-snapshot fluent-card fluent-interactive"
+              key={item.label}
+              to={item.to}
+            >
               <div>
                 <span>{item.label}</span>
                 <item.icon size={19} aria-hidden="true" />
@@ -479,7 +483,7 @@ export function DashboardContent({
         <div className="dashboard-review-grid">
           {reviews.map((item) => (
             <Link
-              className={`dashboard-review-card${item.value > 0 ? " has-todo" : ""}`}
+              className={`dashboard-review-card fluent-card fluent-interactive${item.value > 0 ? " has-todo" : ""}`}
               key={item.label}
               to={item.to}
             >
@@ -496,7 +500,10 @@ export function DashboardContent({
           ))}
         </div>
       </section>
-      <section className="dashboard-todos" aria-label="其他当前待办">
+      <section
+        className="dashboard-todos fluent-card"
+        aria-label="其他当前待办"
+      >
         <span className="dashboard-todos-heading">待办事项</span>
         {todos.map((item) => (
           <Link
@@ -520,7 +527,7 @@ export function DashboardContent({
           {metrics.map((key) => {
             const Icon = metricIcons[key];
             return (
-              <div className="dashboard-period-stat" key={key}>
+              <div className="dashboard-period-stat fluent-card" key={key}>
                 <Icon size={18} aria-hidden="true" />
                 <span>{dashboardMetricNames[key]}</span>
                 <strong>
@@ -540,7 +547,7 @@ export function DashboardContent({
         <DashboardDistributions data={data} />
       </div>
       <DashboardRanking data={data} />
-      <details className="dashboard-definition">
+      <details className="dashboard-definition fluent-card">
         <summary>查看统计口径</summary>
         <ul>
           {metrics.map((key) => (
@@ -615,7 +622,11 @@ function DashboardActions() {
             to: "/contacts",
           },
         ].map((item) => (
-          <Link className="dashboard-action" key={item.to} to={item.to}>
+          <Link
+            className="dashboard-action fluent-card fluent-interactive"
+            key={item.to}
+            to={item.to}
+          >
             <item.icon size={20} aria-hidden="true" />
             <span>
               <strong>{item.title}</strong>
@@ -676,7 +687,6 @@ export function AdminDashboard() {
     <div className="admin-dashboard">
       <div className="admin-heading">
         <div>
-          <span className="eyebrow">清叶运营工作台</span>
           <h1>数据看板</h1>
           <p>查看商品与会员动态，及时处理今天的待办。</p>
         </div>
@@ -685,7 +695,7 @@ export function AdminDashboard() {
           上架新商品
         </Link>
       </div>
-      <div className="dashboard-toolbar">
+      <div className="dashboard-toolbar fluent-card">
         <div className="dashboard-range" role="group" aria-label="统计时间范围">
           {([7, 30] as DashboardDays[]).map((value) => (
             <button

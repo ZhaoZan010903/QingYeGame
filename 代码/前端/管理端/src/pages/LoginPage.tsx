@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
+import { ShieldCheck } from "lucide-react";
 import { api } from "../lib/api";
 import { useSession } from "../context";
 import { StateView } from "../components/shared";
@@ -35,7 +36,9 @@ export function LoginPage() {
   if (user?.role === "admin") return <Navigate replace to="/" />;
   return (
     <section className="admin-login panel">
-      <p className="admin-login-kicker">清叶管理台</p>
+      <span className="admin-login-icon" aria-hidden="true">
+        <ShieldCheck size={24} />
+      </span>
       <h1>管理员登录</h1>
       <p className="muted">使用已开通的管理员账户进入独立管理环境。</p>
       {notice && (

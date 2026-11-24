@@ -29,8 +29,8 @@
   align-items: center;
   padding: 20px;
   border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 10px;
+  background: var(--surface-solid-white);
+  border-radius: var(--radius-cards);
 }
 .account-identity {
   display: flex;
@@ -77,14 +77,14 @@
 .account-state {
   font-size: 12px;
   padding: 5px 9px;
-  border-radius: 6px;
-  background: #edf4ee;
-  color: #347044;
+  border-radius: var(--radius-cards);
+  background: var(--success-surface);
+  color: var(--success-ink);
   white-space: nowrap;
 }
 .account-state.disabled {
-  background: #f2f3f6;
-  color: #727b8b;
+  background: var(--surface-subtle);
+  color: var(--muted);
 }
 .account-actions {
   display: flex;
@@ -101,14 +101,14 @@
   max-height: calc(100dvh - 32px);
   margin: auto;
   padding: 0;
-  border: 1px solid #dce2ec;
-  border-radius: 14px;
-  color: #263145;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-cards);
+  color: var(--ink);
   background: white;
   overflow: auto;
 }
 .account-dialog::backdrop {
-  background: #101a2b80;
+  background: var(--overlay);
 }
 .account-dialog form {
   padding: 26px;
@@ -128,14 +128,14 @@
   padding: 6px;
   border: 0;
   background: none;
-  color: #66758b;
+  color: var(--muted);
 }
 .account-dialog p {
   line-height: 1.7;
 }
 .account-dialog .muted,
 .account-dialog small {
-  color: #718096;
+  color: var(--muted);
   font-size: 12px;
 }
 .account-dialog fieldset {
@@ -180,14 +180,14 @@
   align-items: center;
   gap: 6px;
   padding: 8px 4px;
-  background: #f8faff;
+  background: var(--surface-subtle);
   border: 2px solid transparent;
-  border-radius: 9px;
+  border-radius: var(--radius-buttons);
   min-width: 0;
 }
 .account-avatar-picker button[aria-pressed="true"] {
-  border-color: #5071d2;
-  background: #eef2ff;
+  border-color: var(--line-accent);
+  background: var(--soft);
 }
 .account-avatar-picker button > span:last-child {
   font-size: 12px;
@@ -210,9 +210,9 @@
 }
 .account-warning {
   padding: 10px 12px;
-  background: #fff6e5;
-  color: #8d6228;
-  border-radius: 8px;
+  background: var(--caution-surface);
+  color: var(--caution-ink);
+  border-radius: var(--radius-cards);
   font-size: 13px;
   margin-top: 14px;
 }
@@ -233,23 +233,5 @@
   }
   .account-dialog form {
     padding: 20px 16px;
-  }
-  body:has(.admin-accounts) .admin-topbar {
-    padding-inline: 12px;
-    gap: 10px;
-  }
-  body:has(.admin-accounts) .admin-brand,
-  body:has(.admin-accounts) .admin-session {
-    flex-shrink: 0;
-    gap: 8px;
-  }
-  body:has(.admin-accounts) .admin-brand span,
-  body:has(.admin-accounts) .topbar-help {
-    display: none;
-  }
-  body:has(.admin-accounts) .admin-session > button {
-    white-space: nowrap;
-    padding-inline: 9px;
-    font-size: 12px;
   }
 }

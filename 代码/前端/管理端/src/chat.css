@@ -1,19 +1,114 @@
 @import "../../共享/chat-ui.css";
 
-/* Keep the admin header legible while the conversation occupies a narrow screen. */
+.chat-admin {
+  --chat-bg: var(--surface-solid-white);
+  --chat-soft: var(--surface-subtle);
+  --chat-line: var(--line-subtle);
+  --chat-ink: var(--ink);
+  --chat-muted: var(--muted);
+  --chat-accent: var(--blue);
+  --chat-mine: var(--surface-selected);
+  --chat-peer: var(--surface-solid-white);
+}
+.chat-admin :focus-visible {
+  outline: 2px solid var(--color-fluent-blue);
+  outline-offset: 2px;
+}
+.chat-admin :is(.chat-workspace, .chat-presence) {
+  border-color: var(--acrylic-line);
+  border-radius: var(--radius-cards);
+  background: var(--surface-acrylic);
+  box-shadow: var(--elevation-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.chat-admin .chat-workspace {
+  grid-template-columns: clamp(184px, 26%, 272px) minmax(0, 1fr);
+}
+.chat-admin .chat-presence-dot.accepting {
+  background: var(--color-success);
+}
+.chat-admin
+  :is(
+    .chat-bubble,
+    .chat-product-card,
+    .chat-product-cover,
+    .chat-avatar,
+    .chat-draft-image
+  ) {
+  border-radius: var(--radius-cards);
+}
+.chat-admin
+  :is(
+    .button-white,
+    .button-outline,
+    .chat-back,
+    .chat-compose-tools > button
+  ) {
+  border-radius: var(--radius-buttons);
+}
+.chat-admin .button-white {
+  background: var(--color-fluent-blue);
+  color: var(--surface-solid-white);
+  border: 1px solid var(--color-fluent-blue);
+}
+.chat-admin .button-white:hover:not(:disabled) {
+  background: var(--color-deep-blue);
+  border-color: var(--color-deep-blue);
+}
+.chat-admin .button-white:disabled {
+  color: var(--muted);
+  border-color: var(--line-subtle);
+  background: var(--surface-page);
+  opacity: 1;
+}
+.chat-admin .chat-composer textarea {
+  border-radius: var(--radius-inputs);
+  border-color: var(--line);
+  background: var(--surface-solid-white);
+}
+.chat-admin .chat-composer textarea:focus {
+  border-color: var(--color-fluent-blue);
+}
+.chat-admin .chat-emoji-picker,
+.admin-app .chat-toast {
+  border: 1px solid #ffffff66;
+  border-radius: var(--radius-cards);
+  background: var(--surface-acrylic-hover);
+  color: var(--ink);
+  box-shadow: var(--elevation-flyout);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+}
+.chat-admin .chat-emoji-picker button {
+  border-radius: var(--radius-items);
+}
+.admin-app .chat-toast span {
+  color: var(--muted);
+}
+.admin-app :is(.chat-nav-link b, .chat-unread-nav) {
+  background: var(--color-fluent-blue);
+  color: var(--surface-solid-white);
+  border-radius: var(--radius-pills);
+}
+.admin-session .chat-nav-link {
+  min-height: 36px;
+  padding: 4px 8px;
+  border-radius: var(--radius-buttons);
+  color: var(--ink);
+}
+.admin-session .chat-nav-link:hover {
+  background: var(--soft);
+  color: var(--blue);
+}
 @media (max-width: 760px) {
-  body:has(.chat-page) .admin-topbar {
-    gap: 8px;
+  .chat-admin .chat-workspace {
+    border-radius: var(--radius-cards);
   }
-  body:has(.chat-page) .admin-brand {
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-  body:has(.chat-page) .admin-brand span,
-  body:has(.chat-page) .admin-topbar .chat-nav-label {
+}
+@media (max-width: 360px) {
+  .admin-topbar .chat-nav-label,
+  .admin-brand-label {
     display: none;
-  }
-  body:has(.chat-page) .admin-topbar button {
-    white-space: nowrap;
   }
 }
