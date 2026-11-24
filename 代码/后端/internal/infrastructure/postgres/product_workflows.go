@@ -11,6 +11,11 @@ import (
 	"qingye/backend/internal/infrastructure/security"
 )
 
+func lockProductNumber(ctx context.Context, tx pgx.Tx, prefix string) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "product-number:"+prefix)
+	return err
+}
+
 func nextProductCode(ctx context.Context, tx pgx.Tx, trade string) (string, error) {
 	sequence, prefix := "product_sale_code_seq", "QYCH"
 	if trade == "rent" {
@@ -18,7 +23,7 @@ func nextProductCode(ctx context.Context, tx pgx.Tx, trade string) (string, erro
 	}
 	// The indexed maximum also covers legacy imports performed after an empty-schema migration.
 	// The per-prefix lock makes sequence resynchronization safe across concurrent creators.
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", "product-number:"+prefix); err != nil {
+	if err := lockProductNumber(ctx, tx, prefix); err != nil {
 		return "", err
 	}
 	var maximum int64

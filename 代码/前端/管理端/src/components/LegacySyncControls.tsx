@@ -1,140 +1,73 @@
-import { Check, ChevronDown, X } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef } from "react";
+import { X } from "lucide-react";
 
-const modes = {
-  preview: "先预览，核对后发布",
-  automatic: "通过检查后自动发布",
-  paused: "暂停同步",
+export type SyncProgress = {
+  stage:
+    | "read_source"
+    | "verify_source"
+    | "compare"
+    | "prepare_media"
+    | "commit"
+    | "done";
+  completed: number;
+  total: number;
 };
-export type LegacySyncMode = keyof typeof modes;
-const options = Object.keys(modes) as LegacySyncMode[];
 
-export function LegacySyncModePicker({
-  value,
-  disabled,
-  onChange,
+const steps = {
+  read_source: { label: "读取旧站目录", unit: "页", from: 0, to: 22 },
+  verify_source: { label: "复核旧站目录", unit: "页", from: 22, to: 38 },
+  compare: { label: "比对商品差异", unit: "件", from: 38, to: 58 },
+  prepare_media: { label: "准备商品图集", unit: "组", from: 58, to: 92 },
+  commit: { label: "提交本批变更", unit: "", from: 95, to: 95 },
+  done: { label: "同步完成", unit: "", from: 100, to: 100 },
+} satisfies Record<
+  SyncProgress["stage"],
+  { label: string; unit: string; from: number; to: number }
+>;
+
+export function LegacySyncProgress({
+  progress,
+  running,
+  failed,
 }: {
-  value: LegacySyncMode;
-  disabled: boolean;
-  onChange: (mode: LegacySyncMode) => void;
+  progress: SyncProgress;
+  running: boolean;
+  failed: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapper = useRef<HTMLDivElement>(null);
-  const button = useRef<HTMLButtonElement>(null);
-  const menuItems = useRef<(HTMLButtonElement | null)[]>([]);
-  const first = useRef(0);
-  const id = useId();
-
-  useEffect(() => {
-    if (!open || disabled) return;
-    menuItems.current[first.current]?.focus();
-    function closeOutside(event: PointerEvent) {
-      if (
-        event.target instanceof Node &&
-        !wrapper.current?.contains(event.target)
-      )
-        setOpen(false);
-    }
-    document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
-  }, [open, disabled]);
-
-  function show(index: number) {
-    first.current = index;
-    setOpen(true);
-  }
-
-  function close() {
-    setOpen(false);
-    button.current?.focus();
-  }
-
-  function move(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      close();
-      return;
-    }
-    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const current = menuItems.current.indexOf(
-      document.activeElement as HTMLButtonElement,
-    );
-    const last = options.length - 1;
-    const next =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? last
-          : (current + options.length + (event.key === "ArrowUp" ? -1 : 1)) %
-            options.length;
-    menuItems.current[next]?.focus();
-  }
-
+  const step = steps[progress.stage];
+  const fraction =
+    progress.total > 0 ? Math.min(progress.completed / progress.total, 1) : 0;
+  const percent = Math.round(step.from + (step.to - step.from) * fraction);
+  const count =
+    progress.total > 0 && step.unit
+      ? progress.completed + " / " + progress.total + " " + step.unit
+      : "";
   return (
-    <div
-      className="legacy-sync-mode"
-      ref={wrapper}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-      }}
-    >
-      <span id={id + "-label"}>同步方式</span>
-      <button
-        type="button"
-        ref={button}
-        className="button-outline legacy-sync-mode-button"
-        aria-labelledby={id + "-label " + id + "-value"}
-        aria-haspopup="menu"
-        aria-expanded={open && !disabled}
-        aria-controls={open && !disabled ? id + "-menu" : undefined}
-        disabled={disabled}
-        onClick={() => (open ? setOpen(false) : show(options.indexOf(value)))}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault();
-            if (open) {
-              menuItems.current[
-                event.key === "ArrowUp" ? options.length - 1 : 0
-              ]?.focus();
-            } else {
-              show(event.key === "ArrowUp" ? options.length - 1 : 0);
-            }
-          }
-        }}
+    <div className="legacy-sync-progress">
+      <div className="legacy-sync-progress-caption">
+        <strong aria-live="polite">
+          {failed ? "中止于" + step.label : step.label}
+        </strong>
+        <span className="legacy-sync-numbers">
+          {count && <span>{count}</span>}
+          <b>{percent}%</b>
+        </span>
+      </div>
+      <div
+        className="legacy-sync-track"
+        role="progressbar"
+        aria-label="商品同步进度"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        aria-valuetext={[step.label, count, percent + "%"]
+          .filter(Boolean)
+          .join("，")}
+        data-running={running}
+        data-failed={failed}
       >
-        <span id={id + "-value"}>{modes[value]}</span>
-        <ChevronDown size={16} aria-hidden="true" />
-      </button>
-      {open && !disabled && (
-        <div
-          id={id + "-menu"}
-          className="legacy-sync-mode-menu"
-          role="menu"
-          aria-labelledby={id + "-label"}
-          onKeyDown={move}
-        >
-          {options.map((mode, index) => (
-            <button
-              key={mode}
-              ref={(node) => {
-                menuItems.current[index] = node;
-              }}
-              type="button"
-              role="menuitemradio"
-              tabIndex={-1}
-              aria-checked={value === mode}
-              onClick={() => {
-                close();
-                if (value !== mode) onChange(mode);
-              }}
-            >
-              {modes[mode]}
-              {value === mode && <Check size={16} aria-hidden="true" />}
-            </button>
-          ))}
-        </div>
-      )}
+        <span style={{ width: percent + "%" }} />
+      </div>
     </div>
   );
 }

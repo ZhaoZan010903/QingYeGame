@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,12 +20,13 @@ import (
 const syncProductColumns = `p.id,p.legacy_id,p.product_code,p.category_id,coalesce(p.legacy_category,''),
  p.title,p.description,p.trade_type,p.rental_category,p.attributes,p.price_amount::text,p.price_unit,p.rental_quotes,
  p.status,coalesce(p.approved_version=p.version,false),p.version,p.created_at,p.published_at,
- p.deleted_at IS NOT NULL OR p.purged_at IS NOT NULL,p.source='legacy',p.legacy_payload`
+ p.deleted_at IS NOT NULL OR p.purged_at IS NOT NULL,p.source='legacy',p.legacy_payload,
+ coalesce(p.legacy_sync_hidden_version=p.version,false)`
 
 func productDest(p *syncapp.Current) []any {
 	return []any{&p.ID, &p.LegacyID, &p.Code, &p.Category, &p.SourceCategory, &p.Title, &p.Description, &p.Trade,
 		&p.RentalCategory, &p.Attributes, &p.Amount, &p.Unit, &p.Quotes, &p.Status, &p.Approved,
-		&p.Version, &p.CreatedAt, &p.PublishedAt, &p.Deleted, &p.Legacy, &p.Baseline}
+		&p.Version, &p.CreatedAt, &p.PublishedAt, &p.Deleted, &p.Legacy, &p.Baseline, &p.SyncHidden}
 }
 
 func normalizeSyncSnapshot(p *syncapp.Product) {
@@ -44,6 +46,8 @@ func normalizeSyncSnapshot(p *syncapp.Product) {
 func equalSyncSnapshot(a, b syncapp.Product) bool {
 	normalizeSyncSnapshot(&a)
 	normalizeSyncSnapshot(&b)
+	// Version protects the marker. Historical snapshots predate that field.
+	a.SyncHidden, b.SyncHidden = false, false
 	left, first := json.Marshal(a)
 	right, second := json.Marshal(b)
 	return first == nil && second == nil && bytes.Equal(left, right)
@@ -109,6 +113,9 @@ func (s LegacySyncStore) LoadCatalog(ctx context.Context) (map[string]syncapp.Cu
 		}
 		p := products[legacyID]
 		p.Images = append(p.Images, mediaID)
+		if ready {
+			p.ReadyImages++
+		}
 		if source, parseErr := legacycatalog.CanonicalImageURL(original); ready && parseErr == nil {
 			p.ImagesByURL[source] = mediaID
 		}
@@ -118,15 +125,19 @@ func (s LegacySyncStore) LoadCatalog(ctx context.Context) (map[string]syncapp.Cu
 		return nil, nil, nil, err
 	}
 	codes := map[string]string{}
-	rows, err = tx.Query(ctx, `SELECT upper(product_code),id FROM products`)
+	rows, err = tx.Query(ctx, `SELECT upper(product_code),min(id),count(*) FROM products GROUP BY upper(product_code)`)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var code, id string
-		if err = rows.Scan(&code, &id); err != nil {
+		var count int
+		if err = rows.Scan(&code, &id, &count); err != nil {
 			return nil, nil, nil, err
+		}
+		if count > 1 {
+			id = "\x00" // No PostgreSQL text ID can match a duplicate.
 		}
 		codes[code] = id
 	}
@@ -165,9 +176,9 @@ func lockedSyncProduct(ctx context.Context, tx pgx.Tx, id string) (syncapp.Curre
 	return p, err
 }
 
-func syncItemsToApply(ctx context.Context, tx pgx.Tx, id string) ([]syncapp.Item, error) {
+func syncAppliedItems(ctx context.Context, tx pgx.Tx, id string) ([]syncapp.Item, error) {
 	rows, err := tx.Query(ctx, `SELECT `+legacyItemColumns+` FROM legacy_sync_items
- WHERE batch_id=$1 AND action IN ('create','update') AND after_state IS NOT NULL
+ WHERE batch_id=$1 AND action IN ('create','update','offline','restore') AND after_state IS NOT NULL
  ORDER BY after_state->>'id'`, id)
 	if err != nil {
 		return nil, err
@@ -211,7 +222,7 @@ func lockSyncImages(ctx context.Context, tx pgx.Tx, ids []string, requireReady b
 			return err
 		}
 		if verified != len(ids) {
-			return legacyConflict("有图片未就绪或已回收，请重新生成批次")
+			return legacyConflict("有图片未就绪或已回收，请重新同步")
 		}
 	}
 	return nil
@@ -246,9 +257,10 @@ func syncSetProduct(ctx context.Context, tx pgx.Tx, current, next syncapp.Produc
 	}
 	_, err := tx.Exec(ctx, `UPDATE products SET title=$2,description=$3,attributes=$4,
  price_amount=$5,price_unit=$6,rental_quotes=$7,status=$8,version=version+1,
- approved_version=CASE WHEN $9 THEN version+1 ELSE NULL END,published_at=$10,updated_at=clock_timestamp()
+ approved_version=CASE WHEN $9 THEN version+1 ELSE NULL END,published_at=$10,updated_at=clock_timestamp(),
+ legacy_sync_hidden_version=CASE WHEN $11 THEN version+1 ELSE NULL END
  WHERE id=$1`, next.ID, next.Title, next.Description, next.Attributes, next.Amount, next.Unit,
-		next.Quotes, next.Status, next.Approved, next.PublishedAt)
+		next.Quotes, next.Status, next.Approved, next.PublishedAt, next.SyncHidden)
 	return err
 }
 
@@ -259,12 +271,13 @@ func syncNewProduct(ctx context.Context, tx pgx.Tx, next syncapp.Product, price 
 		return err
 	}
 	if used {
-		return legacyConflict("商品编号或旧站 ID 已被使用")
+		return legacyConflict(fmt.Sprintf("商品 %s 的编号或旧站 ID 已被使用", next.Code))
 	}
 	_, err := tx.Exec(ctx, `INSERT INTO products(id,legacy_id,product_code,category_id,title,description,trade_type,
  rental_category,attributes,price_amount,price_unit,rental_quotes,status,source,version,approved_version,
  legacy_price,legacy_category,created_at,updated_at,published_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'published','legacy',1,1,$13,$14,$15,clock_timestamp(),$16)`,
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'published','legacy',1,1,
+ CASE WHEN $11='unknown' THEN NULL ELSE $13 END,$14,$15,clock_timestamp(),$16)`,
 		next.ID, next.LegacyID, next.Code, next.Category, next.Title, next.Description, next.Trade, next.RentalCategory,
 		next.Attributes, next.Amount, next.Unit, next.Quotes, price, next.SourceCategory, next.CreatedAt, next.PublishedAt)
 	if err != nil {
@@ -273,96 +286,102 @@ func syncNewProduct(ctx context.Context, tx pgx.Tx, next syncapp.Product, price 
 	return setSyncImages(ctx, tx, syncapp.Product{}, next)
 }
 
-func (s LegacySyncStore) ApplyBatch(ctx context.Context, id, actor string) error {
-	return s.applyBatch(ctx, id, actor, actor == "")
-}
-
-func (s LegacySyncStore) ApplyAutomaticBatch(ctx context.Context, id, actor string) error {
-	return s.applyBatch(ctx, id, actor, true)
-}
-
-func (s LegacySyncStore) applyBatch(ctx context.Context, id, actor string, automatic bool) error {
+func (s LegacySyncStore) CommitBatch(ctx context.Context, batch syncapp.Batch, items []syncapp.Item, actor string) (syncapp.Batch, error) {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
-		return err
+		return batch, err
 	}
 	defer tx.Rollback(ctx)
 	controls, err := lockLegacyControls(ctx, tx)
 	if err != nil {
-		return err
+		return batch, err
 	}
 	if actor != "" {
 		if err = legacyActor(ctx, tx, actor); err != nil {
-			return err
+			return batch, err
 		}
 	}
-	var batch syncapp.Batch
-	err = scanLegacyBatch(tx.QueryRow(ctx, `SELECT `+legacyBatchColumns+` FROM legacy_sync_batches WHERE id=$1 FOR UPDATE`, id), &batch)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return fault.New(fault.NotFound, "NOT_FOUND", "同步批次不存在")
+	var reserved syncapp.Batch
+	err = scanLegacyBatch(tx.QueryRow(ctx, `SELECT `+legacyBatchColumns+` FROM legacy_sync_batches WHERE id=$1 FOR UPDATE`, batch.ID), &reserved)
+	if err != nil {
+		return batch, err
 	}
-	if err != nil || batch.Status == "applied" {
-		return err
+	if reserved.Status != "running" || reserved.Progress.Stage != syncapp.Commit ||
+		(reserved.PlannedAt == nil) != (actor != "") {
+		return batch, syncapp.ErrLeaseLost
 	}
-	if controls.Mode == syncapp.Paused || (batch.Status != "ready" && batch.Status != "review") ||
-		(automatic && (controls.Mode != syncapp.Automatic || batch.Status != "ready" || actor == "" && batch.PlannedAt == nil)) {
-		return legacyConflict("同步已暂停，或该批次不能发布")
+	if actor == "" && !controls.ScheduleEnabled {
+		return batch, legacyConflict("提交前定时同步已暂停")
 	}
 	var now time.Time
-	var busy bool
-	if err = tx.QueryRow(ctx, `SELECT clock_timestamp(), EXISTS(SELECT 1 FROM legacy_sync_batches WHERE status='running')`).
-		Scan(&now, &busy); err != nil {
-		return err
+	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return batch, err
 	}
-	if busy || batch.FinishedAt == nil || now.Sub(*batch.FinishedAt) > 48*time.Hour {
-		return legacyConflict("有新批次正在准备，或此预览已经超过两天")
+	// Native and imported products share the existing allocator's prefix locks.
+	for _, prefix := range []string{"QYCH", "QYZH"} {
+		if slices.ContainsFunc(items, func(item syncapp.Item) bool {
+			return item.After != nil && item.Before == nil && strings.HasPrefix(item.After.Code, prefix)
+		}) {
+			if err = lockProductNumber(ctx, tx, prefix); err != nil {
+				return batch, err
+			}
+		}
 	}
-	items, err := syncItemsToApply(ctx, tx, id)
-	if err != nil {
-		return err
-	}
-	until := now.Add(7 * 24 * time.Hour)
-	for _, item := range items {
+	holdUntil := now.Add(7 * 24 * time.Hour)
+	written := 0
+	savedItems := slices.Clone(items)
+	slices.SortFunc(savedItems, func(a, b syncapp.Item) int {
+		if a.After == nil {
+			if b.After == nil {
+				return strings.Compare(a.LegacyID, b.LegacyID)
+			}
+			return 1
+		}
+		if b.After == nil {
+			return -1
+		}
+		return strings.Compare(a.After.ID, b.After.ID)
+	})
+	for i := range savedItems {
+		item := &savedItems[i]
+		if item.Blocking {
+			return batch, legacyConflict("本批商品校验未通过，请重新同步")
+		}
+		if item.After == nil {
+			continue
+		}
 		next := *item.After
 		var current syncapp.Current
 		if item.Before != nil {
 			current, err = lockedSyncProduct(ctx, tx, item.Before.ID)
 			if errors.Is(err, pgx.ErrNoRows) || err == nil &&
 				(current.Deleted || !current.Legacy || !equalSyncSnapshot(current.Product, *item.Before)) {
-				return legacyConflict(fmt.Sprintf("商品 %s 已变化，请生成新批次", item.Code))
+				return batch, legacyConflict(fmt.Sprintf("商品 %s 已被其他操作修改，请重新同步", item.Code))
 			}
 			if err != nil {
-				return err
+				return batch, err
 			}
 		}
-		var rule catalog.CategoryRules
-		err = tx.QueryRow(ctx, `SELECT enabled,trade_type,price_units,filter_config FROM categories WHERE id=$1 FOR SHARE`,
-			next.Category).Scan(&rule.Enabled, &rule.TradeType, &rule.PriceUnits, &rule.Filters)
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && (!rule.Enabled || rule.TradeType != "all" && rule.TradeType != next.Trade) {
-			return legacyConflict("商品分类已停用或修改，请生成新批次")
-		}
-		if err != nil {
-			return err
-		}
-		if item.Before == nil {
-			input := catalog.ProductInput{
-				CategoryID: next.Category, Title: next.Title, Description: next.Description, TradeType: next.Trade,
-				PriceUnit: next.Unit, PriceAmount: next.Amount, RentalQuotes: next.Quotes,
-				Attributes: next.Attributes, LegacyAttributes: true,
+		if next.Status == "published" || item.Action == "offline" {
+			rule, err := lockSyncCategory(ctx, tx, next)
+			if err != nil {
+				return batch, err
 			}
-			if err = catalog.ValidateInput(input, true, rule); err != nil {
-				return legacyConflict(fmt.Sprintf("商品 %s 不再符合分类规则，请重新生成批次", item.Code))
+			if next.Status == "published" && (item.Before == nil || !sameSyncQuote(current.Product, next)) {
+				if err = catalog.ValidateInput(next.Input(), true, rule); err != nil {
+					return batch, legacyConflict(fmt.Sprintf("商品 %s 不再符合分类规则，请重新同步", item.Code))
+				}
 			}
 		}
 		if next.Status == "published" && len(next.Images) == 0 {
-			return legacyConflict("上架商品需要至少一张已校验图片")
+			return batch, legacyConflict(fmt.Sprintf("商品 %s 需要至少一张已校验图片", item.Code))
 		}
 		if err = lockSyncImages(ctx, tx, next.Images, next.Status == "published"); err != nil {
-			return err
+			return batch, err
 		}
 		if item.Before != nil {
-			if err = syncHold(ctx, tx, id, current.Images, until); err != nil {
-				return err
+			if err = syncHold(ctx, tx, batch.ID, current.Images, holdUntil); err != nil {
+				return batch, err
 			}
 		}
 		if next.Status == "published" && next.PublishedAt == nil {
@@ -374,28 +393,60 @@ func (s LegacySyncStore) applyBatch(ctx context.Context, id, actor string, autom
 			err = syncSetProduct(ctx, tx, current.Product, next)
 		}
 		if err != nil {
-			return err
+			return batch, err
 		}
 		saved, err := lockedSyncProduct(ctx, tx, next.ID)
 		if err != nil {
-			return err
+			return batch, err
 		}
-		if saved.Status != next.Status {
-			return legacyConflict("商品图片未达到预期发布状态")
+		if saved.Status != next.Status || saved.Approved != next.Approved || saved.SyncHidden != next.SyncHidden {
+			return batch, legacyConflict(fmt.Sprintf("商品 %s 未达到预期发布状态", item.Code))
 		}
-		if _, err = tx.Exec(ctx, `UPDATE legacy_sync_items SET after_state=$3 WHERE batch_id=$1 AND legacy_id=$2`,
-			id, item.LegacyID, saved.Product); err != nil {
-			return err
+		item.After = &saved.Product
+		written++
+	}
+	if err = saveLegacyItems(ctx, tx, batch.ID, savedItems); err != nil {
+		return batch, err
+	}
+	var completedAt time.Time
+	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&completedAt); err != nil {
+		return batch, err
+	}
+	var until *time.Time
+	if written > 0 {
+		end := completedAt.Add(7 * 24 * time.Hour)
+		until = &end
+		if _, err = tx.Exec(ctx, `UPDATE legacy_sync_media_holds SET expires_at=$2 WHERE batch_id=$1`, batch.ID, end); err != nil {
+			return batch, err
 		}
 	}
-	if _, err = tx.Exec(ctx, `UPDATE legacy_sync_batches SET status='applied',applied_at=clock_timestamp(),
- rollback_until=$2,applied_by=nullif($3,'') WHERE id=$1`, id, until, actor); err != nil {
-		return err
+	var result syncapp.Batch
+	err = scanLegacyBatch(tx.QueryRow(ctx, `UPDATE legacy_sync_batches
+ SET status='applied',finished_at=$7,applied_at=$7,rollback_until=$2,applied_by=nullif($3,''),
+ source_updated_at=$4,source_count=$5,summary=$6,progress_stage='done',progress_completed=1,progress_total=1
+ WHERE id=$1 RETURNING `+legacyBatchColumns, batch.ID, until, actor, batch.SourceUpdated, batch.SourceCount, batch.Summary, completedAt), &result)
+	if err != nil {
+		return batch, err
 	}
-	if err = legacyAudit(ctx, tx, actor, "legacy.sync.apply", id, batch.Summary); err != nil {
-		return err
+	if err = legacyAudit(ctx, tx, actor, "legacy.sync.apply", batch.ID, batch.Summary); err != nil {
+		return batch, err
 	}
-	return tx.Commit(ctx)
+	return result, tx.Commit(ctx)
+}
+
+func lockSyncCategory(ctx context.Context, tx pgx.Tx, product syncapp.Product) (catalog.CategoryRules, error) {
+	var rule catalog.CategoryRules
+	err := tx.QueryRow(ctx, `SELECT enabled,trade_type,price_units,filter_config FROM categories WHERE id=$1 FOR SHARE`,
+		product.Category).Scan(&rule.Enabled, &rule.TradeType, &rule.PriceUnits, &rule.Filters)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && (!rule.Enabled || rule.TradeType != "all" && rule.TradeType != product.Trade) {
+		return rule, legacyConflict(fmt.Sprintf("商品 %s 的分类已停用或修改，请先核对分类", product.Code))
+	}
+	return rule, err
+}
+
+func sameSyncQuote(a, b syncapp.Product) bool {
+	return a.Unit == b.Unit && slices.Equal(a.Quotes, b.Quotes) &&
+		(a.Amount == nil && b.Amount == nil || a.Amount != nil && b.Amount != nil && *a.Amount == *b.Amount)
 }
 
 func (s LegacySyncStore) RollbackBatch(ctx context.Context, id, actor string) error {
@@ -423,11 +474,21 @@ func (s LegacySyncStore) RollbackBatch(ctx context.Context, id, actor string) er
 		return err
 	}
 	if batch.Status != "applied" || batch.RollbackUntil == nil || !batch.RollbackUntil.After(now) {
-		return legacyConflict("只有回滚期内已发布的批次可以回滚")
+		return legacyConflict("只有回滚期内且有实际变更的已完成批次可以回滚")
 	}
-	items, err := syncItemsToApply(ctx, tx, id)
+	var busy bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM legacy_sync_batches WHERE status='running' AND `+freshLegacyBatch+`)`).Scan(&busy); err != nil {
+		return err
+	}
+	if busy {
+		return legacyConflict("有同步任务正在执行，请完成后再回滚")
+	}
+	items, err := syncAppliedItems(ctx, tx, id)
 	if err != nil {
 		return err
+	}
+	if len(items) == 0 {
+		return legacyConflict("这一批没有商品变更")
 	}
 	for _, item := range items {
 		current, err := lockedSyncProduct(ctx, tx, item.After.ID)
@@ -442,8 +503,14 @@ func (s LegacySyncStore) RollbackBatch(ctx context.Context, id, actor string) er
 		if item.Before == nil {
 			// Retain the identity for existing favorites and conversations.
 			restore.Status, restore.Approved, restore.PublishedAt = "draft", false, nil
+			restore.SyncHidden = true
 		} else {
 			restore = *item.Before
+		}
+		if restore.Status == "published" {
+			if _, err = lockSyncCategory(ctx, tx, restore); err != nil {
+				return err
+			}
 		}
 		if err = lockSyncImages(ctx, tx, restore.Images, restore.Status == "published"); err != nil {
 			return err
@@ -451,13 +518,16 @@ func (s LegacySyncStore) RollbackBatch(ctx context.Context, id, actor string) er
 		if err = syncSetProduct(ctx, tx, current.Product, restore); err != nil {
 			return err
 		}
+		saved, err := lockedSyncProduct(ctx, tx, restore.ID)
+		if err != nil {
+			return err
+		}
+		if saved.Status != restore.Status || saved.Approved != restore.Approved {
+			return legacyConflict(fmt.Sprintf("商品 %s 未达到原有状态，本批次未回滚", item.Code))
+		}
 	}
 	if _, err = tx.Exec(ctx, `UPDATE legacy_sync_batches SET status='rolled_back',
  rolled_back_at=clock_timestamp(),rolled_back_by=$2 WHERE id=$1`, id, actor); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE legacy_sync_batches SET status='superseded',reason='已回滚，需重新对照旧站'
- WHERE status IN ('ready','review')`); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE legacy_sync_control SET mode='paused',version=version+1,updated_at=clock_timestamp()`); err != nil {

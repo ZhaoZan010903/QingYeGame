@@ -33,7 +33,6 @@ func run() error {
 	products := flags.String("products", "", "path to private legacy product JSON")
 	file := flags.String("file", "", "private seed-user JSON file; omitted reads stdin")
 	limit := flags.Int("limit", 0, "maximum pending media records to reconcile, 0 means all")
-	manualPreview := flags.Bool("manual-preview", false, "collect an unscheduled legacy catalog preview")
 	checkSource := flags.Bool("check-source", false, "read the full legacy catalog without connecting to the new site")
 	if len(os.Args) > 2 {
 		if err := flags.Parse(os.Args[2:]); err != nil {
@@ -43,12 +42,9 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if command == "legacy-sync" && *checkSource {
-		if *manualPreview {
-			return fmt.Errorf("--check-source cannot be combined with --manual-preview")
-		}
 		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		defer cancel()
-		source, err := legacyfeed.NewSaaS().Catalog(ctx)
+		source, err := legacyfeed.NewSaaS().Catalog(ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -76,14 +72,11 @@ func run() error {
 		if a.LegacySync == nil {
 			return fmt.Errorf("legacy catalog sync requires managed OSS image storage")
 		}
-		var planned *time.Time
-		if !*manualPreview {
-			noon := legacysync.ScheduledNoon(time.Now())
-			planned = &noon
-		}
-		batch, err := a.LegacySync.Run(ctx, planned)
+		batch, err := a.LegacySync.RunScheduled(ctx, legacysync.ScheduledNoon(time.Now()))
 		if batch.ID != "" {
 			fmt.Printf("legacy sync batch %s: %s\n", batch.ID, batch.Status)
+		} else if err == nil {
+			fmt.Println("legacy sync skipped: schedule paused, already run, or another batch active")
 		}
 		return err
 	case "seed-user":

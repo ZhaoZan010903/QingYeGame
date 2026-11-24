@@ -11,17 +11,22 @@ import (
 	"qingye/backend/internal/domain/legacycatalog"
 )
 
-const (
-	Preview   = "preview"
-	Automatic = "automatic"
-	Paused    = "paused"
+const MaxImageBytes = 16 << 20
 
-	MaxImageBytes = 16 << 20
+const (
+	ReadSource   = "read_source"
+	VerifySource = "verify_source"
+	Compare      = "compare"
+	PrepareMedia = "prepare_media"
+	Commit       = "commit"
+	Done         = "done"
 )
 
 var (
-	ErrBusy  = errors.New("商品同步正在运行")
-	ErrImage = errors.New("旧站图片无法读取或校验")
+	ErrBusy        = errors.New("商品同步正在运行")
+	ErrImage       = errors.New("旧站图片无法读取或校验")
+	ErrMediaBudget = errors.New("本批新图已达到下载上限，重试时会复用已校验的图片")
+	ErrLeaseLost   = errors.New("同步执行已中断，请重新发起")
 )
 
 type Record struct {
@@ -49,6 +54,15 @@ type Product struct {
 	CreatedAt      time.Time             `json:"created_at"`
 	PublishedAt    *time.Time            `json:"published_at"`
 	Images         []string              `json:"images"`
+	SyncHidden     bool                  `json:"sync_hidden,omitempty"`
+}
+
+func (p Product) Input() catalog.ProductInput {
+	return catalog.ProductInput{
+		CategoryID: p.Category, Title: p.Title, Description: p.Description, TradeType: p.Trade,
+		PriceUnit: p.Unit, PriceAmount: p.Amount, RentalQuotes: p.Quotes, RentalCategory: &p.RentalCategory,
+		Attributes: p.Attributes, LegacyAttributes: true,
+	}
 }
 
 type Current struct {
@@ -59,11 +73,15 @@ type Current struct {
 	LastApplied *Product
 	Ownership   Ownership
 	ImagesByURL map[string]string
+	ReadyImages int
+}
+
+func (c Current) hasReadyGallery() bool {
+	return len(c.Images) > 0 && len(c.Images) == c.ReadyImages
 }
 
 type Ownership struct {
 	Price      bool     `json:"price"`
-	Status     bool     `json:"status"`
 	Title      bool     `json:"title"`
 	Gallery    bool     `json:"gallery"`
 	Attributes []string `json:"attributes"`
@@ -76,6 +94,7 @@ type Item struct {
 	SourcePrice     string     `json:"source_price"`
 	SourceUpdatedAt *time.Time `json:"source_updated_at"`
 	Notices         []string   `json:"notices"`
+	Blocking        bool       `json:"blocking"`
 	Before          *Product   `json:"before,omitempty"`
 	After           *Product   `json:"after,omitempty"`
 	Ownership       Ownership  `json:"-"`
@@ -85,16 +104,21 @@ type Summary struct {
 	Created  int `json:"created"`
 	Updated  int `json:"updated"`
 	Removed  int `json:"removed"`
+	Restored int `json:"restored"`
 	Priced   int `json:"priced"`
 	Imaged   int `json:"imaged"`
 	Review   int `json:"review"`
 	Missing  int `json:"missing"`
-	BadImage int `json:"bad_image"`
+}
+
+type Progress struct {
+	Stage     string `json:"stage"`
+	Completed int    `json:"completed"`
+	Total     int    `json:"total"`
 }
 
 type Batch struct {
 	ID            string     `json:"id"`
-	Mode          string     `json:"-"`
 	PlannedAt     *time.Time `json:"planned_at"`
 	StartedAt     time.Time  `json:"started_at"`
 	SourceUpdated *time.Time `json:"source_updated_at"`
@@ -106,13 +130,13 @@ type Batch struct {
 	SourceCount   int        `json:"source_count"`
 	Summary       Summary    `json:"summary"`
 	Reason        string     `json:"reason"`
+	Progress      Progress   `json:"progress"`
 }
 
 type Controls struct {
-	Mode          string    `json:"mode"`
-	Version       int64     `json:"version"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	ActiveBatchID string    `json:"active_batch_id"`
+	ScheduleEnabled bool      `json:"schedule_enabled"`
+	Version         int64     `json:"version"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type Inventory struct {
@@ -121,7 +145,7 @@ type Inventory struct {
 }
 
 type Source interface {
-	Catalog(context.Context) (Inventory, error)
+	Catalog(context.Context, func(completed, total int) error) (Inventory, error)
 	Image(context.Context, string, io.Writer) (int64, error)
 }
 
@@ -132,12 +156,13 @@ type Asset struct {
 }
 
 type Store interface {
-	BeginBatch(context.Context, string, *time.Time) (Batch, bool, error)
-	BeginManualBatch(context.Context, string, string, int64) (Batch, bool, error)
-	FailBatch(context.Context, string, string) error
+	BeginScheduledBatch(context.Context, string, time.Time) (Batch, bool, error)
+	BeginManualBatch(context.Context, string, string) (Batch, bool, error)
+	ReportProgress(context.Context, string, Progress) error
+	Heartbeat(context.Context, string) error
 	LoadCatalog(context.Context) (map[string]Current, map[string]catalog.CategoryRules, map[string]string, error)
-	SavePreview(context.Context, Batch, []Item) error
-	ApplyAutomaticBatch(context.Context, string, string) error
+	CloseBatch(context.Context, Batch, []Item) (Batch, error)
+	CommitBatch(context.Context, Batch, []Item, string) (Batch, error)
 	FindAsset(context.Context, string, string, string) (Asset, bool, error)
 	ReserveAsset(context.Context, string, string, string, Asset) error
 	ReadyAsset(context.Context, string) error

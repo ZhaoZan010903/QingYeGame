@@ -1,32 +1,37 @@
-import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowDownToLine,
+  Clock3,
+  Pencil,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import {
   formatRentalAmount,
   rentalQuoteLabel,
   rentalUnitLabels,
 } from "../../../共享/rental-quotes";
 import type { RentalQuote } from "../../../共享/types";
-import { idempotentRequest, request } from "../lib/api";
+import { ApiError, createRequestId, request } from "../lib/api";
 import {
   LegacySyncConfirm,
-  LegacySyncModePicker,
+  LegacySyncProgress,
   type LegacySyncConfirmation,
-  type LegacySyncMode,
+  type SyncProgress,
 } from "./LegacySyncControls";
 
-type Controls = {
-  mode: LegacySyncMode;
-  version: number;
-  active_batch_id?: string;
-};
 type BatchStatus =
-  | "running"
-  | "ready"
-  | "review"
-  | "failed"
-  | "applied"
-  | "rolled_back"
-  | "superseded";
+  "running" | "blocked" | "failed" | "applied" | "rolled_back" | "superseded";
+type Summary = {
+  created: number;
+  updated: number;
+  removed: number;
+  restored: number;
+  review: number;
+  missing: number;
+};
 type Batch = {
   id: string;
   status: BatchStatus;
@@ -34,19 +39,15 @@ type Batch = {
   started_at: string;
   source_updated_at: string | null;
   finished_at: string | null;
-  applied_at: string | null;
-  rolled_back_at: string | null;
   rollback_until: string | null;
   source_count: number;
   reason: string;
-  summary: Partial<
-    Record<"created" | "updated" | "removed" | "review" | "imaged", number>
-  >;
+  summary: Summary;
+  progress: SyncProgress;
 };
 type Product = {
   title: string;
   category: string;
-  attributes: Record<string, unknown>;
   status: string;
   price: string | null;
   unit: string;
@@ -56,23 +57,32 @@ type Product = {
 type Change = {
   legacy_id: string;
   code: string;
-  action: "create" | "update" | "hold" | "missing";
-  source_price: string;
-  source_updated_at: string | null;
+  action: "create" | "update" | "restore" | "offline" | "hold" | "missing";
   before: Product | null;
   after: Product | null;
   images_changed: boolean;
+  attributes_changed: boolean;
+  description_changed: boolean;
   notices: string[];
+  blocking: boolean;
 };
+type Controls = { schedule_enabled: boolean; version: number };
+type BatchList = {
+  batches: Batch[];
+  latest_batch: Batch | null;
+  can_start: boolean;
+  controls: Controls;
+};
+type Filter = "create" | "update" | "restore" | "offline" | "issues";
+type Selection = { id: string; filter: Filter; pages: (string | null)[] };
 
 const states: Record<BatchStatus, string> = {
-  running: "读取中",
-  ready: "待发布",
-  review: "待核对",
+  running: "同步中",
+  blocked: "校验中止",
   failed: "同步失败",
-  applied: "已发布",
+  applied: "同步完成",
   rolled_back: "已回滚",
-  superseded: "已替换",
+  superseded: "已归档",
 };
 const productStates: Record<string, string> = {
   published: "已上架",
@@ -81,11 +91,18 @@ const productStates: Record<string, string> = {
   rented: "出租中",
   draft: "草稿",
 };
-const actions: Record<Change["action"], string> = {
+const groups = [
+  { key: "created", action: "create", label: "新增", icon: Plus },
+  { key: "updated", action: "update", label: "更新", icon: Pencil },
+  { key: "restored", action: "restore", label: "恢复上架", icon: RotateCcw },
+  { key: "removed", action: "offline", label: "下架", icon: ArrowDownToLine },
+] as const;
+const filterNames: Record<Filter, string> = {
   create: "新增商品",
   update: "更新商品",
-  hold: "待人工核对",
-  missing: "旧站列表缺失",
+  restore: "恢复上架",
+  offline: "下架商品",
+  issues: "商品提示",
 };
 const dateFormat = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
@@ -96,223 +113,307 @@ const date = (value?: string | null) =>
   value ? dateFormat.format(new Date(value)) : "—";
 const batchesURL = "/admin/legacy-sync/batches";
 const batchURL = (id: string) => batchesURL + "/" + encodeURIComponent(id);
-const query = (cursor: string | null) =>
-  "?" + new URLSearchParams({ limit: "15", ...(cursor ? { cursor } : {}) });
+const query = (cursor: string | null, filter?: Filter) =>
+  "?" +
+  new URLSearchParams({
+    limit: "15",
+    ...(cursor ? { cursor } : {}),
+    ...(filter ? { filter } : {}),
+  });
+const changed = (batch: Batch) =>
+  groups.some(({ key }) => batch.summary[key] > 0);
+const applied = (batch: Batch) =>
+  batch.status === "applied" || batch.status === "rolled_back";
+const stopped = (batch: Batch) =>
+  batch.status === "blocked" || batch.status === "failed";
 
-function ProductSummary({ product }: { product: Product | null }) {
-  if (!product) return <span>—</span>;
+function price(product: Product) {
+  if (product.quotes?.length) {
+    return product.quotes
+      .map((quote) =>
+        [
+          rentalQuoteLabel(quote),
+          "¥" + formatRentalAmount(quote.amount),
+          quote.unit === "period" && quote.billing_unit
+            ? rentalUnitLabels[quote.billing_unit]
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      )
+      .join(" · ");
+  }
+  if (product.price == null) return "联系客服";
+  const unit = rentalUnitLabels[product.unit as keyof typeof rentalUnitLabels];
+  return "¥" + formatRentalAmount(product.price) + (unit ? " / " + unit : "");
+}
+
+function ChangeRow({ item }: { item: Change }) {
+  const { before, after } = item;
+  const fields =
+    before && after
+      ? [
+          {
+            label: "状态",
+            before: productStates[before.status] ?? before.status,
+            after: productStates[after.status] ?? after.status,
+          },
+          { label: "标题", before: before.title, after: after.title },
+          { label: "报价", before: price(before), after: price(after) },
+        ].filter((field) => field.before !== field.after)
+      : [];
   return (
-    <>
-      <strong>{product.title}</strong>
-      <span>
-        {productStates[product.status] ?? product.status} · {product.category} ·{" "}
-        {product.image_count} 张图
-      </span>
-      {typeof product.attributes?.server === "string" && (
-        <span>{product.attributes.server}</span>
-      )}
-      {product.quotes?.length ? (
-        product.quotes.map((quote, index) => (
-          <span key={index}>
-            {rentalQuoteLabel(quote)} ¥{formatRentalAmount(quote.amount)}
-            {quote.unit === "period" && quote.billing_unit
-              ? "/" + rentalUnitLabels[quote.billing_unit]
-              : ""}
+    <li className="legacy-sync-change">
+      <div>
+        <b className="legacy-sync-numbers">{item.code || item.legacy_id}</b>
+        {item.blocking && (
+          <span className="legacy-sync-status" data-status="blocked">
+            需处理
           </span>
-        ))
-      ) : (
-        <span>
-          {product.price == null
-            ? "报价待确认"
-            : "¥" +
-              formatRentalAmount(product.price) +
-              (product.unit in rentalUnitLabels
-                ? "/" +
-                  rentalUnitLabels[
-                    product.unit as keyof typeof rentalUnitLabels
-                  ]
-                : "")}
-        </span>
+        )}
+      </div>
+      {!before && after && (
+        <p>
+          {after.title} · {price(after)} · {after.image_count} 张图
+        </p>
       )}
-    </>
+      {fields.map((field) => (
+        <div className="legacy-sync-field" key={field.label}>
+          <span>{field.label}</span>
+          <del>{field.before}</del>
+          <span aria-label="变更为">→</span>
+          <b>{field.after}</b>
+        </div>
+      ))}
+      {before && after && item.images_changed && (
+        <p>
+          图集{" "}
+          {before.image_count === after.image_count
+            ? "已更换 · " + after.image_count + " 张"
+            : before.image_count + " 张 → " + after.image_count + " 张"}
+        </p>
+      )}
+      {item.attributes_changed && <p>商品属性已更新</p>}
+      {item.description_changed && <p>商品说明已更新</p>}
+      {item.notices.map((notice) => (
+        <p className="legacy-sync-note" key={notice}>
+          {notice}
+        </p>
+      ))}
+    </li>
+  );
+}
+
+function Pagination({
+  page,
+  next,
+  disabled,
+  turn,
+}: {
+  page: number;
+  next: string | null;
+  disabled: boolean;
+  turn: (next: boolean) => void;
+}) {
+  if (page === 1 && !next) return null;
+  return (
+    <div className="legacy-sync-pagination" aria-label="分页">
+      <button
+        className="button-outline"
+        disabled={disabled || page === 1}
+        onClick={() => turn(false)}
+      >
+        上一页
+      </button>
+      <span className="legacy-sync-numbers">第 {page} 页</span>
+      <button
+        className="button-outline"
+        disabled={disabled || !next}
+        onClick={() => turn(true)}
+      >
+        下一页
+      </button>
+    </div>
   );
 }
 
 export function AdminLegacySync() {
-  const [revision, setRevision] = useState(0);
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [controls, setControls] = useState<Controls | null>(null);
-  const [canStart, setCanStart] = useState(false);
-  const [confirmation, setConfirmation] =
-    useState<LegacySyncConfirmation | null>(null);
+  const [data, setData] = useState<BatchList | null>(null);
   const [batchPages, setBatchPages] = useState<(string | null)[]>([null]);
   const [nextBatch, setNextBatch] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState("");
+  const [selection, setSelection] = useState<Selection | null>(null);
   const [detail, setDetail] = useState<{
     batch: Batch;
     items: Change[];
+    next: string | null;
   } | null>(null);
-  const [detailPages, setDetailPages] = useState<(string | null)[]>([null]);
-  const [nextDetail, setNextDetail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [listError, setListError] = useState("");
   const [detailError, setDetailError] = useState("");
-  const [feedback, setFeedback] = useState<{
-    error: boolean;
-    text: string;
-  } | null>(null);
-
+  const [listError, setListError] = useState("");
+  const [revision, setRevision] = useState(0);
+  const [pending, setPending] = useState<
+    "start" | "schedule" | "rollback" | null
+  >(null);
+  const [confirmation, setConfirmation] = useState<LegacySyncConfirmation>();
+  const [feedback, setFeedback] = useState<{ error: boolean; text: string }>();
+  const work = useRef(false);
+  const requestID = useRef("");
+  const detailHeading = useRef<HTMLHeadingElement>(null);
+  const latest = data?.latest_batch ?? null;
+  const running = latest?.status === "running";
   const batchCursor = batchPages.at(-1) ?? null;
-  const detailCursor = detailPages.at(-1) ?? null;
-  const activeRun = controls?.active_batch_id ?? "";
-  useEffect(() => {
-    const abort = new AbortController();
-    setLoading(true);
-    setListError("");
-    request(batchesURL + query(batchCursor), "GET", undefined, abort.signal)
-      .then((response) => {
-        if (abort.signal.aborted) return;
-        setBatches(response.data.batches ?? []);
-        setControls(response.data.controls);
-        setCanStart(response.data.can_start === true);
-        setNextBatch(response.next_cursor ?? null);
-      })
-      .catch((error: Error) => {
-        if (!abort.signal.aborted) setListError(error.message);
-      })
-      .finally(() => {
-        if (!abort.signal.aborted) setLoading(false);
-      });
-    return () => abort.abort();
-  }, [revision, batchCursor]);
+  const detailCursor = selection?.pages.at(-1) ?? null;
+  const selectionID = selection?.id;
+  const selectionFilter = selection?.filter;
+  const detailStatus = latest?.id === selectionID ? latest?.status : undefined;
 
   useEffect(() => {
-    if (!selectedId) return;
     const abort = new AbortController();
-    setDetailLoading(true);
+    let timer: number;
+    const refresh = async () => {
+      let interval = 6_000;
+      try {
+        const response = await request(
+          batchesURL + query(batchCursor),
+          "GET",
+          undefined,
+          abort.signal,
+        );
+        if (abort.signal.aborted) return;
+        const value: BatchList = response.data;
+        setData(value);
+        setNextBatch(response.next_cursor ?? null);
+        setListError("");
+        if (value.latest_batch?.id === requestID.current) {
+          requestID.current = "";
+          setFeedback(undefined);
+        }
+        if (value.latest_batch?.status === "running") interval = 1_600;
+      } catch (error) {
+        if (abort.signal.aborted) return;
+        setListError(
+          error instanceof Error ? error.message : "批次记录暂不可用",
+        );
+        interval = 2_500;
+      } finally {
+        if (!abort.signal.aborted) timer = window.setTimeout(refresh, interval);
+      }
+    };
+    void refresh();
+    return () => {
+      abort.abort();
+      window.clearTimeout(timer);
+    };
+  }, [batchCursor, revision]);
+
+  useEffect(() => {
+    if (!selectionID || !selectionFilter) return;
+    const abort = new AbortController();
+    setDetail(null);
     setDetailError("");
     request(
-      batchURL(selectedId) + query(detailCursor),
+      batchURL(selectionID) + query(detailCursor, selectionFilter),
       "GET",
       undefined,
       abort.signal,
     )
       .then((response) => {
-        if (abort.signal.aborted) return;
-        setDetail(response.data);
-        setNextDetail(response.next_cursor ?? null);
+        if (!abort.signal.aborted)
+          setDetail({ ...response.data, next: response.next_cursor ?? null });
       })
-      .catch((error: Error) => {
-        if (!abort.signal.aborted) setDetailError(error.message);
-      })
-      .finally(() => {
-        if (!abort.signal.aborted) setDetailLoading(false);
+      .catch((error) => {
+        if (!abort.signal.aborted)
+          setDetailError(
+            error instanceof Error ? error.message : "商品变更暂不可用",
+          );
       });
     return () => abort.abort();
-  }, [selectedId, detailCursor, revision, activeRun]);
+  }, [selectionID, selectionFilter, detailCursor, detailStatus, revision]);
 
   useEffect(() => {
-    if (!activeRun || loading || detailLoading) return;
-    const timer = window.setTimeout(
-      () => setRevision((value) => value + 1),
-      3000,
-    );
-    return () => window.clearTimeout(timer);
-  }, [activeRun, loading, detailLoading, revision]);
-
-  function openBatch(id: string) {
-    if (selectedId === id) return;
-    setSelectedId(id);
-    setDetail(null);
-    setNextDetail(null);
-    setDetailPages([null]);
-  }
-
-  async function startSync(version: number) {
-    setPending(true);
-    setFeedback(null);
-    try {
-      const response = await idempotentRequest(batchesURL, {
-        confirm: true,
-        expected_version: version,
-      });
-      const batch: Batch = response.data;
-      setBatchPages([null]);
-      openBatch(batch.id);
-      if (batch.status === "running") {
-        setControls(
-          (current) => current && { ...current, active_batch_id: batch.id },
-        );
-      }
-    } catch (error) {
-      setFeedback({
-        error: true,
-        text:
-          error instanceof Error
-            ? error.message
-            : "同步请求失败，请刷新记录后重试。",
-      });
-    } finally {
-      setPending(false);
-      setRevision((value) => value + 1);
-    }
-  }
-
-  function confirmStart() {
-    if (!controls) return;
-    setConfirmation({
-      title: "立即同步旧站商品",
-      message:
-        controls?.mode === "automatic"
-          ? "读取旧站商品并校验图片。批次通过检查后直接发布，发现异常时会请你核对。"
-          : "读取旧站商品并校验图片。完成后可以查看差异，再发布本批次。",
-      confirmLabel: "开始同步",
-      confirm: () => void startSync(controls.version),
-    });
-  }
+    if (!selectionID) return;
+    const heading = detailHeading.current;
+    heading?.focus({ preventScroll: true });
+    heading?.scrollIntoView({ block: "nearest" });
+  }, [selectionID, selectionFilter]);
 
   async function mutate(
-    path: string,
-    method: string,
-    body: unknown,
-    message: string,
+    kind: NonNullable<typeof pending>,
+    task: () => Promise<void>,
   ) {
-    setPending(true);
-    setFeedback(null);
+    if (work.current) return;
+    work.current = true;
+    setPending(kind);
+    setFeedback(undefined);
     try {
-      await request(path, method, body);
-      setFeedback({ error: false, text: message });
+      await task();
     } catch (error) {
+      if (kind === "start") {
+        if (
+          error instanceof ApiError &&
+          error.status >= 400 &&
+          error.status < 500
+        ) {
+          requestID.current = "";
+        } else {
+          setFeedback({
+            error: true,
+            text: "暂未收到本次启动结果。可再次点击，系统会核对同一条请求。",
+          });
+          return;
+        }
+      }
       setFeedback({
         error: true,
-        text:
-          error instanceof Error
-            ? error.message
-            : "操作失败，请刷新后核对批次状态。",
+        text: error instanceof Error ? error.message : "操作未完成，请稍后重试",
       });
     } finally {
-      setPending(false);
+      work.current = false;
+      setPending(null);
       setRevision((value) => value + 1);
     }
   }
 
-  function changeMode(mode: LegacySyncMode) {
-    if (!controls || pending || controls.mode === mode) return;
-    const save = () =>
-      void mutate(
-        "/admin/legacy-sync/mode",
-        "PUT",
-        { mode, expected_version: controls.version },
-        "已保存同步方式。",
+  const start = () =>
+    mutate("start", async () => {
+      requestID.current ||= createRequestId();
+      const response = await request(batchesURL, "POST", {
+        request_id: requestID.current,
+      });
+      requestID.current = "";
+      setSelection(null);
+      setBatchPages([null]);
+      setData(
+        (previous) => previous && { ...previous, latest_batch: response.data },
       );
-    if (mode === "automatic") {
+    });
+
+  function choose(batch: Batch, filter: Filter) {
+    setSelection((previous) =>
+      previous?.id === batch.id && previous.filter === filter
+        ? null
+        : { id: batch.id, filter, pages: [null] },
+    );
+  }
+
+  function changeSchedule(controls: Controls) {
+    const enabled = !controls.schedule_enabled;
+    const save = () =>
+      void mutate("schedule", async () => {
+        await request("/admin/legacy-sync/schedule", "PUT", {
+          enabled,
+          expected_version: controls.version,
+        });
+        setFeedback({
+          error: false,
+          text: enabled ? "已允许服务器定时执行。" : "已暂停定时同步。",
+        });
+      });
+    if (enabled) {
       setConfirmation({
-        title: "开启自动发布",
+        title: "恢复定时同步",
         message:
-          "手动同步和定时同步通过检查后会直接更新商品。发现异常的批次需要人工核对。",
-        confirmLabel: "开启自动发布",
+          "服务器定时器触发后，系统会自动同步旧站商品。通常在北京时间每天 12:00 执行。",
+        confirmLabel: "恢复定时同步",
         confirm: save,
       });
     } else {
@@ -320,327 +421,342 @@ export function AdminLegacySync() {
     }
   }
 
-  function changeBatch(operation: "apply" | "rollback", batch: Batch) {
-    const message =
-      operation === "apply"
-        ? "确认发布该批次的可同步商品？新增 " +
-          (batch.summary.created ?? 0) +
-          " 件，更新 " +
-          (batch.summary.updated ?? 0) +
-          " 件。"
-        : "确认整批回滚？本批新增商品会转为草稿，旧站定时同步也会暂停。";
-    if (pending) return;
-    const title = operation === "apply" ? "发布本批次" : "回滚本批次";
+  function rollback(batch: Batch) {
     setConfirmation({
-      title,
-      message,
-      confirmLabel: title,
+      title: "回滚这一批同步？",
+      message:
+        "系统会核对商品和图片是否有后续修改。核对通过后整批恢复，并暂停定时同步。",
+      confirmLabel: "确认回滚",
       confirm: () =>
-        void mutate(
-          batchURL(batch.id) + "/" + operation,
-          "POST",
-          { confirm: true },
-          operation === "apply" ? "批次已发布。" : "批次已回滚，同步已暂停。",
-        ),
+        void mutate("rollback", async () => {
+          await request(batchURL(batch.id) + "/rollback", "POST", {
+            confirm: true,
+          });
+          setFeedback({ error: false, text: "已整批回滚，定时同步已暂停。" });
+        }),
     });
   }
 
-  const active = detail?.batch;
   return (
-    <section>
-      <div className="admin-heading">
+    <section className="admin-workspace legacy-sync-page">
+      <header className="admin-heading">
         <div>
-          <h1>旧站同步</h1>
-          <p>读取旧站商品、核对变更。批次发布后可在 7 天内回滚。</p>
+          <h1>旧站商品同步</h1>
+          <p>根据旧站目录核对商品，新上架和下架的商品随同一批次生效。</p>
         </div>
-        <div className="heading-actions legacy-sync-heading-actions">
-          <button
-            type="button"
-            className="button-outline"
-            onClick={() => setRevision((value) => value + 1)}
-            disabled={loading || pending}
-          >
-            刷新记录
-          </button>
-          <button
-            type="button"
-            className="button-white"
-            onClick={confirmStart}
-            disabled={
-              !canStart || pending || !!activeRun || controls?.mode === "paused"
-            }
-          >
-            <RefreshCw
-              size={15}
-              aria-hidden="true"
-              className={activeRun ? "legacy-sync-spin" : undefined}
-            />
-            {activeRun ? "同步中…" : "立即同步"}
-          </button>
-        </div>
-      </div>
-      <div className="panel products-panel">
-        <div className="admin-toolbar legacy-sync-toolbar">
-          <LegacySyncModePicker
-            value={controls?.mode ?? "preview"}
-            onChange={changeMode}
-            disabled={!controls || pending}
-          />
-          <span className="muted">
-            旧站列表缺失的商品保留当前状态，等待人工核对。
-          </span>
-        </div>
-        {activeRun && (
-          <div className="legacy-sync-running">
-            <span role="status">
-              正在读取旧站并校验图集，完成后将自动刷新。
-            </span>
-            {selectedId !== activeRun && (
-              <button
-                type="button"
-                className="button-outline"
-                onClick={() => openBatch(activeRun)}
-              >
-                查看运行批次
-              </button>
-            )}
-          </div>
-        )}
-        {controls && !canStart && (
-          <p className="muted">当前环境暂不能启动手动同步。</p>
-        )}
-        {listError && (
-          <p className="form-error" role="alert">
-            {listError}
-          </p>
-        )}
-        {feedback && (
-          <p
-            className={feedback.error ? "form-error" : undefined}
-            role={feedback.error ? "alert" : "status"}
-          >
-            {feedback.text}
-          </p>
-        )}
-        {loading && batches.length === 0 ? (
-          <p role="status">正在读取同步记录…</p>
-        ) : (
-          <div className="admin-table-wrap" aria-busy={loading}>
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>批次</th>
-                  <th>计划时刻</th>
-                  <th>开始 / 完成</th>
-                  <th>生效时间</th>
-                  <th>变更</th>
-                  <th>状态</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batches.length === 0 && (
-                  <tr>
-                    <td colSpan={7}>还没有同步批次。</td>
-                  </tr>
-                )}
-                {batches.map((batch) => (
-                  <tr key={batch.id}>
-                    <td className="mono" title={batch.id}>
-                      {batch.id.slice(0, 8)}
-                    </td>
-                    <td>
-                      {batch.planned_at ? date(batch.planned_at) : "手动同步"}
-                    </td>
-                    <td>
-                      {date(batch.started_at)}
-                      <span>{date(batch.finished_at)}</span>
-                    </td>
-                    <td>
-                      {date(batch.applied_at)}
-                      {batch.rolled_back_at && (
-                        <span>回滚 {date(batch.rolled_back_at)}</span>
-                      )}
-                    </td>
-                    <td>
-                      新增 {batch.summary.created ?? 0} · 更新{" "}
-                      {batch.summary.updated ?? 0}
-                      <span>待核对 {batch.summary.review ?? 0}</span>
-                    </td>
-                    <td>
-                      <span className="status-pill">
-                        {states[batch.status]}
-                      </span>
-                    </td>
-                    <td>
-                      <button
-                        className="button-outline"
-                        disabled={pending}
-                        onClick={() => openBatch(batch.id)}
-                      >
-                        查看明细
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <div className="admin-actions">
-          <button
-            className="button-outline"
-            disabled={batchPages.length < 2 || loading || pending}
-            onClick={() => setBatchPages((pages) => pages.slice(0, -1))}
-          >
-            上一页
-          </button>
-          <button
-            className="button-outline"
-            disabled={!nextBatch || loading || pending}
-            onClick={() => setBatchPages((pages) => [...pages, nextBatch])}
-          >
-            下一页
-          </button>
-        </div>
-      </div>
-      {selectedId && (
-        <div
-          className="panel products-panel legacy-sync-detail"
-          aria-label="批次明细"
+        <button
+          type="button"
+          className="button-white legacy-sync-start"
+          disabled={!data?.can_start || running || pending !== null}
+          onClick={() => void start()}
         >
-          <div className="admin-toolbar">
-            <div>
-              <h2>
-                批次 <span className="mono">{selectedId.slice(0, 8)}</span>
-              </h2>
-              {active && (
-                <p>
-                  旧站读到 {active.source_count} 件 · 源数据最新时间{" "}
-                  {date(active.source_updated_at)}
-                </p>
-              )}
-              {active?.reason && <p role="status">{active.reason}</p>}
-            </div>
-            {active && (
-              <div className="admin-actions">
-                {(active.status === "ready" || active.status === "review") &&
-                  controls?.mode !== "paused" && (
-                    <button
-                      className="button-white"
-                      disabled={
-                        pending || detailLoading || !controls || !!activeRun
-                      }
-                      onClick={() => changeBatch("apply", active)}
-                    >
-                      发布本批次
-                    </button>
-                  )}
-                {active.status === "applied" &&
-                  active.rollback_until &&
-                  new Date(active.rollback_until).getTime() > Date.now() && (
-                    <button
-                      className="button-outline"
-                      disabled={pending || detailLoading}
-                      onClick={() => changeBatch("rollback", active)}
-                    >
-                      回滚本批次
-                    </button>
-                  )}
-              </div>
-            )}
-          </div>
-          {active?.rollback_until && active.status === "applied" && (
-            <p>可回滚至 {date(active.rollback_until)}。</p>
-          )}
-          {detailError && (
-            <p className="form-error" role="alert">
-              {detailError}
-            </p>
-          )}
-          {detailLoading && !detail ? (
-            <p role="status">正在读取变更…</p>
-          ) : (
-            detail && (
-              <>
-                <div className="admin-table-wrap" aria-busy={detailLoading}>
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>商品</th>
-                        <th>同步前</th>
-                        <th>同步后</th>
-                        <th>核对事项</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detail.items.length === 0 && (
-                        <tr>
-                          <td colSpan={4}>本次暂无商品差异。</td>
-                        </tr>
-                      )}
-                      {detail.items.map((item) => (
-                        <tr key={item.legacy_id}>
-                          <td>
-                            <strong className="mono">{item.code}</strong>
-                            <span>{actions[item.action]}</span>
-                          </td>
-                          <td>
-                            <ProductSummary product={item.before} />
-                          </td>
-                          <td>
-                            <ProductSummary product={item.after} />
-                            {item.images_changed && <span>图集有变更</span>}
-                          </td>
-                          <td>
-                            {item.source_price && (
-                              <span>旧站原报价数值 {item.source_price}</span>
-                            )}
-                            {item.notices.map((notice) => (
-                              <span key={notice}>{notice}</span>
-                            ))}
-                            {item.source_updated_at && (
-                              <span>
-                                旧站更新 {date(item.source_updated_at)}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="admin-actions">
-                  <button
-                    className="button-outline"
-                    disabled={detailPages.length < 2 || pending}
-                    onClick={() =>
-                      setDetailPages((pages) => pages.slice(0, -1))
-                    }
-                  >
-                    上一页
-                  </button>
-                  <button
-                    className="button-outline"
-                    disabled={!nextDetail || pending}
-                    onClick={() =>
-                      setDetailPages((pages) => [...pages, nextDetail])
-                    }
-                  >
-                    下一页
-                  </button>
-                </div>
-              </>
-            )
-          )}
-        </div>
-      )}
+          <RefreshCw
+            size={16}
+            aria-hidden="true"
+            className={running || pending === "start" ? "legacy-sync-spin" : ""}
+          />
+          {running ? "正在同步" : pending === "start" ? "正在启动" : "立即同步"}
+        </button>
+      </header>
+
       {confirmation && (
         <LegacySyncConfirm
           confirmation={confirmation}
-          onClose={() => setConfirmation(null)}
+          onClose={() => setConfirmation(undefined)}
         />
       )}
+      {feedback && (
+        <p
+          className={feedback.error ? "form-error" : "legacy-sync-note"}
+          role="status"
+        >
+          {feedback.text}
+        </p>
+      )}
+      {listError && (
+        <p className="form-error" role="status">
+          {data ? "进度暂未刷新，正在重连。" : listError + " 正在重试。"}
+        </p>
+      )}
+
+      <section className="legacy-sync-panel" aria-label="同步状态">
+        <div className="legacy-sync-status-head">
+          <div>
+            <span>{running ? "当前任务" : "最近一次同步"}</span>
+            <h2>
+              {latest
+                ? applied(latest) &&
+                  latest.status === "applied" &&
+                  !changed(latest)
+                  ? "商品已是最新"
+                  : states[latest.status]
+                : data
+                  ? "暂无同步记录"
+                  : "正在读取状态"}
+            </h2>
+          </div>
+          {latest && (
+            <div className="legacy-sync-run-info">
+              <span>{latest.planned_at ? "定时触发" : "手动触发"}</span>
+              <time dateTime={latest.finished_at ?? latest.started_at}>
+                {date(latest.finished_at ?? latest.started_at)}
+              </time>
+            </div>
+          )}
+        </div>
+        {latest &&
+          (running || stopped(latest) || latest.status === "applied") && (
+            <LegacySyncProgress
+              progress={latest.progress}
+              running={running}
+              failed={stopped(latest)}
+            />
+          )}
+        {latest?.reason && (
+          <p
+            className={
+              stopped(latest) ? "legacy-sync-stop" : "legacy-sync-note"
+            }
+            role={stopped(latest) ? "status" : undefined}
+          >
+            {latest.reason}
+            {stopped(latest) && "。本批商品变更未生效。"}
+          </p>
+        )}
+        {latest && applied(latest) && (
+          <div className="legacy-sync-totals">
+            {groups.map(({ key, action, label, icon: Icon }) => (
+              <button
+                type="button"
+                key={key}
+                disabled={!latest.summary[key]}
+                aria-pressed={
+                  selectionID === latest.id && selectionFilter === action
+                }
+                onClick={() => choose(latest, action)}
+              >
+                <span>
+                  <Icon size={15} aria-hidden="true" />
+                  {label}
+                </span>
+                <b className="legacy-sync-numbers">
+                  {latest.summary[key] ?? 0}
+                </b>
+              </button>
+            ))}
+          </div>
+        )}
+        {latest && applied(latest) && latest.source_count > 0 && (
+          <p className="legacy-sync-note">
+            读取旧站 {latest.source_count} 件商品
+            {latest.source_updated_at &&
+              " · 旧站最新更新 " + date(latest.source_updated_at)}
+          </p>
+        )}
+        {latest && latest.summary.review > 0 && (
+          <button
+            type="button"
+            className="button-outline legacy-sync-issues"
+            aria-pressed={
+              selectionID === latest.id && selectionFilter === "issues"
+            }
+            onClick={() => choose(latest, "issues")}
+          >
+            {latest.summary.review} 条商品提示
+          </button>
+        )}
+        {data && !data.can_start && (
+          <p className="legacy-sync-note">当前环境未启用商品同步服务。</p>
+        )}
+      </section>
+
+      {selection && (
+        <section
+          className="legacy-sync-panel legacy-sync-detail"
+          aria-labelledby="legacy-sync-detail-heading"
+        >
+          <div className="legacy-sync-status-head">
+            <div>
+              <h2
+                id="legacy-sync-detail-heading"
+                ref={detailHeading}
+                tabIndex={-1}
+              >
+                {filterNames[selection.filter]}
+              </h2>
+              {detail && (
+                <span>
+                  {date(detail.batch.started_at)} ·{" "}
+                  {states[detail.batch.status]}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="button-outline legacy-sync-close"
+              aria-label="收起商品变更"
+              onClick={() => setSelection(null)}
+            >
+              <X size={17} aria-hidden="true" />
+            </button>
+          </div>
+          {detailError ? (
+            <p className="form-error">{detailError}</p>
+          ) : !detail ? (
+            <p className="legacy-sync-note" role="status">
+              正在读取商品变更…
+            </p>
+          ) : detail.items.length > 0 ? (
+            <ul className="legacy-sync-changes">
+              {detail.items.map((item) => (
+                <ChangeRow item={item} key={item.legacy_id} />
+              ))}
+            </ul>
+          ) : (
+            <p className="legacy-sync-note">这一批没有此类变更。</p>
+          )}
+          <Pagination
+            page={selection.pages.length}
+            next={detail?.next ?? null}
+            disabled={!detail}
+            turn={(forward) =>
+              setSelection({
+                ...selection,
+                pages:
+                  forward && detail?.next
+                    ? [...selection.pages, detail.next]
+                    : selection.pages.slice(0, -1),
+              })
+            }
+          />
+        </section>
+      )}
+
+      {data && (
+        <section
+          className="legacy-sync-panel legacy-sync-schedule"
+          aria-label="定时同步"
+        >
+          <Clock3 size={19} aria-hidden="true" />
+          <div>
+            <h2>定时同步</h2>
+            <p>服务器定时器 · 每天 12:00（北京时间）</p>
+          </div>
+          <span
+            className="legacy-sync-status"
+            data-status={
+              data.controls.schedule_enabled ? "applied" : "superseded"
+            }
+          >
+            {data.controls.schedule_enabled ? "已允许执行" : "已暂停"}
+          </span>
+          <button
+            type="button"
+            className="button-outline"
+            disabled={pending !== null || !data.can_start}
+            onClick={() => changeSchedule(data.controls)}
+          >
+            {data.controls.schedule_enabled ? "暂停定时" : "恢复定时"}
+          </button>
+        </section>
+      )}
+
+      <section
+        className="legacy-sync-panel"
+        aria-labelledby="legacy-sync-history"
+      >
+        <div className="legacy-sync-status-head">
+          <h2 id="legacy-sync-history">同步记录</h2>
+          <span>北京时间</span>
+        </div>
+        {data?.batches.length ? (
+          <ul className="legacy-sync-history">
+            {data.batches.map((batch) => (
+              <li key={batch.id}>
+                <div className="legacy-sync-record">
+                  <b>
+                    <time dateTime={batch.started_at}>
+                      {date(batch.started_at)}
+                    </time>
+                  </b>
+                  <span>
+                    {batch.planned_at ? "定时" : "手动"}
+                    {batch.source_count > 0 &&
+                      " · 旧站 " + batch.source_count + " 件"}
+                  </span>
+                </div>
+                <span className="legacy-sync-status" data-status={batch.status}>
+                  {states[batch.status]}
+                </span>
+                <div className="legacy-sync-history-actions">
+                  {applied(batch) &&
+                    groups
+                      .filter(({ key }) => batch.summary[key] > 0)
+                      .map(({ key, action, label }) => (
+                        <button
+                          type="button"
+                          className="button-outline"
+                          key={key}
+                          aria-pressed={
+                            selectionID === batch.id &&
+                            selectionFilter === action
+                          }
+                          onClick={() => choose(batch, action)}
+                        >
+                          {label} {batch.summary[key]}
+                        </button>
+                      ))}
+                  {batch.summary.review > 0 && (
+                    <button
+                      type="button"
+                      className="button-outline"
+                      aria-pressed={
+                        selectionID === batch.id && selectionFilter === "issues"
+                      }
+                      onClick={() => choose(batch, "issues")}
+                    >
+                      提示 {batch.summary.review}
+                    </button>
+                  )}
+                  {batch.status === "applied" &&
+                    changed(batch) &&
+                    batch.rollback_until &&
+                    Date.parse(batch.rollback_until) > Date.now() && (
+                      <button
+                        type="button"
+                        className="button-outline"
+                        disabled={running || pending !== null}
+                        title={"可回滚至 " + date(batch.rollback_until)}
+                        onClick={() => rollback(batch)}
+                      >
+                        回滚
+                      </button>
+                    )}
+                </div>
+                {batch.reason && (
+                  <p className="legacy-sync-note">{batch.reason}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="legacy-sync-note">
+            {data ? "暂无同步记录。" : "正在读取同步记录…"}
+          </p>
+        )}
+        <Pagination
+          page={batchPages.length}
+          next={nextBatch}
+          disabled={!data}
+          turn={(forward) =>
+            setBatchPages(
+              forward && nextBatch
+                ? [...batchPages, nextBatch]
+                : batchPages.slice(0, -1),
+            )
+          }
+        />
+      </section>
     </section>
   );
 }

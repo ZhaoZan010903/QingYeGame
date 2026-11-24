@@ -19,15 +19,14 @@ type ManualRunner struct {
 	gate    sync.Mutex
 	jobs    sync.WaitGroup
 	closed  bool
-	active  string
 }
 
 func NewManualRunner(ctx context.Context, service *Service) *ManualRunner {
 	return &ManualRunner{ctx: ctx, service: service}
 }
 
-func (r *ManualRunner) Start(actor, id string, version int64) (Batch, error) {
-	if !manualBatchID.MatchString(id) || version < 1 {
+func (r *ManualRunner) Start(actor, id string) (Batch, error) {
+	if !manualBatchID.MatchString(id) {
 		return Batch{}, fault.New(fault.Invalid, "INVALID_REQUEST", "同步请求标识无效，请刷新后重试")
 	}
 	r.gate.Lock()
@@ -35,25 +34,16 @@ func (r *ManualRunner) Start(actor, id string, version int64) (Batch, error) {
 	if r.closed || r.ctx.Err() != nil {
 		return Batch{}, fault.New(fault.Unavailable, "LEGACY_SYNC_UNAVAILABLE", "同步服务正在关闭，请稍后重试")
 	}
-	if r.active != "" && r.active != id {
-		return Batch{}, ErrBusy
-	}
 	// Committing the reservation does not depend on the browser staying connected.
 	reserve, closeReserve := context.WithTimeout(context.WithoutCancel(r.ctx), 5*time.Second)
 	defer closeReserve()
-	batch, started, err := r.service.Store.BeginManualBatch(reserve, id, actor, version)
+	batch, started, err := r.service.Store.BeginManualBatch(reserve, id, actor)
 	if err != nil || !started {
 		return batch, err
 	}
-	r.active = batch.ID
 	r.jobs.Add(1)
 	go func() {
 		defer r.jobs.Done()
-		defer func() {
-			r.gate.Lock()
-			r.active = ""
-			r.gate.Unlock()
-		}()
 		task, cancel := context.WithTimeout(r.ctx, runTimeout)
 		defer cancel()
 		if _, err := r.service.complete(task, batch, actor); err != nil {
@@ -61,12 +51,6 @@ func (r *ManualRunner) Start(actor, id string, version int64) (Batch, error) {
 		}
 	}()
 	return batch, nil
-}
-
-func (r *ManualRunner) ActiveBatchID() string {
-	r.gate.Lock()
-	defer r.gate.Unlock()
-	return r.active
 }
 
 func (r *ManualRunner) Wait() {

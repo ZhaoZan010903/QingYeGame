@@ -17,78 +17,117 @@
   line-height: 1.6;
 }
 
-.legacy-sync-heading-actions,
-.legacy-sync-toolbar,
-.legacy-sync-running {
-  flex-wrap: wrap;
-}
-.legacy-sync-mode {
-  position: relative;
+.legacy-sync-page {
   display: grid;
-  gap: 5px;
-  width: min(100%, 242px);
+  gap: 16px;
+}
+.legacy-sync-page > .admin-heading {
+  margin-bottom: 0;
+}
+.legacy-sync-page > .admin-heading p {
+  margin-top: 4px;
+}
+.legacy-sync-start {
+  flex-shrink: 0;
+}
+.legacy-sync-panel {
+  min-width: 0;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.legacy-sync-panel h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 650;
+}
+.legacy-sync-status-head,
+.legacy-sync-progress-caption,
+.legacy-sync-schedule,
+.legacy-sync-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px 16px;
+}
+.legacy-sync-status-head,
+.legacy-sync-progress-caption {
+  justify-content: space-between;
+}
+.legacy-sync-status-head {
+  margin-bottom: 8px;
+}
+.legacy-sync-status-head span,
+.legacy-sync-run-info,
+.legacy-sync-schedule p,
+.legacy-sync-note,
+.legacy-sync-record span {
+  color: var(--muted);
   font-size: 12px;
+}
+.legacy-sync-run-info {
+  display: grid;
+  text-align: right;
+}
+.legacy-sync-numbers {
+  font-family: "JetBrains Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.legacy-sync-progress {
+  margin: 16px 0;
+}
+.legacy-sync-progress-caption {
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.legacy-sync-progress-caption strong {
+  font-weight: 600;
+}
+.legacy-sync-progress-caption .legacy-sync-numbers {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   color: var(--muted);
 }
-.legacy-sync-mode .legacy-sync-mode-button {
-  width: 100%;
-  justify-content: space-between;
-  text-align: left;
+.legacy-sync-progress-caption b {
+  min-width: 4ch;
+  color: var(--blue);
+  text-align: right;
 }
-.legacy-sync-mode-button svg {
-  flex: none;
+.legacy-sync-track {
+  height: 7px;
+  background: var(--soft);
+  border-radius: 999px;
+  overflow: hidden;
 }
-.legacy-sync-mode-button[aria-expanded="true"] svg {
-  transform: rotate(180deg);
+.legacy-sync-track > span {
+  position: relative;
+  display: block;
+  height: 100%;
+  overflow: hidden;
+  background: var(--blue);
+  border-radius: inherit;
+  transition: width 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-.legacy-sync-mode-menu {
+.legacy-sync-track[data-failed="true"] > span {
+  background: #a65a32;
+}
+/* StyleKit Progress Bar uses a light sweep over the filled portion of the track. */
+.legacy-sync-track[data-running="true"] > span::after {
   position: absolute;
-  z-index: 5;
-  inset: calc(100% + 6px) 0 auto;
-  display: grid;
-  gap: 2px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: #fff;
-  box-shadow: 0 12px 32px #17274420;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, #fff5, transparent);
+  content: "";
+  animation: legacy-sync-sweep 2.4s linear infinite;
 }
-.legacy-sync-mode-menu button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 39px;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink);
-  font-size: 13px;
-  text-align: left;
-}
-.legacy-sync-mode-menu
-  button:is(:hover, :focus-visible, [aria-checked="true"]) {
-  color: var(--blue);
-  background: var(--soft);
-}
-.legacy-sync-mode-menu button:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: -2px;
-}
-.legacy-sync-running {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  border-radius: 8px;
-  background: var(--soft);
-  color: var(--blue);
-}
-.legacy-sync-detail {
-  margin-top: 20px;
+@keyframes legacy-sync-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
 }
 .legacy-sync-spin {
   animation: legacy-sync-spin 1.2s linear infinite;
@@ -98,19 +137,198 @@
     transform: rotate(360deg);
   }
 }
+.legacy-sync-stop {
+  margin: 10px 0 0;
+  color: #934524;
+  font-size: 13px;
+}
+.legacy-sync-note {
+  margin: 8px 0 0;
+}
+.legacy-sync-issues {
+  margin-top: 12px;
+}
+.legacy-sync-totals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+.legacy-sync-totals button {
+  display: grid;
+  gap: 4px;
+  min-height: 65px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8f9fc;
+  color: var(--ink);
+  text-align: left;
+}
+.legacy-sync-totals button:not(:disabled):is(:hover, [aria-pressed="true"]) {
+  border-color: #bfcbf5;
+  background: var(--soft);
+}
+.legacy-sync-totals button:disabled {
+  cursor: default;
+}
+.legacy-sync-totals button > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.legacy-sync-totals button > b {
+  font-size: 20px;
+  line-height: 1.2;
+}
+.legacy-sync-schedule {
+  flex-wrap: wrap;
+}
+.legacy-sync-schedule > svg {
+  color: var(--blue);
+}
+.legacy-sync-schedule > div {
+  flex: 1;
+}
+.legacy-sync-schedule h2 {
+  font-size: 15px;
+}
+.legacy-sync-schedule p {
+  margin: 0;
+}
+.legacy-sync-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #edf0f5;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.legacy-sync-status[data-status="applied"],
+.legacy-sync-status[data-status="running"] {
+  background: var(--soft);
+  color: var(--blue);
+}
+.legacy-sync-status:is([data-status="blocked"], [data-status="failed"]) {
+  background: #fff2e9;
+  color: #934524;
+}
+.legacy-sync-close {
+  min-width: 36px;
+  padding: 7px;
+  justify-content: center;
+}
+.legacy-sync-history,
+.legacy-sync-changes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.legacy-sync-history > li {
+  display: grid;
+  grid-template-columns: minmax(145px, 0.8fr) auto minmax(0, 2fr);
+  align-items: center;
+  justify-items: start;
+  gap: 6px 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.legacy-sync-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  justify-self: end;
+  gap: 6px;
+}
+.legacy-sync-history-actions .button-outline {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.legacy-sync-history-actions [aria-pressed="true"],
+.legacy-sync-issues[aria-pressed="true"] {
+  background: var(--soft);
+  color: var(--blue);
+}
+.legacy-sync-history > li > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.legacy-sync-record {
+  display: grid;
+  gap: 1px;
+  font-size: 13px;
+}
+.legacy-sync-change {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.legacy-sync-change > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.legacy-sync-change p {
+  margin: 4px 0 0;
+}
+.legacy-sync-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin-top: 4px;
+}
+.legacy-sync-field del,
+.legacy-sync-field span {
+  color: var(--muted);
+}
+.legacy-sync-pagination {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.legacy-sync-detail h2 {
+  scroll-margin-top: 96px;
+}
 @media (prefers-reduced-motion: reduce) {
-  .legacy-sync-spin {
+  .legacy-sync-spin,
+  .legacy-sync-track[data-running="true"] > span::after {
     animation: none;
+  }
+  .legacy-sync-track > span {
+    transition: none;
   }
 }
 @media (max-width: 600px) {
-  .legacy-sync-heading-actions {
+  .legacy-sync-page > .admin-heading {
+    align-items: stretch;
+    gap: 12px;
+  }
+  .legacy-sync-panel {
+    padding: 15px 14px;
+  }
+  .legacy-sync-start {
     width: 100%;
   }
-  .legacy-sync-heading-actions > button {
-    flex: 1;
+  .legacy-sync-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .legacy-sync-history > li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .legacy-sync-history-actions {
+    grid-column: 1 / -1;
+    justify-self: start;
+    justify-content: flex-start;
   }
 }
+
 .editor-section-title {
   font-size: 19px;
   margin-bottom: 22px;

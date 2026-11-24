@@ -3,7 +3,6 @@ package legacysync
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"maps"
 	"regexp"
 	"slices"
@@ -134,6 +133,11 @@ func (i *Item) hold(notice string) {
 	i.Notices = append(i.Notices, notice)
 }
 
+func (i *Item) block(reason string) {
+	i.hold(reason)
+	i.Blocking = true
+}
+
 func recordImages(r Record) ([]string, error) {
 	if len(r.Content) > 1<<20 {
 		return nil, ErrImage
@@ -170,15 +174,8 @@ func mergeSourceAttributes(after *Product, old *Current, record, baseline legacy
 	original := legacycatalog.LegacyAttributes(baseline)
 	keys := []string{}
 	for key, value := range legacycatalog.LegacyAttributes(record) {
-		if old != nil {
-			before := old.Attributes[key]
-			if old.LastApplied == nil && before != nil && !equalJSON(before, original[key]) {
-				continue
-			}
-			if old.LastApplied != nil && (!slices.Contains(old.Ownership.Attributes, key) ||
-				!equalJSON(before, old.LastApplied.Attributes[key])) {
-				continue
-			}
+		if !sourceOwnsAttribute(old, key, original[key]) {
+			continue
 		}
 		keys = append(keys, key)
 		switch v := value.(type) {
@@ -196,8 +193,78 @@ func mergeSourceAttributes(after *Product, old *Current, record, baseline legacy
 	return keys
 }
 
+func sourceOwnsAttribute(old *Current, key string, original any) bool {
+	if old == nil || old.SyncHidden && old.Status == "draft" {
+		return true
+	}
+	if prev := old.LastApplied; prev != nil {
+		return slices.Contains(old.Ownership.Attributes, key) && equalJSON(old.Attributes[key], prev.Attributes[key])
+	}
+	return old.Attributes[key] == nil || equalJSON(old.Attributes[key], original)
+}
+
+func sourceOwnership(old *Current, baseline legacycatalog.LegacyRecord) Ownership {
+	if old.SyncHidden && old.Status == "draft" {
+		// A rolled-back insertion is still the same source-owned product.
+		return Ownership{Price: true, Title: true, Gallery: true}
+	}
+	if prev := old.LastApplied; prev != nil {
+		return Ownership{
+			Price:   old.Ownership.Price && samePrice(old.Product, *prev),
+			Title:   old.Ownership.Title && old.Title == prev.Title,
+			Gallery: old.Ownership.Gallery && slices.Equal(old.Images, prev.Images),
+		}
+	}
+	return Ownership{
+		Price: (old.Trade == "sale" && old.Unit == "account" && old.Amount != nil &&
+			amountKey(old.Amount) == rawAmount(baseline.Price.String())) ||
+			(old.Amount == nil && old.Unit == "unknown" && len(old.Quotes) == 0),
+		Title:   old.Title == strings.TrimSpace(baseline.Title),
+		Gallery: galleryMatchesImport(old, baseline),
+	}
+}
+
+func visibilityChange(item Item, old *Current, status string) Item {
+	var baseline legacycatalog.LegacyRecord
+	_ = json.Unmarshal(old.Baseline, &baseline)
+	item.Ownership = sourceOwnership(old, baseline)
+	// The current source record can be absent. Retain the last set of trusted
+	// source keys except fields manually changed before this status update.
+	if old.LastApplied != nil {
+		for _, key := range old.Ownership.Attributes {
+			if sourceOwnsAttribute(old, key, nil) {
+				item.Ownership.Attributes = append(item.Ownership.Attributes, key)
+			}
+		}
+	} else {
+		for key, original := range legacycatalog.LegacyAttributes(baseline) {
+			if sourceOwnsAttribute(old, key, original) {
+				item.Ownership.Attributes = append(item.Ownership.Attributes, key)
+			}
+		}
+		slices.Sort(item.Ownership.Attributes)
+	}
+	next := old.Product
+	next.Status, next.Approved, next.SyncHidden = status, false, true
+	item.Before, item.After = &old.Product, &next
+	if old.Status == "published" && old.Approved {
+		item.Action = "offline"
+	} else {
+		item.Action = "update"
+	}
+	return item
+}
+
+func planMissing(old *Current) Item {
+	return visibilityChange(Item{
+		LegacyID: old.LegacyID, Code: old.Code,
+		Notices: []string{"两次完整读取均未找到该商品，按旧站目录下架"},
+	}, old, "offline")
+}
+
 func planRecord(r Record, old *Current, rules map[string]catalog.CategoryRules, codeCollision bool, now time.Time) (Item, []string) {
-	item := Item{Action: "update", LegacyID: r.ID, Code: strings.TrimSpace(r.Code),
+	code := strings.ToUpper(strings.TrimSpace(r.Code))
+	item := Item{LegacyID: r.ID, Code: code,
 		SourcePrice: r.Price.String(), SourceUpdatedAt: TimePointer(r.Updated), Notices: []string{}}
 	if old != nil {
 		item.Before = &old.Product
@@ -206,23 +273,47 @@ func planRecord(r Record, old *Current, rules map[string]catalog.CategoryRules, 
 	if len(item.SourcePrice) > 40 {
 		item.SourcePrice = ""
 	}
-	if !legacycatalog.ValidSourceID(r.ID) || !productCode.MatchString(item.Code) || codeCollision {
-		item.hold("商品编号缺失或冲突，核对商品映射")
+	if !legacycatalog.ValidSourceID(r.ID) || !productCode.MatchString(code) || codeCollision ||
+		(old != nil && (!old.Legacy || !strings.EqualFold(code, old.Code))) {
+		if old == nil && !productCode.MatchString(code) {
+			item.Code = ""
+		}
+		item.block("商品编号或旧站 ID 无法唯一匹配，请核对商品映射")
 		return item, nil
 	}
 	category, rental, known := categoryFor(strings.TrimSpace(r.Category))
 	status := sourceStatus(r)
 	if !known || status == "" || (category.Trade == "sale" && status == "rented") {
-		item.hold("旧站分类或状态需要核对")
+		item.block("旧站分类或状态无法识别")
+		return item, nil
+	}
+	if old != nil {
+		if old.Trade != category.Trade || (old.SourceCategory != "" && old.SourceCategory != category.Name) {
+			item.block("新旧站交易分类不一致，请核对商品映射")
+			return item, nil
+		}
+		if old.Deleted || !(old.Status == "published" && old.Approved || old.SyncHidden) {
+			if status == "published" {
+				item.hold("已保留新站人工下架、回收或审核状态")
+			}
+			return item, nil
+		}
+		if status != "published" {
+			if old.Status == status || old.Status == "draft" || !rules[old.Category].Enabled {
+				return item, nil
+			}
+			return visibilityChange(item, old, status), nil
+		}
+	} else if status != "published" {
 		return item, nil
 	}
 	title := strings.TrimSpace(r.Title)
 	if r.Created.After(now.Add(time.Hour)) || r.Updated.After(now.Add(time.Hour)) {
-		item.hold("旧站商品时间异常")
+		item.block("旧站商品时间异常")
 		return item, nil
 	}
 	if title == "" || utf8.RuneCountInString(title) > 1000 || strings.ContainsRune(title, 0) {
-		item.hold("旧站标题缺失或格式异常")
+		item.block("旧站标题缺失或格式异常")
 		return item, nil
 	}
 	quote, unit := explicitQuote(r, category.Trade)
@@ -230,14 +321,6 @@ func planRecord(r Record, old *Current, rules map[string]catalog.CategoryRules, 
 	var baseline legacycatalog.LegacyRecord
 	if old == nil {
 		item.Action = "create"
-		if status != "published" {
-			item.hold("旧站商品目前不可展示")
-			return item, nil
-		}
-		if quote == nil {
-			item.hold("旧价或租期不明确，补全后再上架")
-			return item, nil
-		}
 		after = Product{
 			ID: legacycatalog.DeterministicID("legacy-product:" + r.ID), LegacyID: r.ID, Code: item.Code,
 			Category: category.ID, SourceCategory: category.Name, Trade: category.Trade,
@@ -248,40 +331,24 @@ func planRecord(r Record, old *Current, rules map[string]catalog.CategoryRules, 
 		if after.CreatedAt.IsZero() {
 			after.CreatedAt = now.UTC().Truncate(time.Microsecond)
 		}
-		item.Ownership = Ownership{Price: true, Status: true, Title: true, Gallery: true}
+		item.Ownership = Ownership{Price: true, Title: true, Gallery: true}
+		if quote == nil {
+			item.Notices = append(item.Notices, "旧站报价未确认，前台显示联系客服")
+		}
 	} else {
-		if old.Deleted || !old.Legacy || old.Trade != category.Trade ||
-			(old.SourceCategory != "" && old.SourceCategory != category.Name) {
-			item.hold("商品已回收或交易分类已变化，核对后再处理")
-			return item, nil
-		}
-		if old.Status != "published" && old.Status != "offline" && old.Status != "sold" && old.Status != "rented" {
-			item.hold("商品正在新站编辑或审核")
-			return item, nil
-		}
 		after = old.Product
+		item.Action = "update"
+		if old.SyncHidden {
+			item.Action = "restore"
+			after.Status, after.Approved, after.SyncHidden = "published", true, false
+		}
 		after.Attributes = maps.Clone(old.Attributes)
 		if after.Attributes == nil {
 			after.Attributes = map[string]any{}
 		}
 		_ = json.Unmarshal(old.Baseline, &baseline)
 		priceChanged := rawAmount(baseline.Price.String()) != rawAmount(r.Price.String())
-		if old.LastApplied != nil {
-			item.Ownership = Ownership{
-				Price:   old.Ownership.Price && samePrice(old.Product, *old.LastApplied),
-				Status:  old.Ownership.Status && old.Status == old.LastApplied.Status && old.Approved == old.LastApplied.Approved,
-				Title:   old.Ownership.Title && old.Title == old.LastApplied.Title,
-				Gallery: old.Ownership.Gallery && slices.Equal(old.Images, old.LastApplied.Images),
-			}
-		} else {
-			item.Ownership = Ownership{
-				Price: (old.Trade == "sale" && old.Unit == "account" && old.Amount != nil &&
-					amountKey(old.Amount) == rawAmount(baseline.Price.String())) ||
-					(old.Amount == nil && old.Unit == "unknown" && len(old.Quotes) == 0),
-				Title:   old.Title == strings.TrimSpace(baseline.Title),
-				Gallery: galleryMatchesImport(old, baseline),
-			}
-		}
+		item.Ownership = sourceOwnership(old, baseline)
 		if item.Ownership.Title {
 			after.Title = title
 			if after.Description == "" || after.Description == old.Title {
@@ -299,37 +366,26 @@ func planRecord(r Record, old *Current, rules map[string]catalog.CategoryRules, 
 				item.Notices = append(item.Notices, "旧站报价有变化，已保留新站人工报价")
 			}
 		}
-		switch {
-		case old.Status == "published" && status != "published":
-			after.Status, after.Approved, item.Ownership.Status = status, false, true
-		case item.Ownership.Status && status != old.Status:
-			after.Status, after.Approved = status, status == "published"
-		}
 	}
 	if item.Ownership.Price && quote != nil && after.Trade == "rent" {
 		after.Quotes = []catalog.RentalQuote{{Unit: unit, Amount: *quote}}
 	}
 	item.Ownership.Attributes = mergeSourceAttributes(&after, old, r.LegacyRecord, baseline)
 	categoryRules, ok := rules[after.Category]
-	input := catalog.ProductInput{
-		CategoryID: after.Category, Title: after.Title, TradeType: after.Trade,
-		PriceUnit: after.Unit, PriceAmount: after.Amount, Attributes: after.Attributes,
-		Description: after.Description, RentalQuotes: after.Quotes, LegacyAttributes: true,
-		RentalCategory: &after.RentalCategory,
-	}
-	if !ok || !categoryRules.Enabled {
-		item.hold("新站对应分类不可用")
+	input := after.Input()
+	if !ok || !categoryRules.Enabled || categoryRules.TradeType != "all" && categoryRules.TradeType != after.Trade {
+		item.block("新站对应分类不可用或交易类型不一致")
 		return item, nil
 	}
 	if old == nil {
 		if err := catalog.ValidateInput(input, true, categoryRules); err != nil {
-			item.hold("需要补齐新站商品格式：" + err.Error())
+			item.block("需要补齐新站商品格式：" + err.Error())
 			return item, nil
 		}
 	} else {
 		input.PreviousAttributes = old.Attributes
 		if err := catalog.ValidateBasicInput(input, true); err != nil {
-			item.hold("需要核对已有商品资料：" + err.Error())
+			item.block("需要核对已有商品资料：" + err.Error())
 			return item, nil
 		}
 		if !samePrice(old.Product, after) {
@@ -340,17 +396,21 @@ func planRecord(r Record, old *Current, rules map[string]catalog.CategoryRules, 
 		}
 	}
 	item.After = &after
-	if status != "published" {
-		// An explicit visibility change is independent of a CDN failure.
+	if old != nil && !item.Ownership.Gallery {
+		if !old.hasReadyGallery() {
+			item.block("现有图集不完整，请先修复新站图片")
+		} else if !galleryMatchesImport(old, r.LegacyRecord) {
+			item.Notices = append(item.Notices, "已保留新站人工维护的图集")
+		}
 		return item, nil
 	}
 	urls, err := recordImages(r)
 	if err != nil || len(urls) == 0 {
-		item.hold("旧站图片清单缺失或来源异常")
-		return item, nil
-	}
-	if old != nil && !item.Ownership.Gallery {
-		item.Notices = append(item.Notices, "新站图集已人工调整，保留现有顺序和图片")
+		if old != nil && old.hasReadyGallery() {
+			item.Notices = append(item.Notices, "旧站图片清单异常，已保留新站的完整图集")
+		} else {
+			item.block("缺少有效的图片清单，无法上架")
+		}
 		return item, nil
 	}
 	return item, urls
@@ -365,44 +425,24 @@ func summarize(items []Item) Summary {
 			out.Imaged++
 		case "update":
 			out.Updated++
-			if item.Before != nil && item.After != nil {
-				if item.Before.Status == "published" && item.After.Status != "published" {
-					out.Removed++
-				}
-				if !samePrice(*item.Before, *item.After) {
-					out.Priced++
-				}
-				if !slices.Equal(item.Before.Images, item.After.Images) {
-					out.Imaged++
-				}
-			}
+		case "restore":
+			out.Restored++
+		case "offline":
+			out.Removed++
 		case "missing":
 			out.Missing++
 		}
 		if len(item.Notices) > 0 {
 			out.Review++
 		}
-		for _, notice := range item.Notices {
-			if strings.Contains(notice, "图片清单") || strings.Contains(notice, "图片读取或校验") {
-				out.BadImage++
-				break
+		if item.Before != nil && item.After != nil {
+			if !samePrice(*item.Before, *item.After) {
+				out.Priced++
+			}
+			if !slices.Equal(item.Before.Images, item.After.Images) {
+				out.Imaged++
 			}
 		}
 	}
 	return out
-}
-
-func reviewReason(summary Summary, existing int) string {
-	switch {
-	case summary.Missing >= max(12, (existing+9)/10):
-		return fmt.Sprintf("本批有 %d 件在旧站列表中缺失，请先确认目录范围", summary.Missing)
-	case summary.Removed >= max(5, (existing+19)/20):
-		return "本批集中出现下架或成交，请核对后发布"
-	case summary.Priced >= max(8, (existing+9)/10):
-		return "本批集中出现报价变化，请核对后发布"
-	case summary.BadImage >= 5:
-		return "本批多件商品图集异常，请核对后发布"
-	default:
-		return ""
-	}
 }

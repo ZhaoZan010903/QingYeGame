@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func (transport testTransport) RoundTrip(req *http.Request) (*http.Response, err
 }
 
 func TestCatalogRejectsPaginationChanges(t *testing.T) {
-	for _, scenario := range []string{"完整目录", "缺一条", "编号重复", "首屏变化"} {
+	for _, scenario := range []string{"完整目录", "缺一条", "编号重复", "首屏变化", "首屏状态变化"} {
 		t.Run(scenario, func(t *testing.T) {
 			hits := 0
 			source := SaaS{client: &http.Client{Transport: testTransport(func(request *http.Request) (*http.Response, error) {
@@ -51,13 +52,20 @@ func TestCatalogRejectsPaginationChanges(t *testing.T) {
 				if scenario == "首屏变化" && hits == 3 {
 					list[0].ID = "legacy-replaced"
 				}
+				if scenario == "首屏状态变化" && hits == 3 {
+					list[0].Status = "已售出"
+				}
 				data, err := json.Marshal(map[string]any{"status": 0, "count": count, "list": list})
 				if err != nil {
 					t.Fatal(err)
 				}
 				return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(data))}, nil
 			})}}
-			inventory, err := source.Catalog(context.Background())
+			var progress [][2]int
+			inventory, err := source.Catalog(context.Background(), func(completed, total int) error {
+				progress = append(progress, [2]int{completed, total})
+				return nil
+			})
 			if scenario != "完整目录" {
 				if err == nil || len(inventory.Records) != 0 {
 					t.Fatalf("incomplete catalog was returned: %d records, %v", len(inventory.Records), err)
@@ -66,6 +74,9 @@ func TestCatalogRejectsPaginationChanges(t *testing.T) {
 			}
 			if err != nil || hits != 3 || len(inventory.Records) != pageSize+1 || inventory.Latest == nil || inventory.Latest.Second() != pageSize {
 				t.Fatalf("complete catalog failed: %d requests, %d records, latest %v, %v", hits, len(inventory.Records), inventory.Latest, err)
+			}
+			if !slices.Equal(progress, [][2]int{{1, 2}, {2, 2}}) {
+				t.Fatalf("unexpected page progress: %v", progress)
 			}
 		})
 	}

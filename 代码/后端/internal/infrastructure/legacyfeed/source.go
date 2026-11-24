@@ -79,7 +79,7 @@ func (s *SaaS) page(ctx context.Context, index int, remaining *int64) ([]legacys
 	return result.List, *result.Count, nil
 }
 
-func (s *SaaS) Catalog(ctx context.Context) (legacysync.Inventory, error) {
+func (s *SaaS) Catalog(ctx context.Context, progress func(completed, total int) error) (legacysync.Inventory, error) {
 	remaining := int64(maxCatalogBytes)
 	first, total, err := s.page(ctx, 1, &remaining)
 	if err != nil {
@@ -110,6 +110,11 @@ func (s *SaaS) Catalog(ctx context.Context) (legacysync.Inventory, error) {
 				newest = item.Updated
 			}
 		}
+		if progress != nil {
+			if err := progress(page, pages); err != nil {
+				return legacysync.Inventory{}, err
+			}
+		}
 	}
 	if pages > 1 {
 		again, count, err := s.page(ctx, 1, &remaining)
@@ -120,7 +125,7 @@ func (s *SaaS) Catalog(ctx context.Context) (legacysync.Inventory, error) {
 			return legacysync.Inventory{}, errors.New("旧站目录总数在读取时发生变化")
 		}
 		for i := range again {
-			if again[i].ID != first[i].ID {
+			if again[i].ID != first[i].ID || again[i].Status != first[i].Status || again[i].Deleted != first[i].Deleted {
 				return legacysync.Inventory{}, errors.New("旧站目录首屏在读取时发生变化")
 			}
 		}

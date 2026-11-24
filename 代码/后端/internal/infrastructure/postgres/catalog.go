@@ -61,7 +61,7 @@ const ProductJSON = `jsonb_build_object(
  'legacy_category',p.legacy_category,'verification_status',p.verification_status,
  'created_at',p.created_at,'updated_at',p.updated_at,'published_at',p.published_at,
  'deleted_at',p.deleted_at,'deleted_by_admin',p.deleted_by_admin,
- 'price_amount',p.price_amount::text,'price_note',CASE WHEN p.price_unit='unknown' THEN '原站报价，单位待核对' ELSE '' END,
+ 'price_amount',p.price_amount::text,'price_note',CASE WHEN p.price_unit='unknown' AND p.legacy_price IS NOT NULL THEN '原站报价，单位待核对' ELSE '' END,
  'rental_quotes',p.rental_quotes,'has_private_credentials',EXISTS(SELECT 1 FROM product_private_credentials pc WHERE pc.product_id=p.id),
  'consultation_count',(SELECT count(*) FROM product_consultations co WHERE co.product_id=p.id),
  'image_total',(SELECT count(*) FROM product_images pi WHERE pi.product_id=p.id),
