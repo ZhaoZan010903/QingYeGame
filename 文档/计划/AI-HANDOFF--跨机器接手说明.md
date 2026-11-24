@@ -1,5 +1,11 @@
 # AI-HANDOFF -- 跨机器接手说明
 
+## 2026年11月24日 · 旧站同步生产发布
+
+北京时间 15:38:47 完成 `legacy-sync-atomic-20261124-144909` 发布。生产双 API 与管理端产物来自 `5f193bcca4d724df9f8f6071a3295562f3283c33`。已执行 `0022_legacy_sync_atomic_progress.sql`。发布前后核对商品和图集关联摘要，确认 576 件公开商品、48,352 条图片关联和原有批次一致。双 API 实际散列、迁移前备份、静态文件校验与发布回执保存在服务器私有目录 `/root/qingye-private/legacy-sync-atomic-20261124-144909/`。
+
+systemd 定时器已启动，按北京时间每天 12:00 触发。应用定时许可在发布时为暂停。管理端一键同步可用，生产浏览器已验收批次与分类结果，管理 API 的访问边界已实测。发布验收期间未执行实际商品同步。手动与定时流程和回滚规则见[旧站商品同步](../../代码/部署/qingye-production/README--旧站商品同步.md)。
+
 ## 当前生产入口：2026年11月16日 Nginx / TLS 升级
 
 8.140.230.149 于北京时间12:36:39切换至独立 `qingye-edge.service`，Nginx1.30.6 + 静态OpenSSL3.5.9；TCP80/443/5179/5181由一个入口管理，UDP5179/5181仍由原Go进程负责。配置 `/etc/qingye-edge/nginx.conf`，程序 `/opt/qingye-edge/current/sbin/nginx`，仓库模板 `代码/部署/qingye-edge/`。API和静态仍为既有R24，未改业务数据和图片。
