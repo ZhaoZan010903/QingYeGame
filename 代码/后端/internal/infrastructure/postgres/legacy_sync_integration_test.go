@@ -11,6 +11,8 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
@@ -27,6 +29,7 @@ import (
 	"qingye/backend/internal/infrastructure/postgres"
 	"qingye/backend/internal/infrastructure/security"
 	"qingye/backend/internal/maintenance"
+	"qingye/backend/internal/transport/httpapi"
 )
 
 type testLegacySource struct {
@@ -114,6 +117,185 @@ func fakeListing(id, code, title, category, price, picture string, now time.Time
 		ID: id, Code: code, Title: title, Category: category, Price: json.Number(price),
 		Content: picture, Status: "出售中", Created: now.Add(-time.Hour), Updated: now,
 	}}
+}
+
+type gatedLegacySource struct {
+	*testLegacySource
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s gatedLegacySource) Catalog(ctx context.Context) (legacysync.Inventory, error) {
+	close(s.entered)
+	select {
+	case <-s.release:
+		return s.testLegacySource.Catalog(ctx)
+	case <-ctx.Done():
+		return legacysync.Inventory{}, ctx.Err()
+	}
+}
+
+func TestManualLegacySyncRunner(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db := legacySyncDB(t, ctx)
+	store := postgres.LegacySyncStore{DB: db}
+	const actor = "sync-operator"
+	if _, err := db.Exec(ctx, `INSERT INTO users(id,phone,nickname,password_hash,role)
+ VALUES('sync-operator','20001','管理员','fixture','admin'),('sync-member','20002','会员','fixture','member');
+ INSERT INTO categories(id,name,trade_type,price_units) VALUES('legacy-sale','QQ炫舞买号','sale','["account"]')`); err != nil {
+		t.Fatal(err)
+	}
+	const pictureURL = "https://cdn.xuansiwei.com/manual-fixture.png"
+	var picture bytes.Buffer
+	if err := png.Encode(&picture, image.NewRGBA(image.Rect(0, 0, 12, 12))); err != nil {
+		t.Fatal(err)
+	}
+	record := fakeListing("manual-sale", "QYCH190", "首次同步", "QQ炫舞买号", "1500", pictureURL, time.Now())
+	temp := t.TempDir()
+	objects := testLegacyObjects{}
+	makeSource := func(records ...legacysync.Record) *testLegacySource {
+		return &testLegacySource{
+			inventory: legacysync.Inventory{Records: records},
+			images:    map[string][]byte{pictureURL: picture.Bytes()},
+		}
+	}
+	newRunner := func(task context.Context, source legacysync.Source) *legacysync.ManualRunner {
+		service := &legacysync.Service{
+			Source: source, Store: store, Objects: objects,
+			Images: mediafiles.LegacyImages{Directory: temp}, Environment: "test", NewID: security.NewID,
+		}
+		return legacysync.NewManualRunner(task, service)
+	}
+	waitStatus := func(id, target string) legacysync.Batch {
+		t.Helper()
+		for {
+			batch, _, _, err := store.Details(ctx, id, 10, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if batch.Status == target {
+				return batch
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("batch %s is %s, want %s", id, batch.Status, target)
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
+	}
+	currentMode := func() legacysync.Controls {
+		t.Helper()
+		_, controls, _, err := store.Batches(ctx, 1, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return controls
+	}
+
+	gate := gatedLegacySource{makeSource(record), make(chan struct{}), make(chan struct{})}
+	previewCtx, stopPreview := context.WithCancel(ctx)
+	preview := newRunner(previewCtx, gate)
+	defer func() { stopPreview(); preview.Wait() }()
+	requestID := security.NewID()
+	if _, err := preview.Start("sync-member", requestID, 1); err == nil {
+		t.Fatal("member started a manual sync")
+	}
+	const origin = "http://127.0.0.1:5181"
+	token := security.RandomToken()
+	if _, err := db.Exec(ctx, `INSERT INTO sessions(token_hash,user_id,expires_at,audience)
+ VALUES($1,$2,now()+interval '1 hour','admin')`, security.TokenHash(token), actor); err != nil {
+		t.Fatal(err)
+	}
+	router := (&httpapi.App{DB: db, LegacySync: preview, Config: httpapi.Config{
+		Surface: "admin", AllowedOrigins: []string{origin},
+	}}).Routes()
+	body, err := json.Marshal(map[string]any{"confirm": true, "request_id": requestID, "expected_version": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/admin/legacy-sync/batches", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", origin)
+	req.AddCookie(&http.Cookie{Name: "qingye_admin_session", Value: token})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	var response struct{ Data legacysync.Batch }
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil || recorder.Code != http.StatusAccepted ||
+		response.Data.ID != requestID || response.Data.Status != "running" {
+		t.Fatalf("manual request was not accepted: %d %s, %v", recorder.Code, recorder.Body.String(), err)
+	}
+	batch := response.Data
+	select {
+	case <-gate.entered:
+	case <-ctx.Done():
+		t.Fatal("catalog worker did not run")
+	}
+	replay, err := preview.Start(actor, requestID, 1)
+	if err != nil || replay.ID != batch.ID || currentMode().ActiveBatchID != batch.ID {
+		t.Fatalf("retry lost the active batch: %+v, %v", replay, err)
+	}
+	if _, err := newRunner(ctx, makeSource(record)).Start(actor, security.NewID(), 1); !errors.Is(err, legacysync.ErrBusy) {
+		t.Fatalf("concurrent runner was not rejected: %v", err)
+	}
+	close(gate.release)
+	waitStatus(requestID, "ready")
+	if err := store.ApplyBatch(ctx, requestID, actor); err != nil {
+		t.Fatal(err)
+	}
+	preview.Wait()
+	if _, err := store.SetMode(ctx, actor, legacysync.Automatic, currentMode().Version); err != nil {
+		t.Fatal(err)
+	}
+
+	record.Title = "同步内容改变"
+	auto := newRunner(ctx, makeSource(record))
+	if _, err := auto.Start(actor, security.NewID(), 1); err == nil {
+		t.Fatal("out-of-date preview confirmation started an automatic publication")
+	}
+	next, err := auto.Start(actor, security.NewID(), currentMode().Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := waitStatus(next.ID, "applied")
+	auto.Wait()
+	if published.PlannedAt != nil || published.Summary.Updated != 1 {
+		t.Fatalf("manual auto-publish did not update the record: %+v", published)
+	}
+	var started, publishedByOperator int
+	if err := db.QueryRow(ctx, `SELECT
+ (SELECT count(*) FROM admin_logs WHERE action='legacy.sync.start' AND resource_id=$1 AND user_id=$2),
+ (SELECT count(*) FROM legacy_sync_batches WHERE id=$3 AND applied_by=$2)`,
+		requestID, actor, next.ID).Scan(&started, &publishedByOperator); err != nil || started != 1 || publishedByOperator != 1 {
+		t.Fatalf("operator audit was not retained: %d, %d, %v", started, publishedByOperator, err)
+	}
+
+	noImage := makeSource(record)
+	for i := range 5 {
+		noImage.inventory.Records = append(noImage.inventory.Records,
+			fakeListing(fmt.Sprintf("review-%d", i), fmt.Sprintf("QYCH%d", 200+i),
+				"需核对新图", "QQ炫舞买号", "100", "https://cdn.xuansiwei.com/missing.png", time.Now()))
+	}
+	review := newRunner(ctx, noImage)
+	next, err = review.Start(actor, security.NewID(), currentMode().Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(next.ID, "review")
+	review.Wait()
+
+	shutdown, stop := context.WithCancel(ctx)
+	interrupted := newRunner(shutdown, gatedLegacySource{makeSource(record), make(chan struct{}), make(chan struct{})})
+	next, err = interrupted.Start(actor, security.NewID(), currentMode().Version)
+	stop()
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted.Wait()
+	waitStatus(next.ID, "failed")
+	if currentMode().ActiveBatchID != "" {
+		t.Fatal("interrupted worker left an active batch")
+	}
 }
 
 func TestLegacySyncTransactions(t *testing.T) {

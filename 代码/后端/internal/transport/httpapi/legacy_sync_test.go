@@ -11,6 +11,7 @@ func TestLegacySyncRoutesAreAdminOnly(t *testing.T) {
 	const batches = "/api/v1/admin/legacy-sync/batches"
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, batches},
+		{http.MethodPost, batches},
 		{http.MethodGet, batches + "/one"},
 		{http.MethodPost, batches + "/one/apply"},
 		{http.MethodPost, batches + "/one/rollback"},

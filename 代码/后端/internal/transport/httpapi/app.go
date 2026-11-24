@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	syncapp "qingye/backend/internal/application/legacysync"
 	mediaapp "qingye/backend/internal/application/media"
 	registrationapp "qingye/backend/internal/application/registration"
 	securityapp "qingye/backend/internal/application/security"
@@ -27,6 +28,7 @@ type App struct {
 	ReadSafety   *securityapp.ReadService
 	HumanSafety  *securityapp.HumanService
 	MediaFiles   mediaapp.Files
+	LegacySync   *syncapp.ManualRunner
 	DB           *pgxpool.Pool
 	Redis        *redis.Client
 	Config       Config

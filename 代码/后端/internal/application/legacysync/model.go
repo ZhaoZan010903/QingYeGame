@@ -109,9 +109,10 @@ type Batch struct {
 }
 
 type Controls struct {
-	Mode      string    `json:"mode"`
-	Version   int64     `json:"version"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Mode          string    `json:"mode"`
+	Version       int64     `json:"version"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	ActiveBatchID string    `json:"active_batch_id"`
 }
 
 type Inventory struct {
@@ -132,10 +133,11 @@ type Asset struct {
 
 type Store interface {
 	BeginBatch(context.Context, string, *time.Time) (Batch, bool, error)
+	BeginManualBatch(context.Context, string, string, int64) (Batch, bool, error)
 	FailBatch(context.Context, string, string) error
 	LoadCatalog(context.Context) (map[string]Current, map[string]catalog.CategoryRules, map[string]string, error)
 	SavePreview(context.Context, Batch, []Item) error
-	ApplyBatch(context.Context, string, string) error
+	ApplyAutomaticBatch(context.Context, string, string) error
 	FindAsset(context.Context, string, string, string) (Asset, bool, error)
 	ReserveAsset(context.Context, string, string, string, Asset) error
 	ReadyAsset(context.Context, string) error

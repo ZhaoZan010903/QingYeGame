@@ -15,8 +15,11 @@ import (
 
 type LegacySyncStore struct{ DB *pgxpool.Pool }
 
+const freshLegacyBatch = `started_at>=now()-interval '30 minutes'`
+const staleLegacyBatch = `status='running' AND NOT (` + freshLegacyBatch + `)`
 const legacyBatchColumns = `id,planned_at,started_at,source_updated_at,finished_at,applied_at,rolled_back_at,
- rollback_until,status,source_count,summary,reason`
+ rollback_until,CASE WHEN ` + staleLegacyBatch + ` THEN 'failed' ELSE status END,source_count,summary,
+ CASE WHEN ` + staleLegacyBatch + ` THEN '任务中断或超时' ELSE reason END`
 
 func scanLegacyBatch(row pgx.Row, batch *syncapp.Batch) error {
 	return row.Scan(&batch.ID, &batch.PlannedAt, &batch.StartedAt, &batch.SourceUpdated, &batch.FinishedAt,
@@ -50,6 +53,17 @@ func legacyAudit(ctx context.Context, tx pgx.Tx, actor, action, target string, d
 }
 
 func (s LegacySyncStore) BeginBatch(ctx context.Context, id string, planned *time.Time) (syncapp.Batch, bool, error) {
+	return s.beginBatch(ctx, id, planned, "", 0)
+}
+
+func (s LegacySyncStore) BeginManualBatch(ctx context.Context, id, actor string, version int64) (syncapp.Batch, bool, error) {
+	if actor == "" {
+		return syncapp.Batch{}, false, fault.New(fault.Forbidden, "FORBIDDEN", "需要启用的管理员账号")
+	}
+	return s.beginBatch(ctx, id, nil, actor, version)
+}
+
+func (s LegacySyncStore) beginBatch(ctx context.Context, id string, planned *time.Time, actor string, version int64) (syncapp.Batch, bool, error) {
 	var batch syncapp.Batch
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
@@ -63,10 +77,33 @@ func (s LegacySyncStore) BeginBatch(ctx context.Context, id string, planned *tim
 	if planned != nil && settings.Mode == syncapp.Paused {
 		return batch, false, nil
 	}
+	if actor != "" {
+		if err = legacyActor(ctx, tx, actor); err != nil {
+			return batch, false, err
+		}
+	}
 	if _, err = tx.Exec(ctx, `UPDATE legacy_sync_batches
  SET status='failed',finished_at=clock_timestamp(),reason='任务中断或超时'
- WHERE status='running' AND started_at<now()-interval '30 minutes'`); err != nil {
+ WHERE `+staleLegacyBatch); err != nil {
 		return batch, false, err
+	}
+	if actor != "" {
+		err = scanLegacyBatch(tx.QueryRow(ctx, `SELECT `+legacyBatchColumns+`
+ FROM legacy_sync_batches b WHERE b.id=$1 AND b.planned_at IS NULL AND EXISTS(
+ SELECT 1 FROM admin_logs a WHERE a.resource_id=b.id AND a.action='legacy.sync.start' AND a.user_id=$2)`,
+			id, actor), &batch)
+		if err == nil {
+			return batch, false, tx.Commit(ctx)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return batch, false, err
+		}
+		if settings.Version != version {
+			return batch, false, legacyConflict("同步方式已变化，请刷新后重新确认")
+		}
+		if settings.Mode == syncapp.Paused {
+			return batch, false, legacyConflict("同步已暂停，请先恢复同步")
+		}
 	}
 	var busy bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM legacy_sync_batches WHERE status='running')`).Scan(&busy); err != nil {
@@ -76,12 +113,20 @@ func (s LegacySyncStore) BeginBatch(ctx context.Context, id string, planned *tim
 		return batch, false, syncapp.ErrBusy
 	}
 	err = scanLegacyBatch(tx.QueryRow(ctx, `INSERT INTO legacy_sync_batches(id,planned_at) VALUES($1,$2)
- ON CONFLICT(planned_at) DO NOTHING RETURNING `+legacyBatchColumns, id, planned), &batch)
+ ON CONFLICT DO NOTHING RETURNING `+legacyBatchColumns, id, planned), &batch)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if actor != "" {
+			return batch, false, legacyConflict("该同步请求标识已被使用，请刷新记录")
+		}
 		return batch, false, tx.Commit(ctx)
 	}
 	if err != nil {
 		return batch, false, err
+	}
+	if actor != "" {
+		if err = legacyAudit(ctx, tx, actor, "legacy.sync.start", id, map[string]string{"mode": settings.Mode}); err != nil {
+			return batch, false, err
+		}
 	}
 	batch.Mode = settings.Mode
 	return batch, true, tx.Commit(ctx)
@@ -134,8 +179,10 @@ func (s LegacySyncStore) SavePreview(ctx context.Context, batch syncapp.Batch, i
 func (s LegacySyncStore) Batches(ctx context.Context, limit, offset int) ([]syncapp.Batch, syncapp.Controls, int, error) {
 	var settings syncapp.Controls
 	var total int
-	if err := s.DB.QueryRow(ctx, `SELECT mode,version,updated_at,(SELECT count(*) FROM legacy_sync_batches)
- FROM legacy_sync_control`).Scan(&settings.Mode, &settings.Version, &settings.UpdatedAt, &total); err != nil {
+	if err := s.DB.QueryRow(ctx, `SELECT mode,version,updated_at,(SELECT count(*) FROM legacy_sync_batches),
+ coalesce((SELECT id FROM legacy_sync_batches WHERE status='running' AND `+freshLegacyBatch+`
+ ORDER BY started_at DESC LIMIT 1),'') FROM legacy_sync_control`).
+		Scan(&settings.Mode, &settings.Version, &settings.UpdatedAt, &total, &settings.ActiveBatchID); err != nil {
 		return nil, settings, 0, err
 	}
 	rows, err := s.DB.Query(ctx, `SELECT `+legacyBatchColumns+`

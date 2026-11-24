@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const maxRunBytes = 256 << 20
+const (
+	maxRunBytes = 256 << 20
+	runTimeout  = 20 * time.Minute
+)
 
 var chinaTime = time.FixedZone("CST", 8*60*60)
 
@@ -36,12 +39,16 @@ type Service struct {
 
 // A nil schedule produces a manual preview even when automatic publishing is armed.
 func (s *Service) Run(ctx context.Context, planned *time.Time) (Batch, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
 	batch, began, err := s.Store.BeginBatch(ctx, s.NewID(), planned)
 	if err != nil || !began {
 		return batch, err
 	}
+	return s.complete(ctx, batch, "")
+}
+
+func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batch, error) {
 	failed := func(reason string) (Batch, error) {
 		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
@@ -119,8 +126,8 @@ func (s *Service) Run(ctx context.Context, planned *time.Time) (Batch, error) {
 	if err = s.Store.SavePreview(ctx, batch, items); err != nil {
 		return failed("保存批次差异失败")
 	}
-	if planned != nil && batch.Mode == Automatic && batch.Status == "ready" {
-		if err = s.Store.ApplyBatch(ctx, batch.ID, ""); err != nil {
+	if (batch.PlannedAt != nil || actor != "") && batch.Mode == Automatic && batch.Status == "ready" {
+		if err = s.Store.ApplyAutomaticBatch(ctx, batch.ID, actor); err != nil {
 			return batch, err
 		}
 		batch.Status = "applied"

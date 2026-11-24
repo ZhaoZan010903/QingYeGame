@@ -274,6 +274,14 @@ func syncNewProduct(ctx context.Context, tx pgx.Tx, next syncapp.Product, price 
 }
 
 func (s LegacySyncStore) ApplyBatch(ctx context.Context, id, actor string) error {
+	return s.applyBatch(ctx, id, actor, actor == "")
+}
+
+func (s LegacySyncStore) ApplyAutomaticBatch(ctx context.Context, id, actor string) error {
+	return s.applyBatch(ctx, id, actor, true)
+}
+
+func (s LegacySyncStore) applyBatch(ctx context.Context, id, actor string, automatic bool) error {
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return err
@@ -297,7 +305,7 @@ func (s LegacySyncStore) ApplyBatch(ctx context.Context, id, actor string) error
 		return err
 	}
 	if controls.Mode == syncapp.Paused || (batch.Status != "ready" && batch.Status != "review") ||
-		(actor == "" && (controls.Mode != syncapp.Automatic || batch.Status != "ready" || batch.PlannedAt == nil)) {
+		(automatic && (controls.Mode != syncapp.Automatic || batch.Status != "ready" || actor == "" && batch.PlannedAt == nil)) {
 		return legacyConflict("同步已暂停，或该批次不能发布")
 	}
 	var now time.Time

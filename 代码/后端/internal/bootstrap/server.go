@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	syncapp "qingye/backend/internal/application/legacysync"
 	"qingye/backend/internal/infrastructure/mediafiles"
 	"qingye/backend/internal/infrastructure/mediaobject"
 	"sync"
@@ -18,6 +19,9 @@ func (r *Runtime) Serve(parent context.Context) error {
 	// 先停止接收并排空HTTP，再取消连接与任务，最后由调用方关闭资源池。
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	defer cancel()
+	if r.HTTP.Config.Surface == "admin" && r.LegacySync != nil {
+		r.HTTP.LegacySync = syncapp.NewManualRunner(ctx, r.LegacySync)
+	}
 	server := &http.Server{Addr: r.HTTP.Config.Addr, Handler: r.HTTP.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10, BaseContext: func(net.Listener) context.Context { return ctx }}
 	var transport *webtransport.Server
 	var err error
@@ -117,6 +121,9 @@ func (r *Runtime) Serve(parent context.Context) error {
 		_ = server.Close()
 	}
 	cancel()
+	if r.HTTP.LegacySync != nil {
+		r.HTTP.LegacySync.Wait()
+	}
 	if transport != nil {
 		_ = transport.Close()
 	}

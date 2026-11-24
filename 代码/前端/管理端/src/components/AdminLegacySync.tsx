@@ -1,14 +1,24 @@
 import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import {
   formatRentalAmount,
   rentalQuoteLabel,
   rentalUnitLabels,
 } from "../../../共享/rental-quotes";
 import type { RentalQuote } from "../../../共享/types";
-import { request } from "../lib/api";
+import { idempotentRequest, request } from "../lib/api";
+import {
+  LegacySyncConfirm,
+  LegacySyncModePicker,
+  type LegacySyncConfirmation,
+  type LegacySyncMode,
+} from "./LegacySyncControls";
 
-type Mode = "preview" | "automatic" | "paused";
-type Controls = { mode: Mode; version: number };
+type Controls = {
+  mode: LegacySyncMode;
+  version: number;
+  active_batch_id?: string;
+};
 type BatchStatus =
   | "running"
   | "ready"
@@ -64,11 +74,6 @@ const states: Record<BatchStatus, string> = {
   rolled_back: "已回滚",
   superseded: "已替换",
 };
-const modes: Record<Mode, string> = {
-  preview: "每天生成预览",
-  automatic: "自动发布通过检查的批次",
-  paused: "已暂停",
-};
 const productStates: Record<string, string> = {
   published: "已上架",
   offline: "已下架",
@@ -89,8 +94,8 @@ const dateFormat = new Intl.DateTimeFormat("zh-CN", {
 });
 const date = (value?: string | null) =>
   value ? dateFormat.format(new Date(value)) : "—";
-const batchURL = (id: string) =>
-  "/admin/legacy-sync/batches/" + encodeURIComponent(id);
+const batchesURL = "/admin/legacy-sync/batches";
+const batchURL = (id: string) => batchesURL + "/" + encodeURIComponent(id);
 const query = (cursor: string | null) =>
   "?" + new URLSearchParams({ limit: "15", ...(cursor ? { cursor } : {}) });
 
@@ -137,6 +142,9 @@ export function AdminLegacySync() {
   const [revision, setRevision] = useState(0);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [controls, setControls] = useState<Controls | null>(null);
+  const [canStart, setCanStart] = useState(false);
+  const [confirmation, setConfirmation] =
+    useState<LegacySyncConfirmation | null>(null);
   const [batchPages, setBatchPages] = useState<(string | null)[]>([null]);
   const [nextBatch, setNextBatch] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
@@ -158,20 +166,17 @@ export function AdminLegacySync() {
 
   const batchCursor = batchPages.at(-1) ?? null;
   const detailCursor = detailPages.at(-1) ?? null;
+  const activeRun = controls?.active_batch_id ?? "";
   useEffect(() => {
     const abort = new AbortController();
     setLoading(true);
     setListError("");
-    request(
-      "/admin/legacy-sync/batches" + query(batchCursor),
-      "GET",
-      undefined,
-      abort.signal,
-    )
+    request(batchesURL + query(batchCursor), "GET", undefined, abort.signal)
       .then((response) => {
         if (abort.signal.aborted) return;
         setBatches(response.data.batches ?? []);
         setControls(response.data.controls);
+        setCanStart(response.data.can_start === true);
         setNextBatch(response.next_cursor ?? null);
       })
       .catch((error: Error) => {
@@ -206,7 +211,67 @@ export function AdminLegacySync() {
         if (!abort.signal.aborted) setDetailLoading(false);
       });
     return () => abort.abort();
-  }, [selectedId, detailCursor, revision]);
+  }, [selectedId, detailCursor, revision, activeRun]);
+
+  useEffect(() => {
+    if (!activeRun || loading || detailLoading) return;
+    const timer = window.setTimeout(
+      () => setRevision((value) => value + 1),
+      3000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [activeRun, loading, detailLoading, revision]);
+
+  function openBatch(id: string) {
+    if (selectedId === id) return;
+    setSelectedId(id);
+    setDetail(null);
+    setNextDetail(null);
+    setDetailPages([null]);
+  }
+
+  async function startSync(version: number) {
+    setPending(true);
+    setFeedback(null);
+    try {
+      const response = await idempotentRequest(batchesURL, {
+        confirm: true,
+        expected_version: version,
+      });
+      const batch: Batch = response.data;
+      setBatchPages([null]);
+      openBatch(batch.id);
+      if (batch.status === "running") {
+        setControls(
+          (current) => current && { ...current, active_batch_id: batch.id },
+        );
+      }
+    } catch (error) {
+      setFeedback({
+        error: true,
+        text:
+          error instanceof Error
+            ? error.message
+            : "同步请求失败，请刷新记录后重试。",
+      });
+    } finally {
+      setPending(false);
+      setRevision((value) => value + 1);
+    }
+  }
+
+  function confirmStart() {
+    if (!controls) return;
+    setConfirmation({
+      title: "立即同步旧站商品",
+      message:
+        controls?.mode === "automatic"
+          ? "读取旧站商品并校验图片。批次通过检查后直接发布，发现异常时会请你核对。"
+          : "读取旧站商品并校验图片。完成后可以查看差异，再发布本批次。",
+      confirmLabel: "开始同步",
+      confirm: () => void startSync(controls.version),
+    });
+  }
 
   async function mutate(
     path: string,
@@ -233,21 +298,26 @@ export function AdminLegacySync() {
     }
   }
 
-  function changeMode(mode: Mode) {
+  function changeMode(mode: LegacySyncMode) {
     if (!controls || pending || controls.mode === mode) return;
-    if (
-      mode === "automatic" &&
-      !window.confirm(
-        "开启后，每天中午 12:00 通过检查的批次会自动更新商品。确认开启？",
-      )
-    )
-      return;
-    void mutate(
-      "/admin/legacy-sync/mode",
-      "PUT",
-      { mode, expected_version: controls.version },
-      "已保存同步方式。",
-    );
+    const save = () =>
+      void mutate(
+        "/admin/legacy-sync/mode",
+        "PUT",
+        { mode, expected_version: controls.version },
+        "已保存同步方式。",
+      );
+    if (mode === "automatic") {
+      setConfirmation({
+        title: "开启自动发布",
+        message:
+          "手动同步和定时同步通过检查后会直接更新商品。发现异常的批次需要人工核对。",
+        confirmLabel: "开启自动发布",
+        confirm: save,
+      });
+    } else {
+      save();
+    }
   }
 
   function changeBatch(operation: "apply" | "rollback", batch: Batch) {
@@ -259,51 +329,86 @@ export function AdminLegacySync() {
           (batch.summary.updated ?? 0) +
           " 件。"
         : "确认整批回滚？本批新增商品会转为草稿，旧站定时同步也会暂停。";
-    if (!pending && window.confirm(message))
-      void mutate(
-        batchURL(batch.id) + "/" + operation,
-        "POST",
-        { confirm: true },
-        operation === "apply" ? "批次已发布。" : "批次已回滚，定时同步已暂停。",
-      );
+    if (pending) return;
+    const title = operation === "apply" ? "发布本批次" : "回滚本批次";
+    setConfirmation({
+      title,
+      message,
+      confirmLabel: title,
+      confirm: () =>
+        void mutate(
+          batchURL(batch.id) + "/" + operation,
+          "POST",
+          { confirm: true },
+          operation === "apply" ? "批次已发布。" : "批次已回滚，同步已暂停。",
+        ),
+    });
   }
 
   const active = detail?.batch;
   return (
     <section>
-      <div className="page-heading">
+      <div className="admin-heading">
         <div>
           <h1>旧站同步</h1>
-          <p>每日北京时间 12:00 读取旧站商品。批次发布后可在 7 天内回滚。</p>
+          <p>读取旧站商品、核对变更。批次发布后可在 7 天内回滚。</p>
         </div>
-        <button
-          className="button-outline"
-          onClick={() => setRevision((value) => value + 1)}
-          disabled={loading || pending}
-        >
-          刷新记录
-        </button>
+        <div className="heading-actions legacy-sync-heading-actions">
+          <button
+            type="button"
+            className="button-outline"
+            onClick={() => setRevision((value) => value + 1)}
+            disabled={loading || pending}
+          >
+            刷新记录
+          </button>
+          <button
+            type="button"
+            className="button-white"
+            onClick={confirmStart}
+            disabled={
+              !canStart || pending || !!activeRun || controls?.mode === "paused"
+            }
+          >
+            <RefreshCw
+              size={15}
+              aria-hidden="true"
+              className={activeRun ? "legacy-sync-spin" : undefined}
+            />
+            {activeRun ? "同步中…" : "立即同步"}
+          </button>
+        </div>
       </div>
-      <div className="admin-panel products-panel">
-        <div className="admin-toolbar">
-          <label>
-            同步方式{" "}
-            <select
-              value={controls?.mode ?? "preview"}
-              onChange={(event) => changeMode(event.target.value as Mode)}
-              disabled={!controls || pending}
-            >
-              {Object.entries(modes).map(([key, label]) => (
-                <option value={key} key={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+      <div className="panel products-panel">
+        <div className="admin-toolbar legacy-sync-toolbar">
+          <LegacySyncModePicker
+            value={controls?.mode ?? "preview"}
+            onChange={changeMode}
+            disabled={!controls || pending}
+          />
           <span className="muted">
             旧站列表缺失的商品保留当前状态，等待人工核对。
           </span>
         </div>
+        {activeRun && (
+          <div className="legacy-sync-running">
+            <span role="status">
+              正在读取旧站并校验图集，完成后将自动刷新。
+            </span>
+            {selectedId !== activeRun && (
+              <button
+                type="button"
+                className="button-outline"
+                onClick={() => openBatch(activeRun)}
+              >
+                查看运行批次
+              </button>
+            )}
+          </div>
+        )}
+        {controls && !canStart && (
+          <p className="muted">当前环境暂不能启动手动同步。</p>
+        )}
         {listError && (
           <p className="form-error" role="alert">
             {listError}
@@ -317,10 +422,10 @@ export function AdminLegacySync() {
             {feedback.text}
           </p>
         )}
-        {loading ? (
+        {loading && batches.length === 0 ? (
           <p role="status">正在读取同步记录…</p>
         ) : (
-          <div className="admin-table-wrap">
+          <div className="admin-table-wrap" aria-busy={loading}>
             <table className="admin-table">
               <thead>
                 <tr>
@@ -345,7 +450,7 @@ export function AdminLegacySync() {
                       {batch.id.slice(0, 8)}
                     </td>
                     <td>
-                      {batch.planned_at ? date(batch.planned_at) : "手动预览"}
+                      {batch.planned_at ? date(batch.planned_at) : "手动同步"}
                     </td>
                     <td>
                       {date(batch.started_at)}
@@ -371,13 +476,7 @@ export function AdminLegacySync() {
                       <button
                         className="button-outline"
                         disabled={pending}
-                        onClick={() => {
-                          if (selectedId === batch.id) return;
-                          setSelectedId(batch.id);
-                          setDetail(null);
-                          setNextDetail(null);
-                          setDetailPages([null]);
-                        }}
+                        onClick={() => openBatch(batch.id)}
                       >
                         查看明细
                       </button>
@@ -407,8 +506,7 @@ export function AdminLegacySync() {
       </div>
       {selectedId && (
         <div
-          className="admin-panel products-panel"
-          style={{ marginTop: 20 }}
+          className="panel products-panel legacy-sync-detail"
           aria-label="批次明细"
         >
           <div className="admin-toolbar">
@@ -429,8 +527,10 @@ export function AdminLegacySync() {
                 {(active.status === "ready" || active.status === "review") &&
                   controls?.mode !== "paused" && (
                     <button
-                      className="button-primary"
-                      disabled={pending || detailLoading || !controls}
+                      className="button-white"
+                      disabled={
+                        pending || detailLoading || !controls || !!activeRun
+                      }
                       onClick={() => changeBatch("apply", active)}
                     >
                       发布本批次
@@ -458,12 +558,12 @@ export function AdminLegacySync() {
               {detailError}
             </p>
           )}
-          {detailLoading ? (
+          {detailLoading && !detail ? (
             <p role="status">正在读取变更…</p>
           ) : (
             detail && (
               <>
-                <div className="admin-table-wrap">
+                <div className="admin-table-wrap" aria-busy={detailLoading}>
                   <table className="admin-table">
                     <thead>
                       <tr>
@@ -534,6 +634,12 @@ export function AdminLegacySync() {
             )
           )}
         </div>
+      )}
+      {confirmation && (
+        <LegacySyncConfirm
+          confirmation={confirmation}
+          onClose={() => setConfirmation(null)}
+        />
       )}
     </section>
   );

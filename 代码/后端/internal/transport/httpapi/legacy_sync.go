@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 
@@ -11,6 +12,7 @@ import (
 
 func (a *App) registerLegacySync(m routeRegistrar) {
 	m.HandleFunc("GET /api/v1/admin/legacy-sync/batches", a.adminOnly(a.legacySyncBatches))
+	m.HandleFunc("POST /api/v1/admin/legacy-sync/batches", a.adminOnly(a.legacySyncStart))
 	m.HandleFunc("GET /api/v1/admin/legacy-sync/batches/{id}", a.adminOnly(a.legacySyncDetails))
 	m.HandleFunc("POST /api/v1/admin/legacy-sync/batches/{id}/apply", a.adminOnly(a.legacySyncApply))
 	m.HandleFunc("POST /api/v1/admin/legacy-sync/batches/{id}/rollback", a.adminOnly(a.legacySyncRollback))
@@ -28,9 +30,56 @@ func (a *App) legacySyncBatches(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "INVALID_CURSOR", err.Error())
 		return
 	}
+	active := ""
+	if a.LegacySync != nil {
+		active = a.LegacySync.ActiveBatchID()
+	}
 	batches, controls, total, err := a.legacyStore().Batches(r.Context(), limit, offset)
-	memberResponse(w, map[string]any{"data": map[string]any{"batches": batches, "controls": controls},
+	if active != "" {
+		controls.ActiveBatchID = active
+	}
+	memberResponse(w, map[string]any{"data": map[string]any{
+		"batches": batches, "controls": controls, "can_start": a.LegacySync != nil,
+	},
 		"total": total, "next_cursor": nextPage(offset, limit, total)}, err)
+}
+
+func (a *App) legacySyncStart(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	user, ok := a.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Confirm         bool   `json:"confirm"`
+		RequestID       string `json:"request_id"`
+		ExpectedVersion int64  `json:"expected_version"`
+	}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	if !input.Confirm {
+		fail(w, http.StatusUnprocessableEntity, "CONFIRM_REQUIRED", "请确认启动同步")
+		return
+	}
+	if a.LegacySync == nil {
+		fail(w, http.StatusServiceUnavailable, "LEGACY_SYNC_UNAVAILABLE", "当前环境暂不能启动同步")
+		return
+	}
+	batch, err := a.LegacySync.Start(user.ID, input.RequestID, input.ExpectedVersion)
+	if errors.Is(err, syncapp.ErrBusy) {
+		fail(w, http.StatusConflict, "LEGACY_SYNC_BUSY", "已有同步任务在运行")
+		return
+	}
+	if err != nil {
+		memberResponse(w, nil, err)
+		return
+	}
+	status := http.StatusOK
+	if batch.Status == "running" {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, map[string]any{"data": batch})
 }
 
 type legacySyncProduct struct {
