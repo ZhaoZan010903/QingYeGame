@@ -30,19 +30,6 @@
   color: var(--blue);
   box-shadow: 0 2px 5px #0000000c;
 }
-.dashboard-rank-select {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--muted);
-  font-size: 12px;
-}
-.admin-dashboard .dashboard-rank-select select {
-  width: auto;
-  padding: 8px 30px 8px 10px;
-  min-height: 38px;
-  font-size: 12px;
-}
 .dashboard-refresh {
   margin-left: auto;
   min-height: 38px;
@@ -664,14 +651,6 @@
   }
   .dashboard-refresh {
     margin-left: 0;
-  }
-  .dashboard-rank-select {
-    order: 3;
-    width: 100%;
-    justify-content: space-between;
-  }
-  .dashboard-rank-select > span {
-    flex-shrink: 0;
   }
   .dashboard-section-heading {
     flex-wrap: wrap;

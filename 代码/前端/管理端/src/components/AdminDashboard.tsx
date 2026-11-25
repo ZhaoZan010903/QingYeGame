@@ -646,7 +646,6 @@ function DashboardActions() {
 
 export function AdminDashboard() {
   const [days, setDays] = useState<DashboardDays>(7);
-  const [rankBy, setRankBy] = useState<RankingMetric>("views");
   const [metric, setMetric] = useState<TrendMetric>("views");
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<unknown>();
@@ -659,7 +658,7 @@ export function AdminDashboard() {
     setLoading(true);
     setError(undefined);
     adminApi
-      .dashboard(days, rankBy, controller.signal)
+      .dashboard(days, "views", controller.signal)
       .then((result) => {
         if (!controller.signal.aborted && generation.current === requestId)
           setData(result);
@@ -679,9 +678,8 @@ export function AdminDashboard() {
       controller.abort();
       generation.current++;
     };
-  }, [days, rankBy, retry]);
-  const current =
-    data?.range.days === days && data.ranking.by === rankBy ? data : null;
+  }, [days, retry]);
+  const current = data?.range.days === days ? data : null;
   const refresh = () => setRetry((value) => value + 1);
   return (
     <div className="admin-dashboard">
@@ -712,20 +710,6 @@ export function AdminDashboard() {
             </button>
           ))}
         </div>
-        <label className="dashboard-rank-select">
-          <span>热门排行依据</span>
-          <select
-            value={rankBy}
-            onChange={(event) => {
-              setRankBy(event.target.value as RankingMetric);
-              setError(undefined);
-            }}
-          >
-            <option value="views">去重商品浏览</option>
-            <option value="favorites">首次有效收藏</option>
-            <option value="consultations">首次商品咨询</option>
-          </select>
-        </label>
         <button
           className="button-outline dashboard-refresh"
           type="button"
