@@ -1,3 +1,4 @@
+import { useAdminConfirm } from "../lib/admin-confirm";
 import { ProtectedImage } from "../../../共享/MediaSecurity";
 import { MediaSyncPanel } from "./MediaSyncPanel";
 import { publicationInterrupted } from "../../../共享/upload-progress";
@@ -89,6 +90,7 @@ export function AdminProductEditor({
   const rowRef = useRef(row);
   rowRef.current = row;
   const aliveRef = useRef(true);
+  const ask = useAdminConfirm(id);
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -321,9 +323,10 @@ export function AdminProductEditor({
       throw new Error("该商品已最终驳回，不能编辑或恢复上架。");
     if (
       row?.status === "published" &&
-      !window.confirm(
+      !(await ask(
         "保存后，这个商品会暂时停止公开并变成草稿。检查完成后需要重新上架。确认保存？",
-      )
+        "保存为草稿",
+      ))
     )
       throw new Error("已取消保存");
     setError("");
@@ -456,7 +459,21 @@ export function AdminProductEditor({
       sold: "确认标记为已售出？商品将停止公开展示。",
       rented: "确认标记为出租中？商品将停止公开展示。",
     };
-    if (!window.confirm(confirmations[kind])) return;
+    const labels = {
+      approve: "审核通过",
+      publish: "确认上架",
+      reject: "退回修改",
+      reject_final: "最终驳回",
+      offline: "确认下架",
+      submit: "提交审核",
+      sold: "标记已售出",
+      rented: "标记出租中",
+    };
+    if (!(await ask(confirmations[kind], labels[kind]))) return;
+    if (rowRef.current?.version !== row.version || dirtyRef.current) {
+      setError("商品资料已变更，请重新核对后操作。");
+      return;
+    }
     setBusy(true);
     try {
       const endpoint = ["approve", "reject", "reject_final"].includes(kind)
@@ -585,8 +602,13 @@ export function AdminProductEditor({
               {conflict && (
                 <button
                   className="text-button"
-                  onClick={() => {
-                    if (window.confirm("重新加载会替换尚未保存的编辑，继续？"))
+                  onClick={async () => {
+                    if (
+                      await ask(
+                        "重新加载会替换尚未保存的编辑，继续？",
+                        "重新加载",
+                      )
+                    )
                       void reload();
                   }}
                 >

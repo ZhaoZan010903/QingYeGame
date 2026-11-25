@@ -23,7 +23,13 @@ import {
 } from "./LegacySyncControls";
 
 type BatchStatus =
-  "running" | "blocked" | "failed" | "applied" | "rolled_back" | "superseded";
+  | "running"
+  | "blocked"
+  | "failed"
+  | "applied"
+  | "no_change"
+  | "rolled_back"
+  | "superseded";
 type Summary = {
   created: number;
   updated: number;
@@ -81,6 +87,7 @@ const states: Record<BatchStatus, string> = {
   blocked: "校验中止",
   failed: "同步失败",
   applied: "同步完成",
+  no_change: "无变化",
   rolled_back: "已回滚",
   superseded: "已归档",
 };
@@ -123,7 +130,9 @@ const query = (cursor: string | null, filter?: Filter) =>
 const changed = (batch: Batch) =>
   groups.some(({ key }) => batch.summary[key] > 0);
 const applied = (batch: Batch) =>
-  batch.status === "applied" || batch.status === "rolled_back";
+  batch.status === "applied" ||
+  batch.status === "no_change" ||
+  batch.status === "rolled_back";
 const stopped = (batch: Batch) =>
   batch.status === "blocked" || batch.status === "failed";
 
@@ -481,9 +490,9 @@ export function AdminLegacySync() {
             <span>{running ? "当前任务" : "最近一次同步"}</span>
             <h2>
               {latest
-                ? applied(latest) &&
-                  latest.status === "applied" &&
-                  !changed(latest)
+                ? latest.status === "applied" &&
+                  !changed(latest) &&
+                  !latest.summary.review
                   ? "商品已是最新"
                   : states[latest.status]
                 : data
@@ -501,7 +510,10 @@ export function AdminLegacySync() {
           )}
         </div>
         {latest &&
-          (running || stopped(latest) || latest.status === "applied") && (
+          (running ||
+            stopped(latest) ||
+            latest.status === "applied" ||
+            latest.status === "no_change") && (
             <LegacySyncProgress
               progress={latest.progress}
               running={running}

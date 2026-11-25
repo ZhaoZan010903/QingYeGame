@@ -1,3 +1,4 @@
+import { useAdminConfirm } from "../lib/admin-confirm";
 import { useEffect, useState } from "react";
 import { adminApi, type AdminRecord } from "../lib/admin-api";
 
@@ -10,6 +11,7 @@ export function UploadRestrictionPanel({
 }) {
   const [current, setCurrent] = useState<AdminRecord | null>(null);
   const [blocked, setBlocked] = useState(false);
+  const ask = useAdminConfirm(member.id);
   const [reason, setReason] = useState("");
   const [purge, setPurge] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -42,9 +44,10 @@ export function UploadRestrictionPanel({
     }
     if (
       purge &&
-      !window.confirm(
+      !(await ask(
         `确认已核实「${member.nickname}」恶意上传，并清理该账号的服务器商品暂存图片？此操作不可恢复；不涉及OSS已上架图片、历史迁移原图或其他会员。`,
-      )
+        "确认清理",
+      ))
     )
       return;
     setBusy(true);

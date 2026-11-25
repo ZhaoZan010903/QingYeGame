@@ -31,41 +31,18 @@ export function AdminMediaSecurity() {
     [duration, setDuration] = useState(600);
   const [filter, setFilter] = useState("abnormal"),
     [page, setPage] = useState(1);
-  const modal = useRef<HTMLDivElement>(null);
+  const modal = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (!selected) return;
-    const previous = document.activeElement as HTMLElement | null;
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    modal.current?.focus();
-    const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) setSelected(null);
-      if (event.key !== "Tab") return;
-      const items = modal.current?.querySelectorAll<HTMLElement>(
-        "button:not(:disabled),select,textarea",
-      );
-      if (!items?.length) return;
-      const first = items[0],
-        last = items[items.length - 1];
-      if (
-        event.shiftKey &&
-        (document.activeElement === first ||
-          document.activeElement === modal.current)
-      ) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", key);
+    const dialog = modal.current;
+    if (!selected || !dialog) return;
+    const trigger = document.activeElement;
+    dialog.showModal();
     return () => {
-      document.removeEventListener("keydown", key);
-      document.body.style.overflow = overflow;
-      previous?.focus();
+      dialog.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected)
+        trigger.focus({ preventScroll: true });
     };
-  }, [selected, busy]);
+  }, [selected]);
   async function load() {
     setError("");
     try {
@@ -111,7 +88,7 @@ export function AdminMediaSecurity() {
   const rows = filtered.slice((currentPage - 1) * 20, currentPage * 20);
   return (
     <section className="admin-media-security">
-      <div className="page-heading">
+      <div className="admin-heading">
         <div>
           <h1>图片访问保护</h1>
           <p>
@@ -122,7 +99,7 @@ export function AdminMediaSecurity() {
           刷新记录
         </button>
       </div>
-      <div className="admin-panel" style={{ padding: 24 }}>
+      <div className="media-access-panel fluent-card">
         <details>
           <summary>第一次使用？查看操作说明</summary>
           <p>
@@ -133,23 +110,29 @@ export function AdminMediaSecurity() {
           </p>
         </details>
         {data && (
-          <p>
-            已放行{" "}
-            <strong className="mono">{data.metrics.allowed ?? "0"}</strong> 次 ·
-            验证通过{" "}
-            <strong className="mono">{data.metrics.verified ?? "0"}</strong> 次
-            · 响应数据{" "}
-            <strong className="mono">
-              {(Number(data.metrics.bytes_sent ?? 0) / 1048576).toFixed(1)} MB
-            </strong>
-          </p>
+          <dl className="media-access-metrics">
+            <div>
+              <dt>已放行</dt>
+              <dd>{data.metrics.allowed ?? "0"} 次</dd>
+            </div>
+            <div>
+              <dt>验证通过</dt>
+              <dd>{data.metrics.verified ?? "0"} 次</dd>
+            </div>
+            <div>
+              <dt>响应数据</dt>
+              <dd>
+                {(Number(data.metrics.bytes_sent ?? 0) / 1048576).toFixed(1)} MB
+              </dd>
+            </div>
+          </dl>
         )}
         {error && (
           <p className="form-error" role="alert">
             {error}
           </p>
         )}
-        <label>
+        <label className="form-field media-access-filter">
           显示范围{" "}
           <select
             value={filter}
@@ -162,7 +145,7 @@ export function AdminMediaSecurity() {
             <option value="all">全部最近访问</option>
           </select>
         </label>
-        <div style={{ overflowX: "auto", marginTop: 18 }}>
+        <div className="admin-table-wrap">
           <table className="admin-table">
             <thead>
               <tr>
@@ -221,14 +204,7 @@ export function AdminMediaSecurity() {
             </tbody>
           </table>
         </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            marginTop: 16,
-          }}
-        >
+        <nav className="media-access-pagination" aria-label="图片访问记录分页">
           <button
             className="button-outline"
             disabled={currentPage <= 1}
@@ -246,7 +222,7 @@ export function AdminMediaSecurity() {
           >
             下一页
           </button>
-        </div>
+        </nav>
         {data && (
           <p className="helper">
             {data.coverage}。{data.retention}。
@@ -254,60 +230,66 @@ export function AdminMediaSecurity() {
         )}
       </div>
       {selected && (
-        <div className="read-safety-overlay">
-          <div
-            ref={modal}
-            tabIndex={-1}
-            className="read-safety-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="media-control-title"
-          >
-            <h2 id="media-control-title">处理图片访问</h2>
-            <p>
-              访问编号：
-              <span className="mono">{selected.subject.slice(0, 12)}</span>
+        <dialog
+          ref={modal}
+          className="product-action-dialog media-access-dialog"
+          aria-labelledby="media-control-title"
+          onCancel={(event) => {
+            event.preventDefault();
+            if (!busy) setSelected(null);
+          }}
+        >
+          <h2 id="media-control-title">处理图片访问</h2>
+          <p>
+            访问编号：
+            <span className="mono">{selected.subject.slice(0, 12)}</span>
+          </p>
+          <label className="form-field">
+            处理方式{" "}
+            <select
+              value={duration}
+              disabled={busy}
+              onChange={(event) => setDuration(Number(event.target.value))}
+            >
+              <option value={600}>限制图片访问10分钟</option>
+              <option value={0}>解除临时限制</option>
+            </select>
+          </label>
+          <label className="form-field">
+            原因
+            <textarea
+              value={reason}
+              disabled={busy}
+              onChange={(event) => setReason(event.target.value)}
+              minLength={2}
+              maxLength={160}
+              placeholder="例如：已确认是用户正常浏览"
+              rows={3}
+            />
+          </label>
+          <p>不会影响登录、聊天或商品资料，也不会删除图片。</p>
+          {error && (
+            <p role="alert" className="form-error">
+              {error}
             </p>
-            <label>
-              处理方式{" "}
-              <select
-                value={duration}
-                onChange={(event) => setDuration(Number(event.target.value))}
-              >
-                <option value={600}>限制图片访问10分钟</option>
-                <option value={0}>解除临时限制</option>
-              </select>
-            </label>
-            <label style={{ display: "block", marginTop: 16 }}>
-              原因
-              <textarea
-                value={reason}
-                onChange={(event) => setReason(event.target.value)}
-                minLength={2}
-                maxLength={160}
-                placeholder="例如：已确认是用户正常浏览"
-                style={{ width: "100%", marginTop: 8 }}
-              />
-            </label>
-            <p>不会影响登录、聊天或商品资料，也不会删除图片。</p>
-            {error && (
-              <p role="alert" className="read-safety-error">
-                {error}
-              </p>
-            )}
-            <div className="read-safety-actions">
-              <button disabled={busy} onClick={() => setSelected(null)}>
-                取消
-              </button>
-              <button
-                disabled={busy || reason.trim().length < 2}
-                onClick={() => void save()}
-              >
-                {busy ? "保存中…" : "确认保存"}
-              </button>
-            </div>
+          )}
+          <div className="product-dialog-actions">
+            <button
+              className="button-outline"
+              disabled={busy}
+              onClick={() => setSelected(null)}
+            >
+              取消
+            </button>
+            <button
+              className="button-white"
+              disabled={busy || reason.trim().length < 2}
+              onClick={() => void save()}
+            >
+              {busy ? "保存中…" : "确认保存"}
+            </button>
           </div>
-        </div>
+        </dialog>
       )}
     </section>
   );

@@ -1,3 +1,4 @@
+import { useAdminConfirm } from "../lib/admin-confirm";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { flushSync } from "react-dom";
 import { useNavigate } from "react-router-dom";
@@ -134,6 +135,7 @@ function AdministratorEditor({
 }) {
   const item = editor.kind === "create" ? null : editor.item;
   const self = item?.id === currentId;
+  const ask = useAdminConfirm();
   const dialog = useRef<HTMLDialogElement>(null);
   const firstInput = useRef<HTMLInputElement>(null);
   const mounted = useRef(false);
@@ -204,22 +206,23 @@ function AdministratorEditor({
     return () => controller.abort();
   }, [editor.kind, avatarRevision]);
 
-  function dismiss() {
+  async function dismiss() {
     if (lock.current) return;
     if (
       failure === "unknown" &&
-      !window.confirm(
+      !(await ask(
         "上次操作可能已成功。关闭后请重新读取账号列表核对；不要重复创建或使用不同密码重试。确认关闭？",
-      )
+        "确认关闭",
+      ))
     )
       return;
     if (
       failure !== "unknown" &&
       dirty &&
-      !window.confirm("关闭后，本次未保存的内容不会保留。确认关闭？")
+      !(await ask("关闭后，本次未保存的内容不会保留。确认关闭？", "放弃并关闭"))
     )
       return;
-    close(!!failure);
+    if (mounted.current && !lock.current) close(!!failure);
   }
   async function submit(event: FormEvent) {
     event.preventDefault();

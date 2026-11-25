@@ -1,3 +1,4 @@
+import { useAdminConfirm } from "../lib/admin-confirm";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adminApi, type AdminRecord } from "../lib/admin-api";
 import { StateView } from "./shared";
@@ -58,6 +59,7 @@ export function MemberAccountCard({
   );
 }
 export function AdminUsers() {
+  const ask = useAdminConfirm();
   const requestSequence = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const mutationLock = useRef(false);
@@ -134,11 +136,13 @@ export function AdminUsers() {
     if (mutationLock.current || busy) return;
     if (
       member.enabled &&
-      !window.confirm(
+      !(await ask(
         `停用「${member.nickname}」会立即撤销其登录会话。已发布商品需另行管理，确认停用？`,
-      )
+        "确认停用",
+      ))
     )
       return;
+    if (mutationLock.current) return;
     mutationLock.current = true;
     setBusy(true);
     setError("");
@@ -252,6 +256,7 @@ const fields = [
   ["consultation_weight", "每位有效咨询用户权重", 0, 100],
 ] as const;
 export function AdminRecommendations() {
+  const ask = useAdminConfirm();
   const [result, setResult] = useState<AdminRecord | null>(null);
   const [config, setConfig] = useState<AdminRecord>({});
   const [dirty, setDirty] = useState(false);
@@ -268,7 +273,10 @@ export function AdminRecommendations() {
       (key) => config[key] !== appliedConfig[key],
     );
   async function load(refresh = false) {
-    if (dirty && !window.confirm("重新读取会替换未保存的参数，确认继续？"))
+    if (
+      dirty &&
+      !(await ask("重新读取会替换未保存的参数，确认继续？", "重新读取"))
+    )
       return;
     setBusy(true);
     setError("");

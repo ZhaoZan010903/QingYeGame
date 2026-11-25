@@ -1,3 +1,4 @@
+import { useAdminConfirm } from "../lib/admin-confirm";
 import { useEffect, useState, type FormEvent } from "react";
 import { ArrowDown, ArrowUp, Plus, Search, Trash2 } from "lucide-react";
 import { adminApi } from "../lib/admin-api";
@@ -134,6 +135,7 @@ function SharedDictionaries({
   onDirtyChange: (dirty: boolean) => void;
   onBusyChange: (busy: boolean) => void;
 }) {
+  const ask = useAdminConfirm();
   const [groups, setGroups] = useState<DictionaryGroup[]>([]),
     [selected, setSelected] = useState<DictionaryKey>("keyword");
   const [busy, setBusy] = useState(true),
@@ -191,9 +193,12 @@ function SharedDictionaries({
       setBusy(false);
     }
   }
-  function switchGroup(key: DictionaryKey) {
+  async function switchGroup(key: DictionaryKey) {
     if (busy || key === selected) return;
-    if (dirty && !window.confirm("这组字典有未保存的修改。确认放弃并切换？"))
+    if (
+      dirty &&
+      !(await ask("这组字典有未保存的修改。确认放弃并切换？", "放弃并切换"))
+    )
       return;
     setSelected(key);
     setQuery("");
@@ -294,8 +299,11 @@ function SharedDictionaries({
             <button
               type="button"
               className="text-button"
-              onClick={() => {
-                if (!dirty || window.confirm("重新读取会放弃当前修改，继续？"))
+              onClick={async () => {
+                if (
+                  !dirty ||
+                  (await ask("重新读取会放弃当前修改，继续？", "重新读取"))
+                )
                   void load();
               }}
             >
@@ -322,12 +330,14 @@ function SharedDictionaries({
 }
 
 export function DictionarySettings() {
+  const ask = useAdminConfirm();
   const [tab, setTab] = useState("dictionary"),
     [dirty, setDirty] = useState(false),
     [busy, setBusy] = useState(true);
-  function change(next: string) {
+  async function change(next: string) {
     if (busy || next === tab) return;
-    if (dirty && !window.confirm("有未保存的修改，确认放弃并切换？")) return;
+    if (dirty && !(await ask("有未保存的修改，确认放弃并切换？", "放弃并切换")))
+      return;
     setDirty(false);
     setTab(next);
   }

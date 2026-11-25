@@ -1,4 +1,5 @@
-import { ProtectedImage } from '../../../共享/MediaSecurity';
+import { useAdminConfirm } from "../lib/admin-confirm";
+import { ProtectedImage } from "../../../共享/MediaSecurity";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { adminApi, type AdminRecord } from "../lib/admin-api";
 import { api, uploadConfig } from "../lib/api";
@@ -81,6 +82,7 @@ export function AdminResources({
   const [editing, setEditing] = useState(false);
   const [dirty, setDirty] = useState(false);
   const sequence = useRef(0);
+  const ask = useAdminConfirm(resource);
   useUnsavedChanges(dirty, busy);
   useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
   useEffect(
@@ -124,9 +126,10 @@ export function AdminResources({
       sequence.current++;
     };
   }, [resource]);
-  function edit(item?: AdminRecord) {
+  async function edit(item?: AdminRecord) {
     if (busy) return;
-    if (dirty && !window.confirm("还有未保存的修改，确认切换？")) return;
+    if (dirty && !(await ask("还有未保存的修改，确认切换？", "放弃并切换")))
+      return;
     setSelected(item ? idOf(item) : null);
     setError("");
     setNotice("");
@@ -177,9 +180,10 @@ export function AdminResources({
       selected &&
       form.enabled === false &&
       items.find((item) => idOf(item) === selected)?.enabled !== false &&
-      !window.confirm(
+      !(await ask(
         "停用这个分类后，其中的公开商品也会隐藏。确认停用并保存？",
-      )
+        "停用并保存",
+      ))
     )
       return;
     setError("");

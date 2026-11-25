@@ -1,4 +1,11 @@
-import React, { lazy, Suspense, type ReactNode, useState } from "react";
+import React, {
+  lazy,
+  Suspense,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import ReactDOM from "react-dom/client";
 import { ArrowUp, ArrowUpRight, LogOut } from "lucide-react";
 import {
@@ -14,7 +21,11 @@ import {
 import { Providers, useSession } from "./context";
 import { MediaVerificationDialog } from "../../共享/MediaSecurity";
 import { api } from "./lib/api";
-import { publicSite } from "./lib/admin-ux";
+import {
+  canLeaveEditor,
+  publicSite,
+  useAdminNavigationGuard,
+} from "./lib/admin-ux";
 import { StateView } from "./components/shared";
 import { LoginPage } from "./pages/LoginPage";
 import { ChatProvider, ChatNavLink } from "./components/ChatNotifications";
@@ -44,22 +55,31 @@ function Shell() {
   const location = useLocation();
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const logoutRequest = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => logoutRequest.current?.abort(),
+    [location.key, user?.id],
+  );
+  useAdminNavigationGuard(Boolean(user), setError);
   async function logout() {
-    if (
-      !window.dispatchEvent(
-        new Event("qingye-before-logout", { cancelable: true }),
-      )
-    )
-      return;
-    setBusy(true);
+    if (logoutRequest.current) return;
+    const request = new AbortController();
+    logoutRequest.current = request;
     setError("");
     try {
+      if (
+        !(await canLeaveEditor(true, setError, request.signal)) ||
+        request.signal.aborted
+      )
+        return;
+      setBusy(true);
       await api.logout();
       await refresh();
       navigate("/login");
     } catch (e) {
       setError(e instanceof Error ? e.message : "退出失败，请重试。");
     } finally {
+      logoutRequest.current = null;
       setBusy(false);
     }
   }

@@ -322,6 +322,158 @@ select {
   color: var(--muted);
   background: var(--surface-subtle);
 }
+
+/* Keep the select element for form submission, validation and type-ahead.
+   Browsers without customizable select use their system picker. */
+.admin-app select:not([multiple], [size]) {
+  max-inline-size: 100%;
+  cursor: pointer;
+}
+.admin-app select:disabled {
+  cursor: not-allowed;
+}
+.admin-app select:enabled:hover:not(:focus) {
+  border-color: var(--muted);
+}
+@supports (appearance: base-select) and selector(::picker(select)) {
+  .admin-app select:not([multiple], [size]),
+  .admin-app select:not([multiple], [size])::picker(select) {
+    appearance: base-select;
+  }
+  .admin-app select:not([multiple], [size]) {
+    align-items: center;
+    gap: 8px;
+    padding-inline-end: 12px;
+  }
+  .admin-app select::picker-icon {
+    content: "";
+    flex: none;
+    width: 7px;
+    height: 7px;
+    margin-inline-start: auto;
+    margin-inline-end: 2px;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    color: var(--muted);
+    transform: translateY(-2px) rotate(45deg);
+    transition: transform var(--ease-quick);
+  }
+  .admin-app select:open::picker-icon {
+    color: var(--blue);
+    transform: translateY(2px) rotate(225deg);
+  }
+  .admin-app select:not([multiple], [size])::picker(select) {
+    margin-block: 4px;
+    min-inline-size: anchor-size(width);
+    max-inline-size: calc(100vw - 24px);
+    max-block-size: min(320px, 48dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding: 6px;
+    border: 1px solid var(--line-subtle);
+    border-radius: var(--radius-cards);
+    color: var(--ink);
+    background: var(--surface-solid-white);
+    box-shadow: var(--elevation-flyout);
+  }
+  @supports (backdrop-filter: blur(1px)) {
+    .admin-app select:not([multiple], [size])::picker(select) {
+      background: var(--surface-acrylic-hover);
+      backdrop-filter: blur(30px);
+    }
+  }
+  .admin-app select:not([multiple], [size]) option {
+    position: relative;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-radius: var(--radius-items);
+    font: inherit;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+  .admin-app option:enabled:is(:hover, :focus-visible) {
+    background: var(--surface-subtle);
+  }
+  .admin-app option:focus-visible {
+    outline: 2px solid var(--color-fluent-blue);
+    outline-offset: -2px;
+  }
+  .admin-app option:checked {
+    background: var(--surface-selected);
+    color: var(--blue);
+    font-weight: 600;
+  }
+  .admin-app option:checked::before {
+    content: "";
+    position: absolute;
+    inset: 9px auto 9px 0;
+    width: 3px;
+    border-radius: var(--radius-pills);
+    background: currentColor;
+  }
+  .admin-app option::checkmark {
+    order: 1;
+    margin-inline-start: auto;
+    color: var(--blue);
+  }
+  .admin-app option:disabled {
+    color: var(--muted);
+    cursor: not-allowed;
+  }
+  @media (pointer: coarse) {
+    .admin-app select:not([multiple], [size]) option {
+      min-height: 44px;
+    }
+  }
+}
+.admin-app input[type="file"]::file-selector-button {
+  margin-inline-end: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-buttons);
+  color: var(--ink);
+  background: var(--surface-subtle);
+  font: inherit;
+  cursor: pointer;
+}
+.admin-app input[type="file"]:enabled:hover::file-selector-button {
+  border-color: var(--line-accent);
+  background: var(--surface-selected);
+}
+.admin-app details > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  list-style: none;
+  cursor: pointer;
+}
+.admin-app details > summary::-webkit-details-marker {
+  display: none;
+}
+.admin-app details > summary::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-inline: 3px;
+  border: solid var(--muted);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(-45deg);
+  transition: transform var(--ease-quick);
+}
+.admin-app details[open] > summary::before {
+  transform: rotate(45deg);
+  border-color: var(--blue);
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-app details > summary::before,
+  .admin-app select::picker-icon {
+    transition: none;
+  }
+}
 input::placeholder,
 textarea::placeholder {
   color: var(--muted);
@@ -749,6 +901,43 @@ textarea::placeholder {
   .page-width {
     width: calc(100% - 32px);
   }
+}
+.admin-confirm-dialog {
+  width: min(420px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  color: var(--ink);
+  background: var(--surface-solid-white);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-cards);
+  box-shadow: var(--elevation-dialog);
+}
+.admin-confirm-dialog::backdrop {
+  background: var(--overlay);
+}
+.admin-confirm-dialog h2 {
+  margin: 24px 24px 8px;
+  font-size: var(--text-subheading);
+}
+.admin-confirm-dialog p {
+  margin: 0 24px 24px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.admin-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 16px 20px;
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--line-subtle);
+}
+.admin-confirm-actions button {
+  min-width: 80px;
+  min-height: 44px;
 }
 @media (forced-colors: active) {
   :where(

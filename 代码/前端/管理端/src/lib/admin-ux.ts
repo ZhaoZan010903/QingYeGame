@@ -1,49 +1,73 @@
 import { useBlocker } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { createRequestId } from "./api";
+import { confirmAdmin } from "./admin-confirm";
 
-/** Every editor uses the same leave guard, including browser Back/Forward. */
+// A product editor can be mounted inside a second guarded page. Router
+// navigation and logout must consider both, but show a single confirmation.
+const editors = new Set<{ busy: boolean }>();
+
 export function useUnsavedChanges(dirty: boolean, busy = false) {
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      (dirty || busy) &&
-      (currentLocation.pathname !== nextLocation.pathname ||
-        currentLocation.search !== nextLocation.search),
-  );
-  useEffect(() => {
-    if (blocker.state !== "blocked") return;
-    if (busy) {
-      window.alert("正在保存或上传，请处理完成后再离开。");
-      blocker.reset();
-    } else if (
-      window.confirm("还有未保存的内容。离开后，这些修改不会保留。确定离开？")
-    )
-      blocker.proceed();
-    else blocker.reset();
-  }, [blocker, busy]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!dirty && !busy) return;
+    const editor = { busy };
+    editors.add(editor);
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, busy]);
-  useEffect(() => {
-    const leave = (event: Event) => {
-      if (busy) {
-        window.alert("正在保存或上传，请处理完成后再退出。");
-        event.preventDefault();
-      } else if (
-        dirty &&
-        !window.confirm("当前有未保存的修改，退出后不会保留。确认退出？")
-      )
-        event.preventDefault();
+    return () => {
+      editors.delete(editor);
+      window.removeEventListener("beforeunload", warn);
     };
-    window.addEventListener("qingye-before-logout", leave);
-    return () => window.removeEventListener("qingye-before-logout", leave);
   }, [dirty, busy]);
+}
+
+export async function canLeaveEditor(
+  forLogout: boolean,
+  notify: (message: string) => void,
+  signal?: AbortSignal,
+) {
+  const blocked = () => {
+    for (const editor of editors) {
+      if (editor.busy) {
+        notify("正在保存或上传，请等操作完成后再试。");
+        return true;
+      }
+    }
+    return false;
+  };
+  if (blocked()) return false;
+  if (!editors.size) return true;
+  const accepted = await confirmAdmin("离开后，当前未保存的修改会丢失。", {
+    confirmLabel: forLogout ? "放弃修改并退出" : "放弃修改并离开",
+    signal,
+  });
+  return accepted && !signal?.aborted && !blocked();
+}
+
+export function useAdminNavigationGuard(
+  signedIn: boolean,
+  notify: (message: string) => void,
+) {
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      signedIn &&
+      editors.size > 0 &&
+      (currentLocation.pathname !== nextLocation.pathname ||
+        currentLocation.search !== nextLocation.search),
+  );
+  useEffect(() => {
+    if (blocker.state !== "blocked") return;
+    const controller = new AbortController();
+    void canLeaveEditor(false, notify, controller.signal).then((allowed) => {
+      if (controller.signal.aborted) return;
+      if (allowed) blocker.proceed();
+      else blocker.reset();
+    });
+    return () => controller.abort();
+  }, [blocker, notify]);
 }
 
 export const unitLabels: Record<string, string> = {
