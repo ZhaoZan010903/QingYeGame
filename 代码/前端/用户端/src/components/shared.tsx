@@ -93,10 +93,12 @@ export function Artwork({
   product: p,
   className = '',
   original = false,
+  retainOnScroll = false,
 }: {
   product: Product;
   className?: string;
   original?: boolean;
+  retainOnScroll?: boolean;
 }) {
   const [failed, setFailed] = useState(false);
   const first = p.images?.[0];
@@ -113,6 +115,7 @@ export function Artwork({
           src={src}
           productId={p.id}
           productVersion={p.version}
+          retainOnScroll={retainOnScroll}
           alt={p.title}
           loading="lazy"
           decoding="async"
@@ -145,7 +148,7 @@ export function AssetCard({ product: p }: { product: Product }) {
         state={{ from: location.pathname + location.search }}
       >
         <div className="asset-image">
-          <Artwork product={p} />
+          <Artwork product={p} retainOnScroll />
           <span className={`trade-badge ${tradeKind}`}>{tradeLabel}</span>
         </div>
         <div className="asset-body">

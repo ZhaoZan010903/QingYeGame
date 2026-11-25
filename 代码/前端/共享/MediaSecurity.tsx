@@ -32,20 +32,55 @@ import {
 
 const placeholder =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"%3E%3Crect width="640" height="360" fill="%238e8e9314"/%3E%3C/svg%3E';
-export function ProtectedImage({
+
+type ProtectedImageProps = ImgHTMLAttributes<HTMLImageElement> &
+  ProductMediaScope & { retainOnScroll?: boolean };
+
+export function ProtectedImage(props: ProtectedImageProps) {
+  const view = useSyncExternalStore(
+    subscribeAccess,
+    accessSnapshot,
+    accessSnapshot,
+  );
+  const identityEpoch = mediaIdentityGeneration();
+  // 换图、更新商品版本或切换登录身份时，释放卡片持有的上一张图片。
+  const key = props.retainOnScroll
+    ? JSON.stringify([
+        props.src,
+        props.productId,
+        props.productVersion,
+        identityEpoch,
+      ])
+    : undefined;
+  return (
+    <MediaImage key={key} {...props} view={view} identityEpoch={identityEpoch} />
+  );
+}
+
+function MediaImage({
   src,
   onError,
   onLoad,
   productId,
   productVersion,
+  retainOnScroll = false,
+  view,
+  identityEpoch,
   ...props
-}: ImgHTMLAttributes<HTMLImageElement> & ProductMediaScope) {
+}: ProtectedImageProps & {
+  view: ReturnType<typeof accessSnapshot>;
+  identityEpoch: number;
+}) {
   const protectedSource = isProtectedMedia(src);
   const [ready, setReady] = useState(!protectedSource);
   const [pending, setPending] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [delivered, setDelivered] = useState<DeliveredImage>();
-  const [visible, setVisible] = useState(props.loading !== "lazy");
+  const [visible, setVisible] = useState(
+    !retainOnScroll && props.loading !== "lazy",
+  );
+  const [startedDelivery, setStartedDelivery] = useState(false);
+  const shouldLoad = visible || (retainOnScroll && startedDelivery);
   const image = useRef<HTMLImageElement>(null);
   const release = useRef<(() => void) | null>(null);
   const retries = useRef(0);
@@ -53,13 +88,7 @@ export function ProtectedImage({
   const deliveryRelease = useRef<(() => void) | null>(null);
   const current = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const view = useSyncExternalStore(
-    subscribeAccess,
-    accessSnapshot,
-    accessSnapshot,
-  );
   const seen = useRef(view.revision);
-  const identityEpoch = mediaIdentityGeneration();
   useEffect(() => {
     const element = image.current;
     if (
@@ -99,7 +128,7 @@ export function ProtectedImage({
     };
   }, [src, protectedSource, identityEpoch, productId, productVersion]);
   useEffect(() => {
-    if (!protectedSource || !src || !ready || !visible || pending) {
+    if (!protectedSource || !src || !ready || !shouldLoad || pending) {
       setDelivered(undefined);
       return;
     }
@@ -120,6 +149,8 @@ export function ProtectedImage({
           releaseSlot();
           return;
         }
+        // 排队时滑出视口可取消。拿到下载槽后由卡片持有，滚动不再中断读取。
+        if (retainOnScroll) setStartedDelivery(true);
         timeout = setTimeout(() => {
           controller.abort(new DOMException("图片读取超时", "TimeoutError"));
           releaseSlot?.();
@@ -180,7 +211,8 @@ export function ProtectedImage({
     protectedSource,
     ready,
     attempt,
-    visible,
+    shouldLoad,
+    retainOnScroll,
     pending,
     identityEpoch,
     productId,
@@ -236,6 +268,7 @@ export function ProtectedImage({
     release.current?.();
     release.current = null;
     delivered?.invalidate?.();
+    if (retainOnScroll) setStartedDelivery(false);
     if (
       protectedSource &&
       (delivered?.mode === "oss" || delivered?.mode === "oss-blob") &&
@@ -301,6 +334,7 @@ export function ProtectedImage({
     <img
       {...props}
       ref={image}
+      loading={retainOnScroll && protectedSource && shouldLoad ? "eager" : props.loading}
       src={pending ? placeholder : ready ? effective : undefined}
       alt={pending ? "图片访问需要确认，请使用页面提示继续" : props.alt}
       data-media-state={pending ? "waiting" : undefined}

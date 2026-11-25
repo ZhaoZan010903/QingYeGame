@@ -128,6 +128,7 @@ export function EditorialCarousel({
             >
               <CarouselSlidePreview
                 slide={slides[i]}
+                productScope={{ productId: p.id, productVersion: p.version }}
                 imageUrl={
                   preloadCarouselSlide(i, activeIndex, products.length)
                     ? (p.images.find((image) => image.id === slides[i].imageId) ?? p.images[0])?.url

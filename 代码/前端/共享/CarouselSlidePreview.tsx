@@ -1,4 +1,5 @@
 import { ProtectedImage } from './MediaSecurity';
+import type { ProductMediaScope } from "./media-delivery";
 import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import type { HomeSlide } from "./home-content";
 import "./carousel-slide.css";
@@ -7,11 +8,13 @@ import "./carousel-slide.css";
 export function CarouselSlidePreview({
   slide,
   imageUrl,
+  productScope,
   action,
   previewViewport,
 }: {
   slide: HomeSlide;
   imageUrl?: string;
+  productScope?: ProductMediaScope;
   action?: ReactNode;
   previewViewport?: "mobile";
 }) {
@@ -61,6 +64,8 @@ export function CarouselSlidePreview({
         {imageUrl ? (
           <ProtectedImage
             src={imageUrl}
+            {...productScope}
+            retainOnScroll={Boolean(productScope)}
             alt={slide.title}
             loading="lazy"
             decoding="async"
