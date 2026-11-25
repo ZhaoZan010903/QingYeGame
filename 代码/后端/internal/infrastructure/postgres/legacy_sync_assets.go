@@ -13,7 +13,9 @@ func (s LegacySyncStore) FindAsset(ctx context.Context, legacyID, source, rawSHA
 	err := s.DB.QueryRow(ctx, `SELECT m.id,o.object_key,o.mime_type,o.sha256,o.byte_size,m.status='ready'
  FROM legacy_sync_assets a JOIN media_files m ON m.id=a.media_id
  JOIN media_objects o ON o.media_id=m.id AND o.variant='original'
- WHERE a.legacy_id=$1 AND (($3='' AND a.source_url=$2) OR ($3<>'' AND a.raw_sha256=$3))
+ WHERE a.legacy_id=$1 AND (($3='' AND (a.source_url=$2 OR EXISTS(
+     SELECT 1 FROM legacy_sync_asset_urls u WHERE u.media_id=a.media_id AND u.source_url=$2)))
+ OR ($3<>'' AND a.raw_sha256=$3))
  AND m.deleted_at IS NULL AND m.status IN ('pending','ready')
  AND o.store='oss' AND o.deleted_at IS NULL AND NOT o.force_delete
  AND NOT EXISTS(SELECT 1 FROM media_object_moves mv WHERE mv.media_id=m.id AND NOT mv.completed)
@@ -25,6 +27,13 @@ func (s LegacySyncStore) FindAsset(ctx context.Context, legacyID, source, rawSHA
 		return out, false, nil
 	}
 	return out, err == nil, err
+}
+
+func (s LegacySyncStore) RememberAssetURL(ctx context.Context, mediaID, source string) error {
+	_, err := s.DB.Exec(ctx, `INSERT INTO legacy_sync_asset_urls(media_id,source_url)
+ SELECT media_id,$2 FROM legacy_sync_assets WHERE media_id=$1 AND source_url<>$2
+ ON CONFLICT DO NOTHING`, mediaID, source)
+	return err
 }
 
 func (s LegacySyncStore) ReserveAsset(ctx context.Context, legacyID, source, rawSHA string, asset syncapp.Asset) error {

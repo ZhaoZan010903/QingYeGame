@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -117,17 +118,14 @@ func (s *SaaS) Catalog(ctx context.Context, progress func(completed, total int) 
 		}
 	}
 	if pages > 1 {
+		// Catch movement at the head of the sorted listing. The service requests
+		// and compares a second complete inventory before taking a product offline.
 		again, count, err := s.page(ctx, 1, &remaining)
 		if err != nil {
 			return legacysync.Inventory{}, err
 		}
-		if count != total || len(again) != len(first) {
-			return legacysync.Inventory{}, errors.New("旧站目录总数在读取时发生变化")
-		}
-		for i := range again {
-			if again[i].ID != first[i].ID || again[i].Status != first[i].Status || again[i].Deleted != first[i].Deleted {
-				return legacysync.Inventory{}, errors.New("旧站目录首屏在读取时发生变化")
-			}
+		if count != total || !reflect.DeepEqual(again, first) {
+			return legacysync.Inventory{}, errors.New("旧站目录首屏在读取时发生变化")
 		}
 	}
 	return legacysync.Inventory{Records: records, Latest: legacysync.TimePointer(newest)}, nil

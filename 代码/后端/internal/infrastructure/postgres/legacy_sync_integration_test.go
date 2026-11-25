@@ -317,6 +317,140 @@ func legacyImage(t *testing.T, red byte) []byte {
 	return data.Bytes()
 }
 
+// Start from an applied catalog, replace one listing with another, then roll
+// that batch back after an unchanged run. Counts alone cannot distinguish
+// these catalogs. Both the product IDs and the ordered galleries matter.
+func TestLegacySyncMixedBatchRepeatAndRollback(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db := legacySyncDB(t, ctx)
+	store := postgres.LegacySyncStore{DB: db}
+	const actor = "catalog-operator"
+	if _, err := db.Exec(ctx, `INSERT INTO users(id,phone,nickname,password_hash,role)
+ VALUES('catalog-operator','21001','管理员','fixture','admin');
+ INSERT INTO categories(id,name,trade_type,price_units) VALUES('legacy-sale','QQ炫舞买号','sale','["account"]')`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	const cdn = "https://cdn.xuansiwei.com/"
+	leaving := fakeListing("leaving", "QYCH11", "原有商品", "QQ炫舞买号", "200", cdn+"leaving.png", now)
+	staying := fakeListing("staying", "QYCH12", "保留商品", "QQ炫舞买号", "300", cdn+"staying.png", now)
+	entering := fakeListing("entering", "QYCH13", "新上架商品", "QQ炫舞买号", "400", cdn+"entering.png", now)
+	source := &testLegacySource{
+		inventory: legacysync.Inventory{Records: []legacysync.Record{leaving, staying}, Latest: &now},
+		images: map[string][]byte{
+			leaving.Content: legacyImage(t, 10), staying.Content: legacyImage(t, 20), entering.Content: legacyImage(t, 30),
+		},
+	}
+	objects := testLegacyObjects{}
+	service := &legacysync.Service{Source: source, Store: store, Objects: objects, Images: mediafiles.LegacyImages{Directory: t.TempDir()},
+		Environment: "test", NewID: security.NewID}
+	manual := func(id, status string) legacysync.Batch {
+		t.Helper()
+		runner := legacysync.NewManualRunner(ctx, service)
+		if _, err := runner.Start(actor, id); err != nil {
+			t.Fatal(err)
+		}
+		runner.Wait()
+		return waitLegacyBatch(t, ctx, store, id, status)
+	}
+	catalogState := func() map[string]legacysync.Current {
+		t.Helper()
+		rows, _, _, err := store.LoadCatalog(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}
+	assertImages := func(want int) {
+		t.Helper()
+		var mediaRows int
+		if err := db.QueryRow(ctx, `SELECT count(*) FROM media_files`).Scan(&mediaRows); err != nil {
+			t.Fatal(err)
+		}
+		if source.fetches != want || len(objects) != want || mediaRows != want {
+			t.Fatalf("image downloads/objects/media rows = %d/%d/%d, want %d each", source.fetches, len(objects), mediaRows, want)
+		}
+	}
+	manual(security.NewID(), "applied")
+	assertImages(2)
+
+	staying.Title = "商品改名，图片未变"
+	source.inventory.Records = []legacysync.Record{staying, entering}
+	mixed := manual(security.NewID(), "applied")
+	if mixed.Summary.Created != 1 || mixed.Summary.Updated != 1 || mixed.Summary.Removed != 1 || mixed.RollbackUntil == nil {
+		t.Fatalf("expected a single batch containing the replacement and rename: %+v", mixed)
+	}
+	after := catalogState()
+	if after[leaving.ID].Status != "offline" || after[entering.ID].Status != "published" || after[staying.ID].Title != staying.Title {
+		t.Fatal("the public catalog does not reflect the mixed batch")
+	}
+	assertImages(3)
+
+	source.inventory.Records = []legacysync.Record{entering, staying}
+	unchanged := manual(security.NewID(), "no_change")
+	_, _, detailCount, err := store.Details(ctx, unchanged.ID, "", 1, 0)
+	if err != nil || detailCount != 0 || unchanged.RollbackUntil != nil || unchanged.AppliedAt != nil ||
+		unchanged.Progress.Stage != legacysync.Done || len(mixed.SourceDigest) != 64 || unchanged.SourceDigest != mixed.SourceDigest {
+		t.Fatalf("unexpected unchanged batch details: count=%d batch=%+v err=%v", detailCount, unchanged, err)
+	}
+	reads := source.reads
+	manual(unchanged.ID, "no_change")
+	if reads != source.reads {
+		t.Fatal("retrying the same manual request ran a second worker")
+	}
+	for id, current := range catalogState() {
+		if current.Version != after[id].Version || !slices.Equal(current.Images, after[id].Images) {
+			t.Fatalf("unchanged sync modified product %s", id)
+		}
+	}
+	assertImages(3)
+
+	if err := store.RollbackBatch(ctx, mixed.ID, actor); err != nil {
+		t.Fatal(err)
+	}
+	rolled := catalogState()
+	if rolled[leaving.ID].Status != "published" || rolled[entering.ID].Status != "draft" || rolled[staying.ID].Title == staying.Title {
+		t.Fatal("rollback after an unchanged run failed to restore all three listings")
+	}
+	reapplied := manual(security.NewID(), "applied")
+	if reapplied.Summary.Created != 0 || reapplied.Summary.Restored != 1 || reapplied.Summary.Removed != 1 || reapplied.Summary.Updated != 1 {
+		t.Fatalf("replay should restore the same listing and remove its predecessor: %+v", reapplied)
+	}
+	replayed := catalogState()
+	if len(replayed) != len(after) {
+		t.Fatalf("replay changed product count: %d vs %d", len(replayed), len(after))
+	}
+	for id, before := range after {
+		current := replayed[id]
+		if current.ID != before.ID || current.Title != before.Title || current.Status != before.Status ||
+			!slices.Equal(current.Images, before.Images) {
+			t.Fatalf("replay changed the identity, data or image references of %s", id)
+		}
+	}
+	assertImages(3)
+
+	// The new title can be applied using the existing gallery while the image
+	// host is unavailable. Identical catalog metadata on the next run must
+	// still retry that image and replace the old reference when it recovers.
+	entering.Title = "更换图片的商品"
+	entering.Content = cdn + "recovered.png"
+	source.inventory.Records[0] = entering
+	withOldGallery := manual(security.NewID(), "applied")
+	held := catalogState()[entering.ID]
+	if withOldGallery.Summary.Review == 0 || held.Title != entering.Title ||
+		!slices.Equal(held.Images, replayed[entering.ID].Images) || source.fetches != 4 || len(objects) != 3 {
+		t.Fatalf("transient image failure did not retain the old gallery: %+v", withOldGallery)
+	}
+	source.images[entering.Content] = legacyImage(t, 40)
+	recovered := manual(security.NewID(), "applied")
+	ready := catalogState()[entering.ID]
+	if recovered.Summary.Imaged != 1 || len(ready.Images) != 1 || ready.Images[0] == held.Images[0] ||
+		ready.ImagesByURL[entering.Content] != ready.Images[0] || source.fetches != 5 || len(objects) != 4 {
+		t.Fatalf("identical source catalog suppressed a pending image retry: %+v", recovered)
+	}
+}
+
 func TestLegacySyncTransactions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -417,13 +551,22 @@ func TestLegacySyncTransactions(t *testing.T) {
 	initial := readCatalog()
 	pristine()
 
-	// The second full directory checksum is based on identity and visibility, not total counts.
+	// Re-reading the same count must verify identities and the complete source record.
 	unstable := slices.Clone(source.inventory.Records)
 	unstable[1].ID = "same-count-other-id"
 	source.second = &legacysync.Inventory{Records: unstable}
 	blocked := run("blocked")
 	if blocked.Progress.Stage != legacysync.VerifySource || blocked.AppliedAt != nil {
 		t.Fatalf("an unstable catalog reached the write stage: %+v", blocked)
+	}
+	pristine()
+	source.reads = 0
+	unstable = slices.Clone(source.inventory.Records)
+	unstable[1].Title += "（复核期间编辑）"
+	source.second = &legacysync.Inventory{Records: unstable}
+	changedDuringRead := run("blocked")
+	if changedDuringRead.Progress.Stage != legacysync.VerifySource || source.fetches != 0 {
+		t.Fatal("a title change during removal verification was missed")
 	}
 	pristine()
 	source.second = nil
@@ -526,7 +669,7 @@ func TestLegacySyncTransactions(t *testing.T) {
 		t.Fatalf("retry did not preserve product identity: %+v", retry)
 	}
 	publicCount(4)
-	unchanged := run("applied")
+	unchanged := run("no_change")
 	if unchanged.RollbackUntil != nil || unchanged.Summary.Created+unchanged.Summary.Updated+
 		unchanged.Summary.Restored+unchanged.Summary.Removed != 0 {
 		t.Fatalf("unchanged job produced writes: %+v", unchanged)

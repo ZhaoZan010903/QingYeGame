@@ -124,6 +124,11 @@ func equalJSON(a, b any) bool {
 }
 
 func sameProduct(a, b Product) bool {
+	if !slices.Equal(a.Images, b.Images) {
+		return false
+	}
+	// Galleries can contain hundreds of IDs. They are already compared above.
+	a.Images, b.Images = nil, nil
 	return equalJSON(a, b)
 }
 
@@ -136,6 +141,16 @@ func (i *Item) hold(notice string) {
 func (i *Item) block(reason string) {
 	i.hold(reason)
 	i.Blocking = true
+}
+
+func omitUnchanged(item Item) Item {
+	if item.After != nil && item.Before != nil && sameProduct(*item.After, *item.Before) {
+		if len(item.Notices) == 0 {
+			return Item{}
+		}
+		item.Action, item.After = "hold", nil
+	}
+	return item
 }
 
 func recordImages(r Record) ([]string, error) {
@@ -159,7 +174,11 @@ func recordImages(r Record) ([]string, error) {
 
 func galleryMatchesImport(old *Current, source legacycatalog.LegacyRecord) bool {
 	urls, err := recordImages(Record{LegacyRecord: source})
-	if err != nil || len(urls) != len(old.Images) {
+	return err == nil && galleryMatchesURLs(old, urls)
+}
+
+func galleryMatchesURLs(old *Current, urls []string) bool {
+	if len(urls) != len(old.Images) {
 		return false
 	}
 	for i, url := range urls {
@@ -411,6 +430,9 @@ func planRecord(r Record, old *Current, rules map[string]catalog.CategoryRules, 
 		} else {
 			item.block("缺少有效的图片清单，无法上架")
 		}
+		return item, nil
+	}
+	if old != nil && galleryMatchesURLs(old, urls) {
 		return item, nil
 	}
 	return item, urls

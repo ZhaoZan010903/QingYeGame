@@ -21,14 +21,14 @@ const freshLegacyBatch = legacyLeaseEnd + ">=now()"
 const staleLegacyBatch = "status='running' AND NOT (" + freshLegacyBatch + ")"
 const legacyBatchColumns = `id,planned_at,started_at,source_updated_at,
  CASE WHEN ` + staleLegacyBatch + ` THEN ` + legacyLeaseEnd + ` ELSE finished_at END,
- applied_at,rolled_back_at,rollback_until,CASE WHEN ` + staleLegacyBatch + ` THEN 'failed' ELSE status END,source_count,summary,
+ applied_at,rolled_back_at,rollback_until,CASE WHEN ` + staleLegacyBatch + ` THEN 'failed' ELSE status END,source_count,source_digest,summary,
  CASE WHEN ` + staleLegacyBatch + ` THEN '任务中断或超时，请重新发起' ELSE reason END,
  progress_stage,progress_completed,progress_total`
 
 func scanLegacyBatch(row pgx.Row, batch *syncapp.Batch) error {
 	return row.Scan(&batch.ID, &batch.PlannedAt, &batch.StartedAt, &batch.SourceUpdated, &batch.FinishedAt,
 		&batch.AppliedAt, &batch.RolledBackAt, &batch.RollbackUntil, &batch.Status, &batch.SourceCount,
-		&batch.Summary, &batch.Reason, &batch.Progress.Stage, &batch.Progress.Completed, &batch.Progress.Total)
+		&batch.SourceDigest, &batch.Summary, &batch.Reason, &batch.Progress.Stage, &batch.Progress.Completed, &batch.Progress.Total)
 }
 
 func legacyConflict(message string) error {
@@ -173,9 +173,9 @@ func (s LegacySyncStore) CloseBatch(ctx context.Context, batch syncapp.Batch, it
 	defer tx.Rollback(ctx)
 	var saved syncapp.Batch
 	err = scanLegacyBatch(tx.QueryRow(ctx, `UPDATE legacy_sync_batches SET status=$2,reason=$3,
- finished_at=clock_timestamp(),source_updated_at=$4,source_count=$5,summary=$6
+ finished_at=clock_timestamp(),source_updated_at=$4,source_count=$5,source_digest=$6,summary=$7
  WHERE id=$1 AND status='running' RETURNING `+legacyBatchColumns,
-		batch.ID, batch.Status, batch.Reason, batch.SourceUpdated, batch.SourceCount, batch.Summary), &saved)
+		batch.ID, batch.Status, batch.Reason, batch.SourceUpdated, batch.SourceCount, batch.SourceDigest, batch.Summary), &saved)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// COMMIT may have succeeded even if the worker lost the database response.
 		err = scanLegacyBatch(tx.QueryRow(ctx, `SELECT `+legacyBatchColumns+` FROM legacy_sync_batches WHERE id=$1`, batch.ID), &saved)

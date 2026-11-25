@@ -97,9 +97,11 @@ func (s LegacySyncStore) LoadCatalog(ctx context.Context) (map[string]syncapp.Cu
 	if err = rows.Err(); err != nil {
 		return nil, nil, nil, err
 	}
-	rows, err = tx.Query(ctx, `SELECT p.legacy_id,pi.media_id,coalesce(nullif(m.source_url,''),a.source_url,''),`+syncMediaReady+`
+	rows, err = tx.Query(ctx, `SELECT p.legacy_id,pi.media_id,coalesce(nullif(m.source_url,''),a.source_url,''),`+syncMediaReady+`,u.urls
  FROM product_images pi JOIN products p ON p.id=pi.product_id JOIN media_files m ON m.id=pi.media_id
- LEFT JOIN legacy_sync_assets a ON a.media_id=m.id WHERE p.legacy_id IS NOT NULL
+ LEFT JOIN legacy_sync_assets a ON a.media_id=m.id AND a.legacy_id=p.legacy_id
+ LEFT JOIN (SELECT media_id,array_agg(source_url) AS urls FROM legacy_sync_asset_urls GROUP BY media_id) u ON u.media_id=a.media_id
+ WHERE p.legacy_id IS NOT NULL
  ORDER BY p.legacy_id,pi.sort_order,pi.media_id`)
 	if err != nil {
 		return nil, nil, nil, err
@@ -108,13 +110,17 @@ func (s LegacySyncStore) LoadCatalog(ctx context.Context) (map[string]syncapp.Cu
 	for rows.Next() {
 		var legacyID, mediaID, original string
 		var ready bool
-		if err = rows.Scan(&legacyID, &mediaID, &original, &ready); err != nil {
+		var aliases []string
+		if err = rows.Scan(&legacyID, &mediaID, &original, &ready, &aliases); err != nil {
 			return nil, nil, nil, err
 		}
 		p := products[legacyID]
 		p.Images = append(p.Images, mediaID)
 		if ready {
 			p.ReadyImages++
+			for _, alias := range aliases {
+				p.ImagesByURL[alias] = mediaID
+			}
 		}
 		if source, parseErr := legacycatalog.CanonicalImageURL(original); ready && parseErr == nil {
 			p.ImagesByURL[source] = mediaID
@@ -413,7 +419,9 @@ func (s LegacySyncStore) CommitBatch(ctx context.Context, batch syncapp.Batch, i
 		return batch, err
 	}
 	var until *time.Time
+	status := "no_change"
 	if written > 0 {
+		status = "applied"
 		end := completedAt.Add(7 * 24 * time.Hour)
 		until = &end
 		if _, err = tx.Exec(ctx, `UPDATE legacy_sync_media_holds SET expires_at=$2 WHERE batch_id=$1`, batch.ID, end); err != nil {
@@ -422,9 +430,9 @@ func (s LegacySyncStore) CommitBatch(ctx context.Context, batch syncapp.Batch, i
 	}
 	var result syncapp.Batch
 	err = scanLegacyBatch(tx.QueryRow(ctx, `UPDATE legacy_sync_batches
- SET status='applied',finished_at=$7,applied_at=$7,rollback_until=$2,applied_by=nullif($3,''),
- source_updated_at=$4,source_count=$5,summary=$6,progress_stage='done',progress_completed=1,progress_total=1
- WHERE id=$1 RETURNING `+legacyBatchColumns, batch.ID, until, actor, batch.SourceUpdated, batch.SourceCount, batch.Summary, completedAt), &result)
+ SET status=$9,finished_at=$8,applied_at=CASE WHEN $9='applied' THEN $8::timestamptz END,rollback_until=$2,applied_by=nullif($3,''),
+ source_updated_at=$4,source_count=$5,source_digest=$6,summary=$7,progress_stage='done',progress_completed=1,progress_total=1
+ WHERE id=$1 RETURNING `+legacyBatchColumns, batch.ID, until, actor, batch.SourceUpdated, batch.SourceCount, batch.SourceDigest, batch.Summary, completedAt, status), &result)
 	if err != nil {
 		return batch, err
 	}

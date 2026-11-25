@@ -2,6 +2,9 @@ package legacysync
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -67,29 +70,32 @@ func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batc
 		if err != nil {
 			return batch, fmt.Errorf("暂无法确认本批结果，请查阅批次记录: %w", err)
 		}
-		if saved.Status == "applied" || saved.Status == "rolled_back" {
+		if saved.Status == "applied" || saved.Status == "no_change" || saved.Status == "rolled_back" {
 			return saved, nil
 		}
 		return saved, errors.New(saved.Reason)
 	}
 	reporter := progressReporter{store: s.Store, id: batch.ID}
-	read := func(stage string) (Inventory, map[string]string, error) {
+	read := func(stage string) (Inventory, map[string]string, string, error) {
 		if err := reporter.update(ctx, stage, 0, 0); err != nil {
-			return Inventory{}, nil, err
+			return Inventory{}, nil, "", err
 		}
 		source, err := s.Source.Catalog(ctx, func(completed, total int) error {
 			return reporter.update(ctx, stage, completed, total)
 		})
 		if err != nil {
-			return Inventory{}, nil, err
+			return Inventory{}, nil, "", err
 		}
-		states, err := inventoryStates(source)
-		return source, states, err
+		states, digest, err := inventorySnapshot(source)
+		return source, states, digest, err
 	}
-	source, states, err := read(ReadSource)
+	source, states, digest, err := read(ReadSource)
 	if err != nil {
 		return finish("failed", stopReason(ctx, err))
 	}
+	batch.SourceCount = len(source.Records)
+	batch.SourceUpdated = source.Latest
+	batch.SourceDigest = digest
 	current, categories, codes, err := s.Store.LoadCatalog(ctx)
 	if err != nil {
 		return finish("failed", "读取新站商品或分类失败")
@@ -112,17 +118,15 @@ func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batc
 	if len(unavailable) > 0 {
 		// Fresh complete membership is required even when additions offset the removals.
 		source = Inventory{}
-		verified, latestStates, err := read(VerifySource)
+		verified, _, verifiedDigest, err := read(VerifySource)
 		if err != nil {
 			return finish("failed", stopReason(ctx, err))
 		}
-		if !sameInventory(states, latestStates) {
-			return finish("blocked", "两次完整读取的商品集合或上架状态不同，请稍后重新同步")
+		if verifiedDigest != digest {
+			return finish("blocked", "两次读取的旧站商品或资料不一致，请稍后重新同步")
 		}
 		source = verified
 	}
-	batch.SourceCount = len(source.Records)
-	batch.SourceUpdated = source.Latest
 	if len(unavailable) >= max(12, (visible+9)/10) ||
 		len(unavailable) >= 2 && len(source.Records)*2 < visible {
 		for _, id := range unavailable {
@@ -149,6 +153,9 @@ func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batc
 		code := strings.ToUpper(strings.TrimSpace(record.Code))
 		collision := sourceCodes[code] != 1 || codes[code] != "" && (old == nil || codes[code] != old.ID)
 		item, urls := planRecord(record, old, categories, collision, batch.StartedAt)
+		if len(urls) == 0 {
+			item = omitUnchanged(item)
+		}
 		if item.Action != "" {
 			items = append(items, item)
 		}
@@ -175,8 +182,10 @@ func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batc
 	if slices.ContainsFunc(items, func(i Item) bool { return i.Blocking }) {
 		return finish("blocked", "有商品资料无法通过校验，请处理提示中的商品后重新同步")
 	}
-	if err = reporter.update(ctx, PrepareMedia, 0, len(galleries)); err != nil {
-		return finish("failed", stopReason(ctx, err))
+	if len(galleries) > 0 {
+		if err = reporter.update(ctx, PrepareMedia, 0, len(galleries)); err != nil {
+			return finish("failed", stopReason(ctx, err))
+		}
 	}
 	budget := int64(maxRunBytes)
 	prepared := 0
@@ -212,13 +221,12 @@ func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batc
 	}
 	differences := items[:0]
 	for _, item := range items {
-		if item.After != nil && item.Before != nil && sameProduct(*item.After, *item.Before) {
-			if len(item.Notices) == 0 {
-				continue
-			}
-			item.Action, item.After = "hold", nil
+		if _, prepared := galleries[item.LegacyID]; prepared {
+			item = omitUnchanged(item)
 		}
-		differences = append(differences, item)
+		if item.Action != "" {
+			differences = append(differences, item)
+		}
 	}
 	items = differences
 	if err = reporter.update(ctx, Commit, 0, 0); err != nil {
@@ -246,30 +254,29 @@ func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batc
 	return finish("failed", stopReason(ctx, errors.New("批次提交失败，请重新同步")))
 }
 
-func inventoryStates(source Inventory) (map[string]string, error) {
+// Hash the decoded fields in stable ID order. Image order within a listing is significant.
+func inventorySnapshot(source Inventory) (map[string]string, string, error) {
 	if len(source.Records) == 0 {
-		return nil, errors.New("旧站目录为空")
+		return nil, "", errors.New("旧站目录为空")
 	}
 	states := make(map[string]string, len(source.Records))
-	for _, record := range source.Records {
+	ordered := make([]int, len(source.Records))
+	for i, record := range source.Records {
 		if _, seen := states[record.ID]; seen {
-			return nil, errors.New("旧站目录有重复商品")
+			return nil, "", errors.New("旧站目录有重复商品")
 		}
 		states[record.ID] = sourceStatus(record)
+		ordered[i] = i
 	}
-	return states, nil
-}
-
-func sameInventory(first, second map[string]string) bool {
-	if len(first) != len(second) {
-		return false
-	}
-	for id, status := range first {
-		if next, ok := second[id]; !ok || next != status {
-			return false
+	sort.Slice(ordered, func(i, j int) bool { return source.Records[ordered[i]].ID < source.Records[ordered[j]].ID })
+	hash := sha256.New()
+	encoder := json.NewEncoder(hash)
+	for _, index := range ordered {
+		if err := encoder.Encode(&source.Records[index]); err != nil {
+			return nil, "", errors.New("旧站商品字段格式异常，无法核对目录")
 		}
 	}
-	return true
+	return states, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func stopReason(ctx context.Context, err error) string {
@@ -378,11 +385,19 @@ func (s *Service) stageImage(ctx context.Context, legacyID, source string, budge
 	if err != nil {
 		return "", err
 	}
-	if found && known.Ready {
-		return known.ID, nil
-	}
-	if found && (known.Size != image.Size || known.SHA256 != image.SHA256 || known.MIME != image.MIME) {
-		return "", ErrImage
+	if found {
+		if !known.Ready && (known.Size != image.Size || known.SHA256 != image.SHA256 || known.MIME != image.MIME) {
+			return "", ErrImage
+		}
+		// The downloaded bytes matched an asset owned by this listing. Cache
+		// the alternate URL even when resuming a pending upload. FindAsset
+		// only allows a ready, retained object to bypass the download.
+		if err = s.Store.RememberAssetURL(ctx, known.ID, source); err != nil {
+			return "", err
+		}
+		if known.Ready {
+			return known.ID, nil
+		}
 	}
 	if !found {
 		id := s.NewID()

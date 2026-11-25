@@ -24,7 +24,7 @@ func (transport testTransport) RoundTrip(req *http.Request) (*http.Response, err
 }
 
 func TestCatalogRejectsPaginationChanges(t *testing.T) {
-	for _, scenario := range []string{"完整目录", "缺一条", "编号重复", "首屏变化", "首屏状态变化"} {
+	for _, scenario := range []string{"完整目录", "缺一条", "编号重复", "首屏变化", "首屏状态变化", "首屏图片变化", "后页总数变化"} {
 		t.Run(scenario, func(t *testing.T) {
 			hits := 0
 			source := SaaS{client: &http.Client{Transport: testTransport(func(request *http.Request) (*http.Response, error) {
@@ -54,6 +54,12 @@ func TestCatalogRejectsPaginationChanges(t *testing.T) {
 				}
 				if scenario == "首屏状态变化" && hits == 3 {
 					list[0].Status = "已售出"
+				}
+				if scenario == "首屏图片变化" && hits == 3 {
+					list[0].Content = "//cdn.xuansiwei.com/updated.png"
+				}
+				if scenario == "后页总数变化" && page == 2 {
+					count++
 				}
 				data, err := json.Marshal(map[string]any{"status": 0, "count": count, "list": list})
 				if err != nil {

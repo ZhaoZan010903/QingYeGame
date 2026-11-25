@@ -128,6 +128,7 @@ type Batch struct {
 	RollbackUntil *time.Time `json:"rollback_until"`
 	Status        string     `json:"status"`
 	SourceCount   int        `json:"source_count"`
+	SourceDigest  string     `json:"-"`
 	Summary       Summary    `json:"summary"`
 	Reason        string     `json:"reason"`
 	Progress      Progress   `json:"progress"`
@@ -164,6 +165,7 @@ type Store interface {
 	CloseBatch(context.Context, Batch, []Item) (Batch, error)
 	CommitBatch(context.Context, Batch, []Item, string) (Batch, error)
 	FindAsset(context.Context, string, string, string) (Asset, bool, error)
+	RememberAssetURL(ctx context.Context, mediaID, source string) error
 	ReserveAsset(context.Context, string, string, string, Asset) error
 	ReadyAsset(context.Context, string) error
 }
