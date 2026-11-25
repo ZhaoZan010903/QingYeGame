@@ -43,7 +43,7 @@
   min-height: 40px;
   padding: 8px 12px;
   border-radius: var(--radius-items);
-  color: #d5d5d8;
+  color: var(--nav-ink);
   font-size: var(--text-body);
 }
 .nav-group a:hover {

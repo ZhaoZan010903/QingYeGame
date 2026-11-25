@@ -177,7 +177,11 @@ export function DashboardTrend({
             gradientUnits="objectBoundingBox"
           >
             <stop offset="0%" stopColor="var(--accent)" stopOpacity=".33" />
-            <stop offset="100%" stopColor="#30D158" stopOpacity=".03" />
+            <stop
+              offset="100%"
+              stopColor="var(--chart-area-end)"
+              stopOpacity=".03"
+            />
           </linearGradient>
         </defs>
         {ticks.map((value) => {

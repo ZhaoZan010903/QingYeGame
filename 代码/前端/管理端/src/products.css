@@ -539,6 +539,9 @@ a.product-list-title:hover {
   background: var(--overlay);
   backdrop-filter: blur(3px);
 }
+:root[data-theme="light"] .product-action-dialog {
+  box-shadow: var(--elevation-dialog);
+}
 .product-action-dialog h2 {
   font-size: 21px;
   margin: 0 30px 18px 0;

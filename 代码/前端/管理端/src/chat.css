@@ -128,7 +128,7 @@
   border-color: var(--color-fluent-blue);
 }
 .chat-admin .chat-emoji-picker,
-.admin-app .chat-toast {
+.chat-toast {
   border: 1px solid var(--line);
   border-radius: var(--radius-cards);
   background: var(--surface-card);
@@ -138,8 +138,23 @@
 .chat-admin .chat-emoji-picker button {
   border-radius: var(--radius-items);
 }
-.admin-app .chat-toast span {
+.chat-toast span {
   color: var(--muted);
+  opacity: 1;
+}
+:root[data-theme="light"] .chat-admin .chat-lightbox {
+  background: var(--surface-page);
+  color: var(--ink);
+}
+:root[data-theme="light"] .chat-admin .chat-lightbox::backdrop {
+  background: var(--overlay);
+}
+:root[data-theme="light"] .chat-admin .chat-lightbox :is(b, p) {
+  color: var(--muted);
+}
+:root[data-theme="light"] .chat-admin .chat-lightbox button {
+  background: var(--surface-card);
+  border-color: var(--line);
 }
 .admin-app :is(.chat-nav-link b, .chat-unread-nav) {
   background: var(--color-fluent-blue);

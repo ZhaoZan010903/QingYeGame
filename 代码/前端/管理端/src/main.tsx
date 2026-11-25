@@ -29,6 +29,7 @@ import {
 import { StateView } from "./components/shared";
 import { LoginPage } from "./pages/LoginPage";
 import { ChatProvider, ChatNavLink } from "./components/ChatNotifications";
+import { AdminThemeSwitch } from "./components/AdminThemeSwitch";
 import "./style.css";
 const AdminPage = lazy(() =>
   import("./pages/AdminPage").then((module) => ({ default: module.AdminPage })),
@@ -104,33 +105,40 @@ function Shell() {
             <strong>清叶</strong>
             <span className="admin-brand-label">管理后台</span>
           </Link>
-          {user && (
-            <div className="admin-session">
-              <span className="environment-badge">
-                {import.meta.env.VITE_ENVIRONMENT_LABEL || "管理环境"}
-              </span>
-              <ChatNavLink />
-              <Link className="topbar-help" to="/help">
-                操作指南
-              </Link>
-              <span className="admin-account" title={user.nickname}>
-                <span className="admin-account-mark" aria-hidden="true">
-                  {Array.from(user.nickname?.trim() ?? "")[0] || "管"}
+          <div className="admin-session">
+            {user && (
+              <>
+                <span className="environment-badge">
+                  {import.meta.env.VITE_ENVIRONMENT_LABEL || "管理环境"}
                 </span>
-                <span className="admin-account-name">{user.nickname}</span>
-              </span>
-              <button
-                className="button-outline admin-logout"
-                type="button"
-                aria-label="退出管理台"
-                disabled={busy}
-                onClick={() => void logout()}
-              >
-                <LogOut size={16} aria-hidden="true" />
-                <span>退出管理台</span>
-              </button>
-            </div>
-          )}
+                <ChatNavLink />
+                <Link className="topbar-help" to="/help">
+                  操作指南
+                </Link>
+              </>
+            )}
+            <AdminThemeSwitch />
+            {user && (
+              <>
+                <span className="admin-account" title={user.nickname}>
+                  <span className="admin-account-mark" aria-hidden="true">
+                    {Array.from(user.nickname?.trim() ?? "")[0] || "管"}
+                  </span>
+                  <span className="admin-account-name">{user.nickname}</span>
+                </span>
+                <button
+                  className="button-outline admin-logout"
+                  type="button"
+                  aria-label="退出管理台"
+                  disabled={busy}
+                  onClick={() => void logout()}
+                >
+                  <LogOut size={16} aria-hidden="true" />
+                  <span>退出管理台</span>
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </header>
       {error && (

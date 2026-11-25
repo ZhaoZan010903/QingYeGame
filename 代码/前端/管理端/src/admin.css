@@ -351,7 +351,7 @@
 .carousel-preview {
   --surface: #111115;
   --text: #f2f2f4;
-  background: #111115;
+  background: var(--surface);
   border: 1px solid #24242a;
   border-radius: 16px;
   overflow: hidden;
@@ -360,6 +360,11 @@
 .carousel-preview-stage {
   transform-origin: top left;
   display: flow-root;
+}
+:root[data-theme="light"] .carousel-preview {
+  --surface: var(--surface-card);
+  --text: var(--ink);
+  border-color: var(--grid-line);
 }
 .carousel-preview.mobile {
   max-width: 390px;
@@ -462,10 +467,21 @@
   background: #111;
   border-radius: 12px;
 }
+:root[data-theme="light"] .admin-listing-preview > img {
+  background: var(--surface-subtle);
+}
 .admin-listing-preview h2 {
   font-size: 23px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+.admin-shell
+  :is(.media-sync-progress, .upload-overall-progress, .upload-caption) {
+  --surface-2: var(--surface-pressed);
+  --gold: var(--accent);
+}
+.admin-shell .media-sync-progress[data-interrupted="true"] {
+  border-color: var(--error-line);
 }
 .admin-listing-preview p {
   white-space: pre-wrap;
@@ -1529,6 +1545,9 @@ textarea {
   background: var(--overlay);
   backdrop-filter: blur(3px);
 }
+:root[data-theme="light"] .guide-dialog {
+  box-shadow: var(--elevation-dialog);
+}
 .guide-dialog[open] {
   animation: dialog-in var(--ease-surface);
 }
@@ -2280,6 +2299,9 @@ textarea {
 }
 .admin-product-lightbox::backdrop {
   background: rgba(9, 9, 11, 0.8);
+}
+:root[data-theme="light"] .admin-product-lightbox::backdrop {
+  background: var(--overlay);
 }
 .admin-product-lightbox > img {
   display: block;
