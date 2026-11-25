@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   Plus,
   Search,
+  SlidersHorizontal,
   RefreshCw,
   ChevronLeft,
   ChevronRight,
@@ -170,11 +171,6 @@ export function ProductListRow({
       </td>
       <td data-label="操作">
         <div className="product-row-actions">
-          {!trash && recommend && (
-            <button type="button" disabled={disabled} onClick={recommend}>
-              推荐加分 <b className="mono">{p.recommendationBoost ?? 0}</b>
-            </button>
-          )}
           {p.status === "rejected_final" ? (
             <>
               {!trash && (
@@ -183,11 +179,6 @@ export function ProductListRow({
                 </Link>
               )}
               <span className="subtle">最终驳回，不可编辑或恢复</span>
-              {!trash && (
-                <button disabled={disabled} onClick={() => act("trash")}>
-                  移入回收站
-                </button>
-              )}
             </>
           ) : trash ? (
             <button
@@ -199,23 +190,21 @@ export function ProductListRow({
               恢复草稿
             </button>
           ) : (
-            <>
-              <div>
-                <Link to={adminProductPath(p.id)} state={{ returnTo }}>
-                  查看
-                </Link>
-                <button
-                  className="button-outline"
-                  disabled={disabled}
-                  onClick={edit}
-                >
-                  {review ? "查看并审核" : "编辑"}
-                </button>
-              </div>
+            <button
+              className="button-outline"
+              disabled={disabled}
+              onClick={edit}
+            >
+              {p.status === "pending" ? "查看并审核" : "编辑"}
+            </button>
+          )}
+          {!trash && (
+            <details className="product-more-actions">
+              <summary>更多操作</summary>
               <div>
                 {!review && ["published", "publishing"].includes(p.status) && (
                   <button disabled={disabled} onClick={() => act("offline")}>
-                    下架
+                    {p.status === "publishing" ? "取消上架" : "下架"}
                   </button>
                 )}
                 {!review &&
@@ -226,7 +215,7 @@ export function ProductListRow({
                       上架
                     </button>
                   )}
-                {p.status === "published" && publicSite && (
+                {p.isPubliclyVisible && publicSite && (
                   <a
                     href={`${publicSite}/accounts/${encodeURIComponent(p.id)}`}
                     target="_blank"
@@ -235,15 +224,21 @@ export function ProductListRow({
                     公开页 ↗
                   </a>
                 )}
+                {recommend && (
+                  <button type="button" disabled={disabled} onClick={recommend}>
+                    推荐加分{" "}
+                    <b className="mono">{p.recommendationBoost ?? 0}</b>
+                  </button>
+                )}
                 <button
                   className="product-delete"
                   disabled={disabled}
                   onClick={() => act("trash")}
                 >
-                  删除
+                  移入回收站
                 </button>
               </div>
-            </>
+            </details>
           )}
           {trash && (
             <button
@@ -269,15 +264,27 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
     trash,
   } = readProductListQuery(params, review);
   const requestKey = requestParams.toString();
-  const [data, setData] = useState<ProductPage>({
-    items: [],
-    total: 0,
-    nextCursor: null,
-  });
+  const [result, setResult] = useState<{
+    query: string;
+    revision: number;
+    page?: ProductPage;
+    error?: unknown;
+  } | null>(null);
   const [q, setQ] = useState(params.get("q") || "");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<unknown>();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const advancedCount = [
+    params.get("source"),
+    params.get("trade_type"),
+    params.get("sort") && params.get("sort") !== "updated",
+  ].filter(Boolean).length;
   const [revision, setRevision] = useState(0);
+  const current =
+    result?.query === requestKey && result.revision === revision
+      ? result
+      : null;
+  const data = current?.page;
+  const loading = !current;
+  const error = current?.error;
   const [notice, setNotice] = useState("");
   const [action, setAction] = useState<{
     product: Product;
@@ -290,25 +297,31 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
   const [purgeTarget, setPurgeTarget] = useState<PurgeTarget | null>(null);
   const [recommendationProduct, setRecommendationProduct] =
     useState<Product | null>(null);
-  const sequence = useRef(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const jump = useRef<HTMLInputElement>(null);
   useUnsavedChanges(false, busy);
   const selected =
     params.get("edit") || (params.get("new") === "1" ? "new" : null);
-  const totalPages = Math.max(1, Math.ceil(data.total / size));
-  const status = review ? "pending" : params.get("status") || "";
+  const cancelPublication =
+    action?.kind === "offline" && action.product.status === "publishing";
+  const actionLabel =
+    action && (cancelPublication ? "取消上架" : actionNames[action.kind]);
+  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / size));
+  const status = requestParams.get("status") || "";
+  const publicOnly = requestParams.get("visibility") === "public";
   useEffect(() => setQ(params.get("q") || ""), [params.get("q")]);
-  useEffect(() => setPurgeTarget(null), [params.toString()]);
   useEffect(() => {
-    const current = ++sequence.current;
-    setLoading(true);
-    setError(undefined);
+    setPurgeTarget(null);
+    setAction(null);
+    setRecommendationProduct(null);
+  }, [requestKey, selected]);
+  useEffect(() => {
+    const controller = new AbortController();
     void adminApi
-      .products(new URLSearchParams(requestKey))
-      .then((result) => {
-        if (current !== sequence.current) return;
-        const last = Math.max(1, Math.ceil(result.total / size));
+      .products(new URLSearchParams(requestKey), controller.signal)
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        const last = Math.max(1, Math.ceil(page.total / size));
         if (pageNumber > last) {
           setParams(
             (previous) => {
@@ -320,16 +333,14 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
           );
           return;
         }
-        setData(result);
+        setResult({ query: requestKey, revision, page });
       })
       .catch((e) => {
-        if (current === sequence.current) setError(e);
-      })
-      .finally(() => {
-        if (current === sequence.current) setLoading(false);
+        if (!controller.signal.aborted)
+          setResult({ query: requestKey, revision, error: e });
       });
     return () => {
-      sequence.current++;
+      controller.abort();
     };
   }, [requestKey, revision]);
   useEffect(() => {
@@ -357,6 +368,13 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
   function go(page: number) {
     update({ page: String(Math.min(totalPages, Math.max(1, page))) }, false);
   }
+  function switchScope(scope: string) {
+    update({
+      status: scope === "public" || scope === "trash" ? "" : scope,
+      visibility: scope === "public" ? "public" : "",
+      trash: scope === "trash" ? "1" : "",
+    });
+  }
   async function perform(event: FormEvent) {
     event.preventDefault();
     if (!action || busy) return;
@@ -382,7 +400,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
             : {}),
         });
       setNotice(
-        `${p.code || p.id}：${kind === "trash" ? "已移入回收站" : kind === "restore" ? "已恢复为草稿" : kind === "offline" ? "已下架" : "已提交上架"}`,
+        `${p.code || p.id}：${kind === "trash" ? "已移入回收站" : kind === "restore" ? "已恢复为草稿" : cancelPublication ? "已取消上架" : kind === "offline" ? "已下架" : "已提交上架"}`,
       );
       setAction(null);
       setRevision((v) => v + 1);
@@ -405,15 +423,8 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
         <section className="product-management">
           <div className="admin-heading">
             <div>
-              <span className="eyebrow">
-                {review ? "会员投稿" : "日常商品维护"}
-              </span>
               <h1>{review ? "待审核商品" : "商品管理"}</h1>
-              <p>
-                {review
-                  ? "核对资料和图片，审核通过后再公开上架。"
-                  : "查找、编辑与管理上架状态，删除的商品可在回收站恢复。"}
-              </p>
+              {review && <p>核对商品资料与图片后，可通过审核或退回修改。</p>}
             </div>
             <div className="heading-actions">
               <GuideButton kind={review ? "review" : "product"} />
@@ -426,31 +437,59 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
             </div>
           </div>
           {!review && (
-            <div className="product-list-tabs" aria-label="按商品状态筛选">
-              <button
-                aria-pressed={!status && !trash}
-                onClick={() => update({ status: "", trash: "" })}
-              >
-                全部商品
-              </button>
-              {Object.entries(statusNames).map(([value, label]) => (
-                <button
-                  key={value}
-                  aria-pressed={status === value && !trash}
-                  onClick={() => update({ status: value, trash: "" })}
+            <>
+              <label className="product-mobile-scope">
+                商品范围
+                <select
+                  value={trash ? "trash" : publicOnly ? "public" : status}
+                  onChange={(event) => switchScope(event.target.value)}
                 >
-                  {label}
-                </button>
-              ))}
-              <button
-                className="trash-tab"
-                aria-pressed={trash}
-                onClick={() => update({ status: "", trash: "1" })}
+                  <option value="">全部商品</option>
+                  <option value="public">公开可见</option>
+                  {Object.entries(statusNames).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                  <option value="trash">回收站</option>
+                </select>
+              </label>
+              <div
+                className="product-list-tabs"
+                role="group"
+                aria-label="按商品状态筛选"
               >
-                <Trash2 size={15} />
-                回收站
-              </button>
-            </div>
+                <button
+                  aria-pressed={!status && !trash && !publicOnly}
+                  onClick={() => switchScope("")}
+                >
+                  全部商品
+                </button>
+                <button
+                  aria-pressed={publicOnly}
+                  onClick={() => switchScope("public")}
+                >
+                  公开可见
+                </button>
+                {Object.entries(statusNames).map(([value, label]) => (
+                  <button
+                    key={value}
+                    aria-pressed={status === value && !trash}
+                    onClick={() => switchScope(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <button
+                  className="trash-tab"
+                  aria-pressed={trash}
+                  onClick={() => switchScope("trash")}
+                >
+                  <Trash2 size={15} />
+                  回收站
+                </button>
+              </div>
+            </>
           )}
           <div className="panel product-list-panel">
             <form
@@ -473,57 +512,77 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
               <button className="button-white" type="submit">
                 搜索
               </button>
-              <label>
-                交易类型
-                <select
-                  value={params.get("trade_type") || ""}
-                  onChange={(e) => update({ trade_type: e.target.value })}
-                >
-                  <option value="">全部类型</option>
-                  <option value="sale">账号出售</option>
-                  <option value="rent">账号租赁</option>
-                </select>
-              </label>
-              <label>
-                商品来源
-                <select
-                  value={params.get("source") || ""}
-                  onChange={(e) => update({ source: e.target.value })}
-                >
-                  <option value="">全部来源</option>
-                  {Object.entries(sources).map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                排序
-                <select
-                  value={params.get("sort") || "updated"}
-                  onChange={(e) => update({ sort: e.target.value })}
-                >
-                  <option value="updated">最近更新优先</option>
-                  <option value="published">首次上架时间倒序</option>
-                  <option value="created">创建时间倒序</option>
-                </select>
-              </label>
               <button
-                className="text-button"
+                className="product-filter-toggle button-outline"
                 type="button"
-                onClick={() => {
-                  setQ("");
-                  update({ q: "", source: "", trade_type: "", sort: "" });
-                }}
+                aria-controls="product-list-options"
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen(!filtersOpen)}
               >
-                重置筛选
+                <SlidersHorizontal size={16} aria-hidden="true" />
+                筛选{advancedCount > 0 ? ` (${advancedCount})` : ""}
               </button>
+              <div
+                className="product-list-options"
+                id="product-list-options"
+                data-open={filtersOpen}
+              >
+                <label>
+                  交易类型
+                  <select
+                    value={params.get("trade_type") || ""}
+                    onChange={(e) => update({ trade_type: e.target.value })}
+                  >
+                    <option value="">全部类型</option>
+                    <option value="sale">账号出售</option>
+                    <option value="rent">账号租赁</option>
+                  </select>
+                </label>
+                <label>
+                  商品来源
+                  <select
+                    value={params.get("source") || ""}
+                    onChange={(e) => update({ source: e.target.value })}
+                  >
+                    <option value="">全部来源</option>
+                    {Object.entries(sources).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  排序
+                  <select
+                    value={params.get("sort") || "updated"}
+                    onChange={(e) => update({ sort: e.target.value })}
+                  >
+                    <option value="updated">最近更新优先</option>
+                    <option value="published">首次上架时间倒序</option>
+                    <option value="created">创建时间倒序</option>
+                  </select>
+                </label>
+                <button
+                  className="text-button"
+                  type="button"
+                  onClick={() => {
+                    setQ("");
+                    update({ q: "", source: "", trade_type: "", sort: "" });
+                  }}
+                >
+                  重置查询条件
+                </button>
+              </div>
             </form>
             <div className="product-list-meta">
               <span>
-                共 <b className="mono">{data.total}</b> 个商品
-                {data.total > 0 && (
+                {data ? (
+                  <>
+                    共 <b className="mono">{data.total}</b> 个商品
+                  </>
+                ) : null}
+                {data && data.total > 0 && (
                   <>
                     {" "}
                     · 本页{" "}
@@ -533,6 +592,11 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                     </b>{" "}
                     条
                   </>
+                )}
+                {publicOnly && (
+                  <span className="product-scope-note">
+                    用户端可见 · 分类已启用且当前版本已审核上架
+                  </span>
                 )}
               </span>
               <button
@@ -604,7 +668,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.items.map((p) => (
+                      {data?.items.map((p) => (
                         <ProductListRow
                           returnTo={`${review ? "/reviews" : "/products"}?${params}`}
                           key={p.id}
@@ -628,85 +692,92 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                     正在读取第 {pageNumber} 页…
                   </p>
                 )}
-                {!loading && !data.items.length && (
+                {data && !data.items.length && (
                   <StateView
                     empty={
                       trash
                         ? "回收站中没有符合当前条件的商品。清空预览将检查整个回收站。"
-                        : "没有符合条件的商品，请调整搜索或筛选条件。"
+                        : review &&
+                            !params.get("q") &&
+                            !params.get("source") &&
+                            !params.get("trade_type")
+                          ? "当前没有待审核商品。"
+                          : "没有符合条件的商品，请调整搜索或筛选条件。"
                     }
                   />
                 )}
               </>
             )}
-            <nav className="product-pagination" aria-label="商品列表分页">
-              <label>
-                每页
-                <select
-                  aria-label="每页条数"
-                  disabled={loading}
-                  value={size}
-                  onChange={(e) => update({ limit: e.target.value })}
+            {data && data.total > 0 && (
+              <nav className="product-pagination" aria-label="商品列表分页">
+                <label>
+                  每页
+                  <select
+                    aria-label="每页条数"
+                    disabled={loading}
+                    value={size}
+                    onChange={(e) => update({ limit: e.target.value })}
+                  >
+                    <option value="20">20 条</option>
+                    <option value="50">50 条</option>
+                  </select>
+                </label>
+                <div className="product-page-buttons">
+                  <button
+                    aria-label="上一页"
+                    disabled={loading || !!error || pageNumber <= 1}
+                    onClick={() => go(pageNumber - 1)}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  {pageItems(pageNumber, totalPages).map((n) =>
+                    typeof n === "string" ? (
+                      <span key={n}>…</span>
+                    ) : (
+                      <button
+                        key={n}
+                        aria-label={`第 ${n} 页`}
+                        aria-current={n === pageNumber ? "page" : undefined}
+                        disabled={loading || !!error}
+                        onClick={() => go(n)}
+                      >
+                        {n}
+                      </button>
+                    ),
+                  )}
+                  <button
+                    aria-label="下一页"
+                    disabled={loading || !!error || pageNumber >= totalPages}
+                    onClick={() => go(pageNumber + 1)}
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const n = Number(jump.current?.value);
+                    if (Number.isSafeInteger(n) && n > 0) {
+                      go(n);
+                      if (jump.current) jump.current.value = "";
+                    }
+                  }}
                 >
-                  <option value="20">20 条</option>
-                  <option value="50">50 条</option>
-                </select>
-              </label>
-              <div className="product-page-buttons">
-                <button
-                  aria-label="上一页"
-                  disabled={loading || !!error || pageNumber <= 1}
-                  onClick={() => go(pageNumber - 1)}
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                {pageItems(pageNumber, totalPages).map((n) =>
-                  typeof n === "string" ? (
-                    <span key={n}>…</span>
-                  ) : (
-                    <button
-                      key={n}
-                      aria-label={`第 ${n} 页`}
-                      aria-current={n === pageNumber ? "page" : undefined}
-                      disabled={loading || !!error}
-                      onClick={() => go(n)}
-                    >
-                      {n}
-                    </button>
-                  ),
-                )}
-                <button
-                  aria-label="下一页"
-                  disabled={loading || !!error || pageNumber >= totalPages}
-                  onClick={() => go(pageNumber + 1)}
-                >
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const n = Number(jump.current?.value);
-                  if (Number.isSafeInteger(n) && n > 0) {
-                    go(n);
-                    if (jump.current) jump.current.value = "";
-                  }
-                }}
-              >
-                <span>
-                  共 <b className="mono">{totalPages}</b> 页，前往
-                </span>
-                <input
-                  ref={jump}
-                  aria-label="跳转页码"
-                  type="number"
-                  min="1"
-                  max={totalPages}
-                  inputMode="numeric"
-                />
-                <button disabled={loading || !!error}>跳转</button>
-              </form>
-            </nav>
+                  <span>
+                    共 <b className="mono">{totalPages}</b> 页，前往
+                  </span>
+                  <input
+                    ref={jump}
+                    aria-label="跳转页码"
+                    type="number"
+                    min="1"
+                    max={totalPages}
+                    inputMode="numeric"
+                  />
+                  <button disabled={loading || !!error}>跳转</button>
+                </form>
+              </nav>
+            )}
           </div>
         </section>
       )}
@@ -717,15 +788,12 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
           onClose={(refresh) => {
             setPurgeTarget(null);
             if (refresh) {
-              setLoading(true);
               setRevision((value) => value + 1);
             }
           }}
           onSuccess={(result) => {
             setPurgeTarget(null);
             setBusy(false);
-            setData({ items: [], total: 0, nextCursor: null });
-            setLoading(true);
             setNotice(
               `已永久删除 ${result.purged_count} 个商品。独占图片正在后台清理，其他引用及必要记录保留。`,
             );
@@ -761,14 +829,18 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
             >
               <X size={20} />
             </button>
-            <h2 id="product-action-heading">{actionNames[action.kind]}</h2>
+            <h2 id="product-action-heading">{actionLabel}</h2>
             <p className="product-action-code mono">
               {action.product.code || action.product.id}
             </p>
             <p className="product-action-title">
               {action.product.title.trim() || "未填写标题"}
             </p>
-            <p>{actionNotes[action.kind]}</p>
+            <p>
+              {cancelPublication
+                ? "停止本次上架流程，商品转为已下架。"
+                : actionNotes[action.kind]}
+            </p>
             {action.kind === "publish" && action.product.mode === "rent" && (
               <label>
                 租赁标签
@@ -826,7 +898,7 @@ export function AdminProducts({ review = false }: { review?: boolean }) {
                   (["trash", "offline"].includes(action.kind) && !reason.trim())
                 }
               >
-                {busy ? "正在处理…" : actionNames[action.kind]}
+                {busy ? "正在处理…" : actionLabel}
               </button>
             </div>
           </form>

@@ -262,6 +262,9 @@ func (s *ManagementStore) Products(ctx context.Context, in management.ProductQue
 	if in.Trash {
 		where = "p.deleted_at IS NOT NULL AND p.deleted_by_admin"
 	}
+	if in.Visibility == "public" {
+		where += " AND " + VisibleSQL
+	}
 	args := []any{}
 	// 列名固定，用户输入只作为绑定参数。
 	for _, item := range []struct{ column, value string }{{"status", in.Status}, {"source", in.Source}, {"trade_type", in.TradeType}, {"rental_category", in.RentalCategory}} {

@@ -5,6 +5,7 @@ import { StateView } from "./shared";
 import { Link } from "react-router-dom";
 import { RefreshCw, TrendingUp } from "lucide-react";
 import { useUnsavedChanges } from "../lib/admin-ux";
+import { productTime } from "../lib/product-list";
 import { UploadRestrictionPanel } from "./UploadRestrictionPanel";
 import "../accounts.css";
 
@@ -29,12 +30,18 @@ export function MemberAccountCard({
   onRestriction: () => void;
 }) {
   return (
-    <article className="account-card">
+    <article className="account-card member-row">
       <div className="account-identity">
         <div>
-          <strong>{member.nickname}</strong>
-          <p>{member.phone || "未填写手机号"}</p>
+          <strong>{member.nickname || "未填写昵称"}</strong>
+          <p className="mono">{member.phone || "未填写手机号"}</p>
         </div>
+      </div>
+      <div className="member-registered">
+        <span>注册时间</span>
+        <time className="mono" dateTime={member.created_at}>
+          {productTime(member.created_at, "未记录")}
+        </time>
       </div>
       <span className={`account-state${member.enabled ? "" : " disabled"}`}>
         {member.enabled ? "可用" : "已停用"}
@@ -64,16 +71,30 @@ export function AdminUsers() {
   const controller = useRef<AbortController | null>(null);
   const mutationLock = useRef(false);
   const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState<{
+    text: string;
+    cursors: (string | null)[];
+  }>({ text: "", cursors: [null] });
   const [items, setItems] = useState<AdminRecord[]>([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState<number | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [restrictionMember, setRestrictionMember] =
     useState<AdminRecord | null>(null);
-  async function load(more = false) {
+  function navigate(text: string, cursors: (string | null)[]) {
+    if (mutationLock.current) return;
+    controller.current?.abort();
+    setItems([]);
+    setTotal(null);
+    setCursor(null);
+    setNotice("");
+    setError("");
+    setBusy(true);
+    setQuery({ text, cursors });
+  }
+  async function load() {
     if (mutationLock.current) return;
     controller.current?.abort();
     const requestController = new AbortController();
@@ -81,34 +102,32 @@ export function AdminUsers() {
     const sequence = ++requestSequence.current;
     setBusy(true);
     setError("");
-    if (!more) {
-      setItems([]);
-      setTotal(0);
-      setCursor(null);
-    }
+    setItems([]);
+    setTotal(null);
+    setCursor(null);
     try {
       const params = new URLSearchParams({
-        q: query,
+        q: query.text,
         limit: "20",
         role: "member",
       });
-      if (more && cursor) params.set("cursor", cursor);
+      const pageCursor = query.cursors.at(-1);
+      if (pageCursor) params.set("cursor", pageCursor);
       const page = await adminApi.users(params, requestController.signal);
       if (
         requestController.signal.aborted ||
         sequence !== requestSequence.current
       )
         return;
-      setItems((old) =>
-        more
-          ? [
-              ...old,
-              ...page.items.filter(
-                (item) => !old.some((existing) => existing.id === item.id),
-              ),
-            ]
-          : page.items,
-      );
+      if (!page.items.length && query.cursors.length > 1) {
+        const last = Math.max(1, Math.ceil(page.total / 20));
+        navigate(
+          query.text,
+          query.cursors.slice(0, Math.min(last, query.cursors.length - 1)),
+        );
+        return;
+      }
+      setItems(page.items);
       setTotal(page.total);
       setCursor(page.nextCursor);
     } catch (e) {
@@ -167,27 +186,18 @@ export function AdminUsers() {
     }
   }
   return (
-    <section className="admin-accounts">
+    <section className="admin-accounts member-management">
       <div className="admin-heading">
         <div>
-          <span className="eyebrow">账户维护</span>
           <h1>会员管理</h1>
-          <p>共 {total} 位会员 · 完整手机号仅在管理端展示</p>
+          <p>查询会员的登录状态和上传权限。</p>
         </div>
-      </div>
-      <div className="location-note">
-        <strong>这里可以控制账户能否登录</strong>
-        <span>
-          停用会撤销该账户的登录会话，但不会自动下架它发布的商品。商品展示请到商品管理处理。
-        </span>
       </div>
       <div className="admin-toolbar">
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (mutationLock.current) return;
-            if (search.trim() === query) void load();
-            else setQuery(search.trim());
+            navigate(search.trim(), [null]);
           }}
         >
           <input
@@ -196,9 +206,22 @@ export function AdminUsers() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="昵称或完整手机号"
           />
-          <button className="button-outline" disabled={busy}>
+          <button className="button-white" disabled={busy}>
             查询
           </button>
+          {query.text && (
+            <button
+              className="button-outline"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setSearch("");
+                navigate("", [null]);
+              }}
+            >
+              清除
+            </button>
+          )}
         </form>
       </div>
       {error && (
@@ -214,7 +237,13 @@ export function AdminUsers() {
           {notice}
         </p>
       )}
-      <div className="account-list">
+      {total !== null && (
+        <p className="member-result-count">
+          {query.text ? "匹配会员" : "全部会员"}{" "}
+          <strong className="mono">{total}</strong> 位
+        </p>
+      )}
+      <div className="account-list member-list" aria-busy={busy}>
         {items.map((member) => (
           <MemberAccountCard
             key={member.id}
@@ -234,16 +263,35 @@ export function AdminUsers() {
       )}
       {busy && <p role="status">正在处理…</p>}
       {!busy && !error && !items.length && (
-        <p className="admin-empty">没有匹配的账户。</p>
+        <p className="admin-empty">
+          {query.text
+            ? "没有匹配的会员，可以更换昵称或完整手机号查询。"
+            : "当前还没有注册会员。"}
+        </p>
       )}
-      {cursor && (
-        <button
-          className="button-outline"
-          disabled={busy}
-          onClick={() => void load(true)}
-        >
-          加载更多
-        </button>
+      {total !== null && total > 0 && (
+        <nav className="member-pagination" aria-label="会员列表分页">
+          <span>
+            第 <b className="mono">{query.cursors.length}</b> /{" "}
+            <b className="mono">{Math.ceil(total / 20)}</b> 页
+          </span>
+          <button
+            className="button-outline"
+            disabled={busy || query.cursors.length === 1}
+            onClick={() => navigate(query.text, query.cursors.slice(0, -1))}
+          >
+            上一页
+          </button>
+          <button
+            className="button-outline"
+            disabled={busy || !cursor}
+            onClick={() => {
+              if (cursor) navigate(query.text, [...query.cursors, cursor]);
+            }}
+          >
+            下一页
+          </button>
+        </nav>
       )}
     </section>
   );

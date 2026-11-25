@@ -282,7 +282,7 @@ func ValidateCategoryIdentity(id string, in CategoryInput) error {
 
 type ProductQuery struct {
 	Status, Source, Query, TradeType, Sort string
-	RentalCategory                         string
+	RentalCategory, Visibility             string
 	Trash                                  bool
 	Limit, Offset                          int
 }

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
   Package,
@@ -7,14 +7,15 @@ import {
   PanelsTopLeft,
   Headphones,
   Plus,
-  BookOpen,
-  TrendingUp,
+  ListChecks,
+  RefreshCcw,
+  ChartNoAxesCombined,
   MessageSquare,
   Users,
   RefreshCw,
   Eye,
-  Heart,
   Clock3,
+  ChevronRight,
 } from "lucide-react";
 import { adminApi } from "../lib/admin-api";
 import {
@@ -42,21 +43,43 @@ const metrics: TrendMetric[] = [
   "consultations",
   "new_members",
 ];
-const metricIcons = {
-  views: Eye,
-  favorites: Heart,
-  consultations: MessageSquare,
-  new_members: Users,
-};
+function DashboardRange({
+  value,
+  change,
+}: {
+  value: DashboardDays;
+  change: (days: DashboardDays) => void;
+}) {
+  return (
+    <div
+      className="dashboard-range"
+      role="group"
+      aria-label="趋势及商品排行的统计时间范围"
+    >
+      {([7, 30] as const).map((days) => (
+        <button
+          key={days}
+          type="button"
+          aria-pressed={days === value}
+          onClick={() => change(days)}
+        >
+          最近 {days} 天
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function DashboardTrend({
   data,
   metric,
   onMetric,
+  onDays,
 }: {
   data: DashboardData;
   metric: TrendMetric;
   onMetric: (value: TrendMetric) => void;
+  onDays?: (days: DashboardDays) => void;
 }) {
   const chartElement = useRef<SVGSVGElement>(null);
   const [chartWidth, setChartWidth] = useState(710);
@@ -98,14 +121,13 @@ export function DashboardTrend({
     >
       <div className="dashboard-section-title">
         <div>
-          <span className="dashboard-overline">
-            最近 {data.range.days} 天 · 北京时间
-          </span>
           <h2 id={`${id}-heading`}>每日趋势</h2>
+          <p className="dashboard-note">
+            最近 {data.range.days} 天 · {dashboardDate(data.range.start_date)} –{" "}
+            {dashboardDate(data.range.end_date)}（北京）
+          </p>
         </div>
-        <span className="dashboard-period">
-          {data.range.start_date} — {data.range.end_date}
-        </span>
+        {onDays && <DashboardRange value={data.range.days} change={onDays} />}
       </div>
       <div className="dashboard-metric-tabs" role="group" aria-label="趋势指标">
         {metrics.map((key) => (
@@ -115,14 +137,22 @@ export function DashboardTrend({
             aria-pressed={metric === key}
             onClick={() => onMetric(key)}
           >
-            {dashboardMetricNames[key]}
+            <span>{dashboardMetricNames[key]}</span>
+            <strong>
+              {number(
+                key === "new_members"
+                  ? data.members.new_in_period
+                  : data.engagement[key],
+              )}
+            </strong>
           </button>
         ))}
       </div>
       <p className="dashboard-chart-summary">
-        {label}
-        <strong>{number(chart.total)}</strong>
-        <span>期间合计 · 单日最高 {number(chart.peak)}</span>
+        <span className="dashboard-chart-key">{label}</span>
+        <span>
+          单日最高 <strong>{number(chart.peak)}</strong>
+        </span>
       </p>
       <svg
         ref={chartElement}
@@ -137,6 +167,19 @@ export function DashboardTrend({
           {number(chart.total)}，单日最高 {number(chart.peak)}
           。精确每日数值见下方数据明细。
         </desc>
+        <defs>
+          <linearGradient
+            id={`${id}-area`}
+            x1="0"
+            y1="0"
+            x2="0"
+            y2="1"
+            gradientUnits="objectBoundingBox"
+          >
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity=".33" />
+            <stop offset="100%" stopColor="#30D158" stopOpacity=".03" />
+          </linearGradient>
+        </defs>
         {ticks.map((value) => {
           const y = 196 - (value / chart.ceiling) * 172;
           return (
@@ -157,7 +200,7 @@ export function DashboardTrend({
         {chart.total > 0 && (
           <path
             d={`${chart.line} L${chart.right},196 L${chart.left},196 Z`}
-            className="dashboard-chart-area"
+            fill={`url(#${id}-area)`}
           />
         )}
         <path d={chart.line} className="dashboard-chart-line" />
@@ -244,8 +287,8 @@ function DashboardDistributions({ data }: { data: DashboardData }) {
     >
       <div className="dashboard-section-title">
         <div>
-          <span className="dashboard-overline">当前快照 · 不随日期筛选</span>
           <h2 id="dashboard-distribution-title">商品分布</h2>
+          <p className="dashboard-note">当前库存 · 不含回收站</p>
         </div>
         <Package size={20} aria-hidden="true" />
       </div>
@@ -282,7 +325,7 @@ function DashboardDistributions({ data }: { data: DashboardData }) {
         ))}
       </ul>
       <p className="dashboard-note">
-        商品总量与分布不含回收站。已上架为商品状态，公开可见还须审核版本一致、分类启用。
+        已上架商品须分类启用且当前版本已获批，才会公开展示。
       </p>
       <Link className="dashboard-inline-link" to="/products?trash=1">
         回收站 {number(data.products.trash)} 件 <ArrowRight size={14} />
@@ -293,6 +336,7 @@ function DashboardDistributions({ data }: { data: DashboardData }) {
 
 function DashboardRanking({ data }: { data: DashboardData }) {
   const selected = data.ranking.by;
+  const location = useLocation();
   return (
     <section
       className="dashboard-panel dashboard-ranking fluent-card"
@@ -300,24 +344,20 @@ function DashboardRanking({ data }: { data: DashboardData }) {
     >
       <div className="dashboard-section-title">
         <div>
-          <span className="dashboard-overline">
-            最近 {data.range.days} 天 · 按{dashboardMetricNames[selected]}排序
-          </span>
-          <h2 id="dashboard-ranking-title">商品互动排行 TOP 10</h2>
+          <h2 id="dashboard-ranking-title">商品互动排行</h2>
+          <p className="dashboard-note">
+            最近 {data.range.days} 天 · 按{dashboardMetricNames[selected]}
+            排序，最多 10 件
+          </p>
         </div>
         <Link className="dashboard-inline-link" to="/recommendations">
-          推荐规则 <ArrowRight size={14} />
+          首页热门规则 <ArrowRight size={14} />
         </Link>
       </div>
-      <p className="dashboard-note">
-        当前未删除商品在所选期间的互动排行，包含草稿和已下架商品；仅列出所选指标大于
-        0 的商品。首页热门榜另按推荐规则加权计算。
-      </p>
       {data.ranking.items.length === 0 ? (
         <div className="dashboard-ranking-empty" role="status">
-          <TrendingUp size={26} aria-hidden="true" />
-          <p>这段时间暂无符合条件的互动商品。</p>
-          <span>有新的浏览、收藏或咨询记录后，可刷新查看。</span>
+          <ChartNoAxesCombined size={28} aria-hidden="true" />
+          <p>本期暂无产生{dashboardMetricNames[selected]}的商品。</p>
         </div>
       ) : (
         <ol className="dashboard-ranking-list">
@@ -329,11 +369,15 @@ function DashboardRanking({ data }: { data: DashboardData }) {
                 {String(index + 1).padStart(2, "0")}
               </span>
               <div className="dashboard-rank-product">
-                <Link to={adminProductPath(item.id)} title={item.title}>
+                <Link
+                  to={adminProductPath(item.id)}
+                  state={{ returnTo: location.pathname + location.search }}
+                  title={item.title}
+                >
                   {item.title.trim() || "未填写标题"}
                 </Link>
                 <span>
-                  {item.product_code} ·{" "}
+                  <code>{item.product_code}</code> ·{" "}
                   {item.trade_type === "sale"
                     ? "账号出售"
                     : item.rental_category === "hour_day"
@@ -368,185 +412,175 @@ function DashboardRanking({ data }: { data: DashboardData }) {
   );
 }
 
+function DashboardInventory({ data }: { data: DashboardData }) {
+  return (
+    <section className="dashboard-snapshot-grid" aria-label="当前库存和会员">
+      <Link className="dashboard-snapshot fluent-card" to="/products">
+        <div>
+          <Package size={17} aria-hidden="true" />
+          <h2>全部商品</h2>
+          <ChevronRight size={16} aria-hidden="true" />
+        </div>
+        <strong>{number(data.products.total)}</strong>
+        <p>在库商品，含 {number(data.products.statuses.draft)} 件草稿</p>
+      </Link>
+      <Link
+        className="dashboard-snapshot fluent-card"
+        to="/products?visibility=public"
+      >
+        <div>
+          <Eye size={17} aria-hidden="true" />
+          <h2>公开可见</h2>
+          <ChevronRight size={16} aria-hidden="true" />
+        </div>
+        <strong>{number(data.products.visible)}</strong>
+        <p>用户站可查看的在架商品</p>
+      </Link>
+      <Link className="dashboard-snapshot fluent-card" to="/users">
+        <div>
+          <Users size={17} aria-hidden="true" />
+          <h2>会员总数</h2>
+          <ChevronRight size={16} aria-hidden="true" />
+        </div>
+        <strong>{number(data.members.total)}</strong>
+        <p>
+          启用 {number(data.members.enabled)} · 停用{" "}
+          {number(data.members.disabled)}
+        </p>
+      </Link>
+    </section>
+  );
+}
+
+function DashboardWork({ data }: { data: DashboardData }) {
+  const {
+    pending_products,
+    pending_nicknames,
+    waiting_conversations,
+    publishing_products,
+  } = data.todos;
+  return (
+    <section
+      className="dashboard-panel dashboard-work fluent-card"
+      aria-labelledby="dashboard-work-title"
+    >
+      <div className="dashboard-section-title">
+        <div>
+          <h2 id="dashboard-work-title">工作队列</h2>
+          <p className="dashboard-note">当前状态 · 全部时间</p>
+        </div>
+        <ListChecks aria-hidden="true" size={20} />
+      </div>
+      <h3>待人工处理</h3>
+      <ul className="dashboard-work-list">
+        {[
+          {
+            name: "待审核商品",
+            count: pending_products,
+            to: "/reviews",
+            icon: ClipboardCheck,
+          },
+          {
+            name: "待审核昵称",
+            count: pending_nicknames,
+            to: "/nickname-reviews",
+            icon: Users,
+          },
+        ].map(({ name, count, to, icon: Icon }) => (
+          <li key={to}>
+            <Link to={to}>
+              <Icon size={16} aria-hidden="true" />
+              <span>{name}</span>
+              <strong data-active={count > 0}>{number(count)}</strong>
+              <ChevronRight size={15} aria-hidden="true" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <h3>系统处理中</h3>
+      <ul className="dashboard-work-list">
+        <li>
+          <Link to="/chat">
+            <MessageSquare size={16} aria-hidden="true" />
+            <span>
+              全站等待分配<small>进入接待台</small>
+            </span>
+            <strong>{number(waiting_conversations)}</strong>
+            <ChevronRight size={15} aria-hidden="true" />
+          </Link>
+        </li>
+        <li>
+          <Link to="/products?status=publishing">
+            <Clock3 size={16} aria-hidden="true" />
+            <span>商品上架中</span>
+            <strong>{number(publishing_products)}</strong>
+            <ChevronRight size={15} aria-hidden="true" />
+          </Link>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
 export function DashboardContent({
   data,
   metric,
   onMetric,
+  days = data.range.days,
+  onDays,
 }: {
   data: DashboardData;
   metric: TrendMetric;
   onMetric: (value: TrendMetric) => void;
+  days?: DashboardDays;
+  onDays?: (days: DashboardDays) => void;
 }) {
-  const snapshots = [
-    {
-      label: "全部商品",
-      value: data.products.total,
-      note: "不含回收站商品",
-      icon: Package,
-      to: "/products",
-    },
-    {
-      label: "公开可见",
-      value: data.products.visible,
-      note: "管理已上架商品",
-      icon: Eye,
-      to: "/products?status=published",
-    },
-    {
-      label: "会员总数",
-      value: data.members.total,
-      note: `启用 ${number(data.members.enabled)} · 停用 ${number(data.members.disabled)}`,
-      icon: Users,
-      to: "/users",
-    },
-    {
-      label: "未发布草稿",
-      value: data.products.statuses.draft,
-      note: "继续填写或准备上架",
-      icon: BookOpen,
-      to: "/products?status=draft",
-    },
-  ];
-  const reviews = [
-    {
-      label: "待审核商品",
-      value: data.todos.pending_products,
-      to: "/reviews",
-      icon: ClipboardCheck,
-      note: "查看会员提交的账号资料与图片",
-    },
-    {
-      label: "待审核昵称",
-      value: data.todos.pending_nicknames,
-      to: "/nickname-reviews",
-      icon: Users,
-      note: "核对会员申请的新昵称",
-    },
-  ];
-  const todos = [
-    {
-      label: "等待接待",
-      value: data.todos.waiting_conversations,
-      to: "/chat",
-      icon: MessageSquare,
-    },
-    {
-      label: "商品上架中",
-      value: data.todos.publishing_products,
-      to: "/products?status=publishing",
-      icon: Clock3,
-    },
-  ];
+  const current = days === data.range.days;
   return (
     <div
       className="dashboard-content"
-      data-days={data.range.days}
+      data-days={days}
       data-rank-by={data.ranking.by}
     >
-      <section aria-labelledby="dashboard-current-title">
-        <div className="dashboard-section-title dashboard-section-heading">
-          <h2 id="dashboard-current-title">当前总览</h2>
-          <span className="dashboard-note">
-            截至 {dashboardTime(data.generated_at)} · 北京时间
-          </span>
-        </div>
-        <div className="dashboard-snapshot-grid">
-          {snapshots.map((item) => (
-            <Link
-              className="dashboard-snapshot fluent-card fluent-interactive"
-              key={item.label}
-              to={item.to}
-            >
-              <div>
-                <span>{item.label}</span>
-                <item.icon size={19} aria-hidden="true" />
-              </div>
-              <strong>{number(item.value)}</strong>
-              <p>
-                {item.note}
-                <ArrowRight size={14} aria-hidden="true" />
-              </p>
-            </Link>
-          ))}
-        </div>
-      </section>
-      <section
-        className="dashboard-review-section"
-        aria-labelledby="dashboard-review-title"
-      >
-        <div className="dashboard-section-title dashboard-section-heading">
-          <h2 id="dashboard-review-title">待审核事项</h2>
-          <span className="dashboard-note">
-            当前全部待审核数量，不受 7／30 天选择影响
-          </span>
-        </div>
-        <div className="dashboard-review-grid">
-          {reviews.map((item) => (
-            <Link
-              className={`dashboard-review-card fluent-card fluent-interactive${item.value > 0 ? " has-todo" : ""}`}
-              key={item.label}
-              to={item.to}
-            >
-              <item.icon size={22} aria-hidden="true" />
-              <div>
-                <h3>{item.label}</h3>
-                <p>{item.note}</p>
-              </div>
-              <strong className="mono">{number(item.value)}</strong>
-              <span>
-                前往审核 <ArrowRight size={15} aria-hidden="true" />
-              </span>
-            </Link>
-          ))}
-        </div>
-      </section>
-      <section
-        className="dashboard-todos fluent-card"
-        aria-label="其他当前待办"
-      >
-        <span className="dashboard-todos-heading">待办事项</span>
-        {todos.map((item) => (
-          <Link
-            key={item.label}
-            to={item.to}
-            className={item.value > 0 ? "has-todo" : ""}
-          >
-            <item.icon size={17} aria-hidden="true" />
-            <span>{item.label}</span>
-            <strong>{number(item.value)}</strong>
-            <ArrowRight size={14} aria-hidden="true" />
-          </Link>
-        ))}
-      </section>
-      <section aria-labelledby="dashboard-period-title">
-        <div className="dashboard-section-title dashboard-section-heading">
-          <h2 id="dashboard-period-title">最近 {data.range.days} 天</h2>
-          <span className="dashboard-note">含今天，统计至本次更新时间</span>
-        </div>
-        <div className="dashboard-period-grid">
-          {metrics.map((key) => {
-            const Icon = metricIcons[key];
-            return (
-              <div className="dashboard-period-stat fluent-card" key={key}>
-                <Icon size={18} aria-hidden="true" />
-                <span>{dashboardMetricNames[key]}</span>
-                <strong>
-                  {number(
-                    key === "new_members"
-                      ? data.members.new_in_period
-                      : data.engagement[key],
-                  )}
-                </strong>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+      <DashboardInventory data={data} />
       <div className="dashboard-analysis-grid">
-        <DashboardTrend data={data} metric={metric} onMetric={onMetric} />
+        {current ? (
+          <DashboardTrend
+            data={data}
+            metric={metric}
+            onMetric={onMetric}
+            onDays={onDays}
+          />
+        ) : (
+          <section
+            className="dashboard-panel dashboard-trend fluent-card"
+            aria-label="每日趋势"
+          >
+            <div className="dashboard-section-title">
+              <h2>每日趋势</h2>
+              {onDays && <DashboardRange value={days} change={onDays} />}
+            </div>
+            <div className="dashboard-loading-period" role="status">
+              正在读取最近 {days} 天的趋势和排行…
+            </div>
+          </section>
+        )}
+        <DashboardWork data={data} />
+      </div>
+      <div className="dashboard-analysis-grid">
+        {current ? (
+          <DashboardRanking data={data} />
+        ) : (
+          <section
+            className="dashboard-panel dashboard-ranking fluent-card"
+            aria-label="商品互动排行"
+          >
+            <h2>商品互动排行</h2>
+            <p className="dashboard-note">等待所选期间数据</p>
+          </section>
+        )}
         <DashboardDistributions data={data} />
       </div>
-      <DashboardRanking data={data} />
       <details className="dashboard-definition fluent-card">
         <summary>查看统计口径</summary>
         <ul>
@@ -586,10 +620,10 @@ function DashboardActions() {
       <div className="dashboard-action-grid">
         {[
           {
-            icon: Plus,
-            title: "上架新商品",
-            desc: "填写资料与图片",
-            to: "/products?new=1",
+            icon: RefreshCcw,
+            title: "旧站同步",
+            desc: "核对目录更新与批次结果",
+            to: "/legacy-sync",
           },
           {
             icon: ClipboardCheck,
@@ -645,8 +679,24 @@ function DashboardActions() {
 }
 
 export function AdminDashboard() {
-  const [days, setDays] = useState<DashboardDays>(7);
-  const [metric, setMetric] = useState<TrendMetric>("views");
+  const [params, setParams] = useSearchParams();
+  const days: DashboardDays = params.get("days") === "30" ? 30 : 7;
+  const metric =
+    metrics.find((item) => item === params.get("metric")) ?? "views";
+  const setFilter = (
+    key: "days" | "metric",
+    value: string,
+    defaultValue: string,
+  ) =>
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value === defaultValue) next.delete(key);
+        else next.set(key, value);
+        return next;
+      },
+      { replace: true },
+    );
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<unknown>();
   const [loading, setLoading] = useState(true);
@@ -679,80 +729,72 @@ export function AdminDashboard() {
       generation.current++;
     };
   }, [days, retry]);
-  const current = data?.range.days === days ? data : null;
   const refresh = () => setRetry((value) => value + 1);
+  const changeDays = (next: DashboardDays) => {
+    if (days === next) return;
+    setError(undefined);
+    setFilter("days", String(next), "7");
+  };
   return (
     <div className="admin-dashboard">
       <div className="admin-heading">
         <div>
           <h1>数据看板</h1>
-          <p>查看商品与会员动态，及时处理今天的待办。</p>
+          <p className="dashboard-feedback" aria-live="polite">
+            {loading && !data
+              ? `正在读取最近 ${days} 天的数据…`
+              : error
+                ? "数据读取失败"
+                : data
+                  ? `数据截至 ${dashboardTime(data.generated_at)}（北京时间）`
+                  : "准备读取数据…"}
+          </p>
         </div>
-        <Link className="button-white" to="/products?new=1">
-          <Plus size={17} />
-          上架新商品
-        </Link>
-      </div>
-      <div className="dashboard-toolbar fluent-card">
-        <div className="dashboard-range" role="group" aria-label="统计时间范围">
-          {([7, 30] as DashboardDays[]).map((value) => (
-            <button
-              type="button"
-              key={value}
-              aria-pressed={days === value}
-              onClick={() => {
-                if (days === value) return;
-                setDays(value);
-                setError(undefined);
-              }}
-            >
-              最近 {value} 天
-            </button>
-          ))}
+        <div className="dashboard-heading-actions">
+          <button
+            className="button-outline dashboard-refresh"
+            type="button"
+            disabled={loading}
+            onClick={refresh}
+          >
+            <RefreshCw size={16} aria-hidden="true" />
+            {loading ? "正在更新" : "刷新数据"}
+          </button>
+          <Link className="button-white" to="/products?new=1">
+            <Plus size={17} aria-hidden="true" />
+            新建商品
+          </Link>
         </div>
-        <button
-          className="button-outline dashboard-refresh"
-          type="button"
-          disabled={loading}
-          onClick={refresh}
-        >
-          <RefreshCw size={15} aria-hidden="true" />
-          {loading ? "正在更新" : "刷新数据"}
-        </button>
       </div>
-      <div className="dashboard-feedback" aria-live="polite">
-        {loading
-          ? `正在读取最近 ${days} 天的数据…`
-          : error
-            ? "本次数据读取失败，请重试。"
-            : current
-              ? `已更新 ${dashboardTime(current.generated_at)}（北京时间）`
-              : "准备读取数据…"}
-      </div>
-      {error ? (
-        <StateView error={error} onRetry={refresh} />
-      ) : current ? (
+      {data && !error ? (
         <div aria-busy={loading}>
           <DashboardContent
-            data={current}
+            data={data}
             metric={metric}
-            onMetric={setMetric}
+            onMetric={(value) => setFilter("metric", value, "views")}
+            days={days}
+            onDays={changeDays}
           />
         </div>
       ) : (
-        <div className="dashboard-loading">
-          <StateView loading />
+        <div
+          className={`dashboard-panel dashboard-initial fluent-card${error ? " is-error" : ""}`}
+        >
+          <div className="dashboard-section-title">
+            <h2>运营数据</h2>
+            <DashboardRange value={days} change={changeDays} />
+          </div>
+          <StateView error={error} loading={!error} onRetry={refresh} />
         </div>
       )}
       <DashboardActions />
-      <div className="dashboard-foot">
-        <span>当前数据来自本站。</span>
-        {publicSite && (
+      {publicSite && (
+        <div className="dashboard-foot">
           <a href={publicSite} target="_blank" rel="noreferrer">
             打开用户网站 ↗
           </a>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

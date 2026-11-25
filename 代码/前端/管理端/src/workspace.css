@@ -1,5 +1,5 @@
 .admin-layout {
-  --navigation-width: 228px;
+  --navigation-width: 216px;
   display: grid;
   grid-template-columns: var(--navigation-width) minmax(0, 1fr);
   align-items: start;
@@ -14,24 +14,22 @@
   align-self: start;
   min-height: calc(100dvh - var(--topbar-height) - 52px);
   max-height: calc(100dvh - var(--topbar-height));
-  padding: 20px 12px;
+  padding: 24px 12px 32px;
   overflow-y: auto;
   scrollbar-width: thin;
   border-right: 1px solid var(--line-subtle);
-  background: var(--surface-acrylic);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--surface-subtle);
 }
 .admin-navigation {
   display: grid;
-  gap: 16px;
+  gap: 24px;
 }
 .nav-group {
   min-width: 0;
 }
 .nav-group > p {
   padding: 0 12px;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
   color: var(--muted);
   font-size: var(--text-label);
   font-weight: 600;
@@ -42,14 +40,18 @@
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 40px;
   padding: 8px 12px;
   border-radius: var(--radius-items);
-  color: var(--ink);
+  color: #d5d5d8;
   font-size: var(--text-body);
 }
 .nav-group a:hover {
-  background: var(--surface-acrylic-hover);
+  color: var(--ink);
+  background: var(--surface-row-hover);
+}
+.nav-group a:not([aria-current="page"]) svg {
+  color: var(--muted);
 }
 .nav-group a[aria-current="page"] {
   background: var(--surface-selected);
@@ -77,7 +79,7 @@
   max-width: var(--page-max-width);
   min-width: 0;
   margin-inline: auto;
-  padding: 20px 24px 48px;
+  padding: 24px 32px 48px;
 }
 .admin-commandbar {
   display: flex;
@@ -145,7 +147,7 @@ dialog.admin-drawer {
   color: var(--ink);
   overflow: hidden;
 }
-@media (min-width: 761px) {
+@media (min-width: 1024px) {
   .admin-layout[data-view="dashboard"] .admin-commandbar {
     display: none;
   }
@@ -186,7 +188,7 @@ dialog.admin-drawer {
   }
 }
 
-@media (max-width: 1000px) {
+@media (min-width: 1024px) and (max-width: 1200px) {
   .admin-layout {
     --navigation-width: 192px;
   }
@@ -197,7 +199,7 @@ dialog.admin-drawer {
     padding-inline: 16px;
   }
 }
-@media (max-width: 760px) {
+@media (max-width: 1023px) {
   .admin-layout {
     display: block;
   }
@@ -205,7 +207,7 @@ dialog.admin-drawer {
     display: none;
   }
   .admin-shell {
-    padding: 12px 12px 32px;
+    padding: 16px 24px 32px;
   }
   .admin-commandbar {
     min-height: 52px;
@@ -226,6 +228,11 @@ dialog.admin-drawer {
     width: auto;
     min-width: 44px;
     padding-inline: 8px;
+  }
+}
+@media (max-width: 600px) {
+  .admin-shell {
+    padding-inline: 16px;
   }
 }
 @media (max-width: 360px) {

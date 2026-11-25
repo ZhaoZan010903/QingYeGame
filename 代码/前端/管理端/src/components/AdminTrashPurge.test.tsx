@@ -218,6 +218,11 @@ describe("回收站入口与确认文案", () => {
     expect(row(true)).toContain("恢复草稿");
     expect(row(true)).toContain("永久删除");
   });
+  it("待审商品的主操作是审核，上架中的次操作是取消上架", () => {
+    expect(row(false, "pending")).toContain("查看并审核");
+    expect(row(false, "publishing")).toContain("取消上架");
+    expect(row(false, "published")).toContain(">下架<");
+  });
   it("最终驳回在回收站仍可永久删除，但不能恢复草稿", () => {
     const html = row(true, "rejected_final");
     expect(html).toContain("永久删除");

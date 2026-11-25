@@ -119,6 +119,37 @@ func TestDashboardCurrentInventoryAndTodoSemantics(t *testing.T) {
 	if len(statuses) != 9 || total != p["total"] {
 		t.Fatal("status distribution does not sum to nondeleted total")
 	}
+	// Published rows can be hidden by category or by a missing approval.
+	var published struct {
+		Data []struct {
+			ID      string `json:"id"`
+			Visible *bool  `json:"is_publicly_visible"`
+		} `json:"data"`
+		Total int `json:"total"`
+	}
+	w := f.call(t, f.first, "GET", "/api/v1/admin/products?status=published", nil, 200)
+	if err := json.Unmarshal(w.Body.Bytes(), &published); err != nil || published.Total != 4 || len(published.Data) != 4 {
+		t.Fatalf("unexpected published rows: %+v, %v", published, err)
+	}
+	want := map[string]bool{f.product: true, "dash-state-published": true, "dash-disabled-category-p": false, "dash-unapproved": false}
+	for _, row := range published.Data {
+		if visible, ok := want[row.ID]; !ok || row.Visible == nil || *row.Visible != visible {
+			t.Fatalf("incorrect public visibility in admin list: %+v", row)
+		}
+	}
+	seen := map[string]bool{}
+	for page := 1; page <= 2; page++ {
+		w = f.call(t, f.first, "GET", fmt.Sprintf("/api/v1/admin/products?visibility=public&limit=1&page=%d", page), nil, 200)
+		if err := json.Unmarshal(w.Body.Bytes(), &published); err != nil || float64(published.Total) != p["visible"] || len(published.Data) != 1 {
+			t.Fatalf("drill-down does not match dashboard: %+v, %v", published, err)
+		}
+		row := published.Data[0]
+		if !want[row.ID] || seen[row.ID] || row.Visible == nil || !*row.Visible {
+			t.Fatalf("unexpected visible row on page %d: %+v", page, row)
+		}
+		seen[row.ID] = true
+	}
+	f.call(t, f.first, "GET", "/api/v1/admin/products?visibility=invalid", nil, 422)
 	todos := data["todos"].(map[string]any)
 	for _, field := range []string{"pending_products", "publishing_products", "pending_nicknames", "waiting_conversations"} {
 		if todos[field] != float64(1) {

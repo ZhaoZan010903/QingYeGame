@@ -32,6 +32,31 @@ describe("管理商品分页与数据", () => {
     expect(pageItems(1, 1)).toEqual([1]);
     expect(pageItems(6, 12)).toEqual([1, "gap-5", 5, 6, 7, "gap-12", 12]);
   });
+  it("公开可见按后台展示口径分页，审核和回收站不继承此范围", () => {
+    const params = new URLSearchParams(
+      "visibility=public&status=draft&limit=50&page=2&q=QY",
+    );
+    const list = readProductListQuery(params);
+    expect(Object.fromEntries(list.query)).toEqual({
+      visibility: "public",
+      q: "QY",
+      limit: "50",
+      page: "2",
+    });
+    expect(readProductListQuery(params, true).query.has("visibility")).toBe(
+      false,
+    );
+    params.set("trash", "1");
+    expect(readProductListQuery(params).query.has("visibility")).toBe(false);
+    expect(
+      productFrom({ status: "published", is_publicly_visible: false })
+        .isPubliclyVisible,
+    ).toBe(false);
+    expect(productFrom({ status: "published" }).isPubliclyVisible).toBe(false);
+    expect(productFrom({ is_publicly_visible: true }).isPubliclyVisible).toBe(
+      true,
+    );
+  });
   it("空时间不伪造上架记录，统一北京时间", () => {
     expect(productTime("", "尚未上架")).toBe("尚未上架");
     expect(productTime("broken")).toBe("—");

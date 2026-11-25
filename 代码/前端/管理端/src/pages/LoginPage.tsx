@@ -42,7 +42,7 @@ export function LoginPage() {
       <h1>管理员登录</h1>
       <p className="muted">使用已开通的管理员账户进入独立管理环境。</p>
       {notice && (
-        <p className="admin-success" role="status">
+        <p className="admin-login-notice" role="status">
           {notice}
         </p>
       )}

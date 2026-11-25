@@ -225,6 +225,7 @@ export function productFrom(value: RecordData): Product {
     status:
       value.status === "approved" ? "published" : (value.status ?? "published"),
     publicationInterrupted: value.publication_interrupted === true,
+    isPubliclyVisible: value.is_publicly_visible === true,
     version: Number(value.version ?? 1),
     verification:
       value.verification_status ?? value.verification ?? "unprovided",

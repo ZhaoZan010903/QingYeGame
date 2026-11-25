@@ -1,14 +1,14 @@
 @import "../../共享/chat-ui.css";
 
 .chat-admin {
-  --chat-bg: var(--surface-solid-white);
-  --chat-soft: var(--surface-subtle);
+  --chat-bg: var(--surface-card);
+  --chat-soft: var(--surface-page);
   --chat-line: var(--line-subtle);
   --chat-ink: var(--ink);
   --chat-muted: var(--muted);
   --chat-accent: var(--blue);
   --chat-mine: var(--surface-selected);
-  --chat-peer: var(--surface-solid-white);
+  --chat-peer: var(--surface-card);
   --chat-radius: var(--radius-cards);
   --chat-control-radius: var(--radius-buttons);
   --chat-accent-soft: var(--surface-selected);
@@ -18,12 +18,10 @@
   outline-offset: 2px;
 }
 .chat-admin :is(.chat-workspace, .chat-presence) {
-  border-color: var(--acrylic-line);
+  border-color: var(--grid-line);
   border-radius: var(--radius-cards);
-  background: var(--surface-acrylic);
-  box-shadow: var(--elevation-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--surface-card);
+  box-shadow: none;
 }
 .chat-admin .chat-workspace {
   grid-template-columns: clamp(184px, 26%, 272px) minmax(0, 1fr);
@@ -41,11 +39,51 @@
     .chat-product-card b,
     .chat-list-heading strong span
   ) {
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .chat-admin .chat-presence-dot.accepting {
   background: var(--color-success);
+  box-shadow: none;
+}
+.chat-admin .chat-room-status[data-status="active"] {
+  color: var(--success-ink);
+}
+.chat-admin
+  :is(
+    .conversation-copy strong,
+    .chat-list-heading strong,
+    .chat-presence strong
+  ) {
+  font-size: 14px;
+}
+.chat-admin
+  :is(
+    .conversation-copy > b,
+    .conversation-copy time,
+    .conversation-copy em,
+    .conversation-copy i,
+    .chat-list-heading small,
+    .chat-sent,
+    .chat-time-divider time,
+    .chat-message-meta,
+    .chat-product-card small,
+    .chat-message-content > small em,
+    .chat-compose-tools > small,
+    .chat-room-heading .button-outline,
+    .chat-notification-control .button-outline
+  ) {
+  font-size: 12px;
+}
+.chat-admin .chat-presence > div {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.chat-admin .conversation-item.active {
+  box-shadow: inset 3px 0 var(--accent);
+}
+.chat-admin .conversation-item:not(.active):hover {
+  background: var(--surface-row-hover);
 }
 .chat-admin
   :is(
@@ -67,9 +105,9 @@
   border-radius: var(--radius-buttons);
 }
 .chat-admin .button-white {
-  background: var(--color-fluent-blue);
-  color: var(--surface-solid-white);
-  border: 1px solid var(--color-fluent-blue);
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 1px solid var(--accent);
 }
 .chat-admin .button-white:hover:not(:disabled) {
   background: var(--color-deep-blue);
@@ -91,13 +129,11 @@
 }
 .chat-admin .chat-emoji-picker,
 .admin-app .chat-toast {
-  border: 1px solid #ffffff66;
+  border: 1px solid var(--line);
   border-radius: var(--radius-cards);
-  background: var(--surface-acrylic-hover);
+  background: var(--surface-card);
   color: var(--ink);
   box-shadow: var(--elevation-flyout);
-  backdrop-filter: blur(30px);
-  -webkit-backdrop-filter: blur(30px);
 }
 .chat-admin .chat-emoji-picker button {
   border-radius: var(--radius-items);
@@ -107,7 +143,7 @@
 }
 .admin-app :is(.chat-nav-link b, .chat-unread-nav) {
   background: var(--color-fluent-blue);
-  color: var(--surface-solid-white);
+  color: var(--on-accent);
   border-radius: var(--radius-pills);
 }
 .admin-session .chat-nav-link {

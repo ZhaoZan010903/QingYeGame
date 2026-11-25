@@ -19,6 +19,8 @@ export function readProductListQuery(params: URLSearchParams, review = false) {
   }
   if (review) query.set("status", "pending");
   else if (params.get("trash") === "1") query.set("trash", "1");
+  else if (params.get("visibility") === "public")
+    query.set("visibility", "public");
   else if (params.get("status")) query.set("status", params.get("status")!);
   return { page, size, query, trash: !review && params.get("trash") === "1" };
 }

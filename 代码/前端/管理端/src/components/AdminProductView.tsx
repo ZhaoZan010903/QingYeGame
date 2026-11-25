@@ -12,10 +12,11 @@ import { Price, StateView } from "./shared";
 import { statusNames } from "./AdminProductEditor";
 import type { Product, ImageItem } from "../types";
 import { PrivateCredentials } from "./PrivateCredentials";
-import { productListReturn } from "../lib/product-links";
+import { productDetailOrigin, productListReturn } from "../lib/product-links";
 
 export function AdminProductView({ id }: { id: string }) {
   const location = useLocation();
+  const origin = productDetailOrigin(location.state?.returnTo, location.search);
   const returnTo = productListReturn(location.state?.returnTo);
   const editorParams = new URLSearchParams(returnTo?.split("?")[1] || "");
   editorParams.set("edit", id);
@@ -93,15 +94,13 @@ export function AdminProductView({ id }: { id: string }) {
     <div className="admin-product-view">
       <div className="admin-page-heading">
         <div>
-          <Link to={returnTo || "/chat"}>
-            <ArrowLeft size={16} /> {returnTo ? "返回商品列表" : "返回在线咨询"}
+          <Link to={origin.href}>
+            <ArrowLeft size={16} /> 返回{origin.label}
           </Link>
-          <h1>{returnTo ? "商品资料" : "咨询商品资料"}</h1>
-          <p>
-            {returnTo
-              ? "查看当前资料与完整图片，需要修改时点击右侧编辑。"
-              : "这里显示商品当前资料；聊天卡片保留发起咨询时的价格与标题。"}
-          </p>
+          <h1>商品资料</h1>
+          {origin.href.startsWith("/chat") && (
+            <p>此页显示当前商品资料。咨询记录保留当时的标题和报价。</p>
+          )}
         </div>
         <Link
           className="button-white"

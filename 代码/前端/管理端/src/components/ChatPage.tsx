@@ -8,10 +8,10 @@ import { ChatWorkspace } from "../../../共享/ChatWorkspace";
 import { ChatProductCard as ProductCard } from "../../../共享/ChatThread";
 import type { ChatProduct } from "../../../共享/chat-types";
 import "../chat.css";
-import { adminProductPath } from "../lib/product-links";
+import { chatProductPath } from "../lib/product-links";
 
 export function ChatProductCard({ product }: { product: ChatProduct }) {
-  return <ProductCard product={product} href={adminProductPath(product.id)} />;
+  return <ProductCard product={product} href={chatProductPath(product.id)} />;
 }
 export function ChatPage() {
   const { user } = useSession();
@@ -27,7 +27,7 @@ export function ChatPage() {
       selected={params.get("conversation") || ""}
       productId={params.get("product") || ""}
       navigate={(next, replace) => setParams(next, { replace })}
-      productHref={adminProductPath}
+      productHref={(id) => chatProductPath(id, params.get("conversation"))}
       notificationControl={<DesktopNoticeButton />}
       connectionNotice={<ChatConnectionNotice message={chat.connectionError} />}
     />

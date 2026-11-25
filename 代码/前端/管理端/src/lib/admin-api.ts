@@ -113,8 +113,16 @@ export const adminApi = {
       refresh ? "POST" : "GET",
     );
   },
-  async products(params: URLSearchParams): Promise<ProductPage> {
-    const result = await request(`/admin/products?${params}`);
+  async products(
+    params: URLSearchParams,
+    signal?: AbortSignal,
+  ): Promise<ProductPage> {
+    const result = await request(
+      `/admin/products?${params}`,
+      "GET",
+      undefined,
+      signal,
+    );
     return {
       items: rows(result).map(productFrom),
       total: result.total ?? unwrap(result).total ?? 0,

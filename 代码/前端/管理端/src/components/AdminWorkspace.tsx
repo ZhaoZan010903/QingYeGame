@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { useChat } from "./ChatNotifications";
-import { productListReturn } from "../lib/product-links";
+import { productDetailOrigin } from "../lib/product-links";
 import "../workspace.css";
 
 const groups = [
@@ -112,7 +112,7 @@ function WorkspaceMenu({
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
-    const mobile = window.matchMedia("(max-width: 760px)");
+    const mobile = window.matchMedia("(max-width: 1023px)");
     const resize = () => {
       if (!mobile.matches) node.close();
     };
@@ -173,10 +173,10 @@ export function AdminWorkspace({
   children: ReactNode;
 }) {
   const { list } = useChat();
-  const { state } = useLocation();
+  const { state, search } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const parentHref = detail
-    ? (productListReturn(state?.returnTo) ?? "/chat")
+    ? productDetailOrigin(state?.returnTo, search).href
     : undefined;
   const route = parentHref ? parentHref.slice(1).split("?")[0] : tab;
   const current = groups
@@ -226,9 +226,7 @@ export function AdminWorkspace({
                 <span aria-current="page">商品详情</span>
               </>
             ) : (
-              <span aria-current="page">
-                {active === "" ? "工作台" : label}
-              </span>
+              <span aria-current="page">{label}</span>
             )}
           </nav>
         </div>

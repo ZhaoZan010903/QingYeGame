@@ -623,6 +623,7 @@ export function ChatWorkspace({
   const canCompose = !!conversation && conversation.status !== "closed";
   const canReply =
     canCompose && conversation?.peer_read_through !== undefined && !sending;
+  const currentPresence = connected && !presenceError ? presence : null;
   return (
     <section
       ref={pageElement}
@@ -637,33 +638,43 @@ export function ChatWorkspace({
         <div className="chat-presence">
           <div>
             <span
-              className={`chat-presence-dot ${presence?.accepting ? "accepting" : ""}`}
+              className={`chat-presence-dot ${currentPresence?.accepting ? "accepting" : ""}`}
+              aria-hidden="true"
             />
             <strong>
-              {presence?.accepting
-                ? presence.active >= presence.capacity
-                  ? "接待已满"
-                  : "正在接待"
-                : "暂停接待新咨询"}
+              {!connected
+                ? "接待连接未就绪"
+                : !currentPresence
+                  ? presenceError
+                    ? "接待状态暂不可用"
+                    : "正在读取接待状态"
+                  : currentPresence.accepting
+                    ? currentPresence.active >= currentPresence.capacity
+                      ? "接待已满"
+                      : "正在接待"
+                    : "暂停接待新咨询"}
             </strong>
             <span>
-              当前 {presence?.active ?? "—"} / {presence?.capacity ?? 3} 个咨询
-              · 等待分配 {presence?.waiting ?? "—"} 个
+              我的接待 {currentPresence?.active ?? "—"} /{" "}
+              {currentPresence?.capacity ?? "—"}
+              {" · "}全站待分配 {currentPresence?.waiting ?? "—"}
             </span>
           </div>
           <Button
             className="button-outline"
-            disabled={presenceBusy || !connected}
-            onClick={() => void setAccepting(!presence?.accepting)}
+            disabled={presenceBusy || !currentPresence}
+            onClick={() =>
+              currentPresence && void setAccepting(!currentPresence.accepting)
+            }
           >
             {presenceBusy
               ? "正在更新…"
-              : presence?.accepting
+              : currentPresence?.accepting
                 ? "暂停接待"
                 : "开始接待"}
           </Button>
           <small>
-            保持后台打开即保持在线。暂停只停止接收新咨询，已有对话仍可回复。
+            开始接待后，系统会按空余名额分配咨询。暂停接待后仍可回复已有对话。
           </small>
           {presenceError && (
             <p className="chat-error" role="alert">
@@ -690,7 +701,8 @@ export function ChatWorkspace({
         <aside className="chat-list">
           <div className="chat-list-heading">
             <strong>
-              全部咨询 <span>{list.total}</span>
+              {chatAdmin ? "分配给我的咨询" : "全部咨询"}{" "}
+              <span>{list.total}</span>
             </strong>
             <small>{connected ? "实时连接" : "连接未就绪"}</small>
           </div>

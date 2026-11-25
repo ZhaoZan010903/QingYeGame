@@ -104,7 +104,7 @@
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius-cards);
   color: var(--ink);
-  background: white;
+  background: var(--surface-card);
   overflow: auto;
 }
 .account-dialog::backdrop {
@@ -216,11 +216,86 @@
   font-size: 13px;
   margin-top: 14px;
 }
+.member-result-count {
+  color: var(--muted);
+  margin: 8px 0 16px;
+}
+.member-result-count strong {
+  color: var(--ink);
+}
+.member-list:not(:empty) {
+  display: block;
+  overflow: hidden;
+  background: var(--surface-card);
+  border: 1px solid var(--grid-line);
+  border-radius: var(--radius-cards);
+}
+.account-card.member-row {
+  grid-template-columns: minmax(104px, 1fr) minmax(148px, 0.8fr) auto minmax(
+      144px,
+      auto
+    );
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--grid-line);
+  border-radius: 0;
+  padding: 16px 20px;
+}
+.member-row:last-child {
+  border: 0;
+}
+.member-row:hover {
+  background: var(--surface-row-hover);
+}
+.member-registered {
+  display: grid;
+  gap: 4px;
+}
+.member-registered span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.member-registered time,
+.member-row .account-actions button {
+  font-size: 13px;
+}
+.member-row .account-actions {
+  justify-content: end;
+}
+.member-row .account-state {
+  justify-self: start;
+}
+.member-pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--muted);
+}
+.member-pagination > span {
+  margin-right: auto;
+}
 @media (max-width: 760px) {
   .account-card {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 14px;
     padding: 16px;
+  }
+  .account-card.member-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 16px;
+    padding: 16px;
+  }
+  .member-row .account-state {
+    grid-area: 1 / 2;
+    justify-self: end;
+  }
+  .member-registered {
+    grid-column: 1/-1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
   .account-actions {
     grid-column: 1/-1;

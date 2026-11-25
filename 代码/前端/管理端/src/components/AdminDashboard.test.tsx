@@ -262,7 +262,9 @@ describe("趋势图与看板展示", () => {
     expect(html).toContain('tabindex="0"');
     expect(html).toContain("2026-11-08");
     expect(html).toContain("2026-11-14");
-    expect(html).toContain('aria-pressed="true">首次有效收藏');
+    expect(html).toMatch(
+      /aria-pressed="true"><span>首次有效收藏<\/span><strong>2<\/strong>/,
+    );
   });
   it.each([254, 324, 710])(
     "%s像素绘图区保持完整日期和真实数值，轴标签预留空间",
@@ -294,20 +296,21 @@ describe("趋势图与看板展示", () => {
       </MemoryRouter>,
     );
     expect(html).toContain('data-days="30" data-rank-by="consultations"');
-    expect(html).toContain("当前快照 · 不随日期筛选");
+    expect(html).toContain("当前库存 · 不含回收站");
     expect(html).toContain("最近 30 天");
     expect(html).toContain('href="/nickname-reviews"');
     expect(html).toContain('href="/reviews"');
     expect(html).toContain("待审核商品");
     expect(html).toContain("待审核昵称");
-    expect(html).toContain("当前全部待审核数量，不受 7／30 天选择影响");
+    expect(html).toContain("当前状态 · 全部时间");
+    expect(html).toContain("全站等待分配");
     expect(html).toContain('href="/products?status=publishing"');
     expect(html).toContain('href="/products?trash=1"');
     expect(html).toContain('href="/products/item%2Fa"');
     expect(html).toContain("周月租号 · 已下架");
     expect(html).toContain("&lt;script&gt;账号标题&lt;/script&gt;");
     expect(html).not.toContain("<script>");
-    expect(html).toContain("当前未删除商品在所选期间的互动排行");
+    expect(html).toContain("按首次商品咨询排序");
     expect(html).not.toContain("转化率");
   });
   it("没有互动时显示空态并保留每日零值", () => {
@@ -323,11 +326,52 @@ describe("趋势图与看板展示", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("这段时间暂无去重商品浏览记录");
-    expect(html).toContain("这段时间暂无符合条件的互动商品");
+    expect(html).toContain("本期暂无产生去重商品浏览的商品");
     expect(html).not.toContain("NaN");
     expect(html).not.toContain("Infinity");
   });
-  it("首次加载不会渲染假数字，快捷操作仍可用", () => {
+  it("公开可见数不误导至全部已上架，草稿计数和入口仍可核对", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <DashboardContent data={fixture()} metric="views" onMetric={() => {}} />
+      </MemoryRouter>,
+    );
+    expect(html).toMatch(
+      /\bhref="\/products\?visibility=public"[\s\S]*?公开可见[\s\S]*?<strong>30<\/strong>/,
+    );
+    expect(html).toMatch(
+      /\bhref="\/products\?status=published"[\s\S]*?<strong>35<\/strong>/,
+    );
+    expect(html).toContain('href="/products?status=draft"');
+  });
+  it("切换日期在途时仍可核对库存和处理待办；隐藏旧期间的趋势和排行", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <DashboardContent
+          data={fixture(7)}
+          days={30}
+          metric="views"
+          onMetric={() => {}}
+          onDays={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("全站等待分配");
+    expect(html).toContain("会员总数");
+    expect(html).toContain("正在读取最近 30 天的趋势和排行");
+    expect(html).not.toContain('class="dashboard-ranking-list"');
+    expect(html).not.toContain('role="img"');
+  });
+  it("从看板链接恢复30天筛选，排行依据仍然是浏览", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/?days=30&metric=favorites"]}>
+        <AdminDashboard />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("正在读取最近 30 天的数据");
+    expect(html).not.toContain("热门排行依据");
+  });
+  it("首次加载不会渲染假数字，新建商品打开编辑器且保留旧站同步入口", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <AdminDashboard />
@@ -335,8 +379,11 @@ describe("趋势图与看板展示", () => {
     );
     expect(html).toContain("正在读取最近 7 天的数据");
     expect(html).not.toContain('class="dashboard-content"');
+    expect(html).toContain("新建商品");
+    expect(html).not.toContain("上架新商品");
     for (const target of [
       "/products?new=1",
+      "/legacy-sync",
       "/reviews",
       "/chat",
       "/settings",

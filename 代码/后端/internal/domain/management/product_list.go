@@ -35,6 +35,9 @@ func ValidateProductQuery(in ProductQuery) error {
 	if !catalog.ValidRentalCategory(in.RentalCategory) || in.RentalCategory != "" && in.TradeType == "sale" {
 		return fault.New(fault.Invalid, "INVALID_RENTAL_CATEGORY", "出租分类筛选无效")
 	}
+	if in.Visibility != "" && in.Visibility != "public" {
+		return fault.New(fault.Invalid, "INVALID_QUERY", "商品可见范围无效")
+	}
 	return nil
 }
 

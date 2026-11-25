@@ -25,6 +25,7 @@ const reasonLabels: Record<string, string> = {
 export function AdminMediaSecurity() {
   const [data, setData] = useState<Summary | null>(null),
     [error, setError] = useState(""),
+    [loading, setLoading] = useState(true),
     [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<AccessRow | null>(null),
     [reason, setReason] = useState(""),
@@ -32,6 +33,7 @@ export function AdminMediaSecurity() {
   const [filter, setFilter] = useState("abnormal"),
     [page, setPage] = useState(1);
   const modal = useRef<HTMLDialogElement>(null);
+  const read = useRef<AbortController | null>(null);
   useEffect(() => {
     const dialog = modal.current;
     if (!selected || !dialog) return;
@@ -44,18 +46,31 @@ export function AdminMediaSecurity() {
     };
   }, [selected]);
   async function load() {
+    read.current?.abort();
+    const controller = new AbortController();
+    read.current = controller;
+    setLoading(true);
     setError("");
     try {
-      const result = await request("/admin/security/media-access");
-      setData(result.data as Summary);
+      const result = await request(
+        "/admin/security/media-access",
+        "GET",
+        undefined,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) setData(result.data as Summary);
     } catch (failure) {
+      if (controller.signal.aborted) return;
       setError(
         failure instanceof Error ? failure.message : "读取失败，请重试。",
       );
+    } finally {
+      if (!controller.signal.aborted) setLoading(false);
     }
   }
   useEffect(() => {
     void load();
+    return () => read.current?.abort();
   }, []);
   async function save() {
     if (!selected) return;
@@ -71,6 +86,8 @@ export function AdminMediaSecurity() {
       setReason("");
       await load();
     } catch (failure) {
+      // A failed acknowledgement may already have changed the record version.
+      setSelected(null);
       await load();
       setError(
         failure instanceof Error
@@ -95,24 +112,19 @@ export function AdminMediaSecurity() {
             查看异常看图请求，处理误限制。仅影响图片访问，不停用账号或删除图片。
           </p>
         </div>
-        <button className="button-outline" onClick={() => void load()}>
-          刷新记录
+        <button
+          className="button-outline"
+          disabled={loading || busy}
+          onClick={() => void load()}
+        >
+          {loading ? "正在读取…" : "刷新记录"}
         </button>
       </div>
       <div className="media-access-panel fluent-card">
-        <details>
-          <summary>第一次使用？查看操作说明</summary>
-          <p>
-            先查看原因和到期时间。确认误限制后，选择「解除限制」，填写原因并保存；持续异常可选择「限制10分钟」。解除后仍保留正常限流，必要时用户需完成验证。
-          </p>
-          <p>
-            列表为有时效的运行记录；人工处置另存审计日志。发送字节是服务端写入响应的统计，不是云厂商计费账单。
-          </p>
-        </details>
         {data && (
           <dl className="media-access-metrics">
             <div>
-              <dt>已放行</dt>
+              <dt>已放行请求</dt>
               <dd>{data.metrics.allowed ?? "0"} 次</dd>
             </div>
             <div>
@@ -120,9 +132,10 @@ export function AdminMediaSecurity() {
               <dd>{data.metrics.verified ?? "0"} 次</dd>
             </div>
             <div>
-              <dt>响应数据</dt>
+              <dt>服务端已发送</dt>
               <dd>
-                {(Number(data.metrics.bytes_sent ?? 0) / 1048576).toFixed(1)} MB
+                {(Number(data.metrics.bytes_sent ?? 0) / 1048576).toFixed(1)}{" "}
+                MiB
               </dd>
             </div>
           </dl>
@@ -153,7 +166,7 @@ export function AdminMediaSecurity() {
                 <th>入口</th>
                 <th>当前情况</th>
                 <th>请求数</th>
-                <th>到期时间</th>
+                <th>到期时间（北京）</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -171,16 +184,24 @@ export function AdminMediaSecurity() {
                     </small>
                   </td>
                   <td>{item.surface === "admin" ? "管理端" : "用户端"}</td>
-                  <td>{reasonLabels[item.reason] ?? "正常"}</td>
+                  <td>
+                    {item.reason
+                      ? (reasonLabels[item.reason] ?? "其他异常")
+                      : "正常"}
+                  </td>
                   <td className="mono">{item.requests}</td>
                   <td>
                     {item.until > Math.floor(Date.now() / 1000)
-                      ? new Date(item.until * 1000).toLocaleTimeString("zh-CN")
+                      ? new Date(item.until * 1000).toLocaleTimeString(
+                          "zh-CN",
+                          { timeZone: "Asia/Shanghai", hour12: false },
+                        )
                       : "—"}
                   </td>
                   <td>
                     <button
                       className="button-outline"
+                      disabled={loading || busy || !!error}
                       onClick={() => {
                         setSelected(item);
                         setDuration(
@@ -197,37 +218,51 @@ export function AdminMediaSecurity() {
               {!rows.length && (
                 <tr>
                   <td colSpan={6}>
-                    {data ? "当前没有符合条件的记录。" : "正在读取…"}
+                    {data
+                      ? "当前没有符合条件的记录。"
+                      : loading
+                        ? "正在读取…"
+                        : "记录暂不可用"}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-        <nav className="media-access-pagination" aria-label="图片访问记录分页">
-          <button
-            className="button-outline"
-            disabled={currentPage <= 1}
-            onClick={() => setPage(currentPage - 1)}
-          >
-            上一页
-          </button>
-          <span>
-            第 {currentPage} / {pages} 页 · {filtered.length} 条
-          </span>
-          <button
-            className="button-outline"
-            disabled={currentPage >= pages}
-            onClick={() => setPage(currentPage + 1)}
-          >
-            下一页
-          </button>
-        </nav>
         {data && (
-          <p className="helper">
-            {data.coverage}。{data.retention}。
-          </p>
+          <nav
+            className="media-access-pagination"
+            aria-label="图片访问记录分页"
+          >
+            <button
+              className="button-outline"
+              disabled={currentPage <= 1}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              上一页
+            </button>
+            <span>
+              第 {currentPage} / {pages} 页 · {filtered.length} 条
+            </span>
+            <button
+              className="button-outline"
+              disabled={currentPage >= pages}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              下一页
+            </button>
+          </nav>
         )}
+        <details>
+          <summary>统计范围与处置说明</summary>
+          {data &&
+            [data.coverage, data.retention]
+              .filter(Boolean)
+              .map((note) => <p key={note}>{note}</p>)}
+          <p>
+            人工限制可以提前解除，正常限流和安全验证继续生效。每次人工处置都会记录原因。
+          </p>
+        </details>
       </div>
       {selected && (
         <dialog
@@ -283,10 +318,14 @@ export function AdminMediaSecurity() {
             </button>
             <button
               className="button-white"
-              disabled={busy || reason.trim().length < 2}
+              disabled={busy || Array.from(reason.trim()).length < 2}
               onClick={() => void save()}
             >
-              {busy ? "保存中…" : "确认保存"}
+              {busy
+                ? "正在保存…"
+                : duration
+                  ? "限制图片访问 10 分钟"
+                  : "解除临时限制"}
             </button>
           </div>
         </dialog>

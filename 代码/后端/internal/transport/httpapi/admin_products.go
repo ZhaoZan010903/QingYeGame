@@ -66,7 +66,11 @@ func (a *App) adminProducts(w http.ResponseWriter, r *http.Request) {
 		fail(w, 422, "INVALID_QUERY", "回收站筛选无效")
 		return
 	}
-	data, err := a.managementService().Products(r.Context(), managementActor(u), management.ProductQuery{Status: q.Get("status"), Source: q.Get("source"), Query: q.Get("q"), TradeType: q.Get("trade_type"), RentalCategory: q.Get("rental_category"), Sort: q.Get("sort"), Trash: q.Get("trash") == "1", Limit: limit, Offset: offset})
+	data, err := a.managementService().Products(r.Context(), managementActor(u), management.ProductQuery{
+		Status: q.Get("status"), Source: q.Get("source"), Query: q.Get("q"),
+		TradeType: q.Get("trade_type"), RentalCategory: q.Get("rental_category"), Visibility: q.Get("visibility"),
+		Sort: q.Get("sort"), Trash: q.Get("trash") == "1", Limit: limit, Offset: offset,
+	})
 	memberResponse(w, data, err)
 }
 

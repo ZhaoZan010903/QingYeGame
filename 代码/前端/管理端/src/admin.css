@@ -21,7 +21,7 @@
 }
 .legacy-sync-panel {
   min-width: 0;
-  padding: 24px;
+  padding: 20px;
 }
 .legacy-sync-panel h2 {
   margin: 0;
@@ -50,14 +50,14 @@
 .legacy-sync-note,
 .legacy-sync-record span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .legacy-sync-run-info {
   display: grid;
   text-align: right;
 }
 .legacy-sync-numbers {
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .legacy-sync-progress {
@@ -65,7 +65,7 @@
 }
 .legacy-sync-progress-caption {
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .legacy-sync-progress-caption strong {
   font-weight: 600;
@@ -102,7 +102,7 @@
 .legacy-sync-stop {
   margin: 10px 0 0;
   color: var(--caution-ink);
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .legacy-sync-note {
   margin: 8px 0 0;
@@ -139,7 +139,7 @@
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .legacy-sync-totals button > b {
   font-size: 20px;
@@ -168,7 +168,7 @@
   border-radius: var(--radius-items);
   background: var(--surface-page);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
   white-space: nowrap;
 }
 .legacy-sync-status[data-status="applied"],
@@ -211,7 +211,7 @@
 .legacy-sync-history-actions .button-outline {
   min-height: 30px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .legacy-sync-history-actions [aria-pressed="true"],
 .legacy-sync-issues[aria-pressed="true"] {
@@ -225,12 +225,12 @@
 .legacy-sync-record {
   display: grid;
   gap: 1px;
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .legacy-sync-change {
   padding: 12px 0;
   border-top: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--text-body);
   overflow-wrap: anywhere;
 }
 .legacy-sync-change > div:first-child {
@@ -406,7 +406,7 @@
   border-radius: var(--radius-buttons);
 }
 .carousel-search-results span {
-  font-size: 12px;
+  font-size: var(--text-label);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -431,7 +431,7 @@
 .private-credentials dd {
   overflow-wrap: anywhere;
   margin: 6px 0 16px;
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
 }
 .preview-tags {
   display: flex;
@@ -444,7 +444,7 @@
   border: 1px solid var(--line);
   background: var(--soft);
   border-radius: var(--radius-items);
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .admin-listing-preview {
   display: grid;
@@ -514,27 +514,27 @@
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 .admin-heading h1 {
   font-size: var(--text-heading);
   font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.35;
-  margin-top: 6px;
+  margin-top: 0;
 }
 .admin-heading h2 {
   font-size: 24px;
 }
 .admin-heading p {
-  font-size: 13px;
+  font-size: var(--text-body);
   color: var(--muted);
-  margin-top: 10px;
+  margin-top: 8px;
   line-height: 1.8;
   max-width: 740px;
 }
 .eyebrow {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   letter-spacing: 0.1em;
 }
@@ -569,7 +569,7 @@
   align-items: center;
   justify-content: space-between;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .stat-card > div svg {
   color: var(--muted);
@@ -587,7 +587,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .stat-card.attention {
@@ -625,7 +625,7 @@
   margin: 5px 0 8px;
 }
 .welcome-panel p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .welcome-panel > .guide-trigger {
@@ -658,7 +658,7 @@
   font-weight: 600;
 }
 .section-heading > span {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   display: flex;
   align-items: center;
@@ -687,7 +687,7 @@
   flex-shrink: 0;
 }
 .task-card small {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .task-card strong {
@@ -696,7 +696,7 @@
   margin: 3px 0 7px;
 }
 .task-card p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   line-height: 1.8;
 }
@@ -728,7 +728,7 @@
   border: 1px solid var(--line-subtle);
   background: var(--surface-subtle);
   border-radius: 50%;
-  font-size: 12px;
+  font-size: var(--text-label);
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -736,16 +736,16 @@
 }
 .workflow-card li strong {
   font-weight: 400;
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .workflow-card li p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   margin-top: 4px;
   line-height: 1.8;
 }
 .workflow-card > a {
-  font-size: 12px;
+  font-size: var(--text-label);
   padding: 0;
 }
 .dashboard-foot {
@@ -753,7 +753,7 @@
   justify-content: space-between;
   gap: 20px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
   margin-top: 34px;
 }
 .dashboard-foot a {
@@ -788,12 +788,12 @@ textarea {
   gap: 20px;
 }
 .admin-shell .form-field {
-  font-size: 13px;
+  font-size: var(--text-body);
   gap: 8px;
 }
 .form-field small,
 .field-hint {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   line-height: 1.8;
 }
@@ -816,7 +816,7 @@ textarea {
   min-width: 300px;
 }
 .admin-toolbar .muted {
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .status-tabs {
   display: flex;
@@ -833,7 +833,7 @@ textarea {
   white-space: nowrap;
   padding: 12px 2px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .status-tabs button.active {
   border-color: var(--blue);
@@ -845,7 +845,7 @@ textarea {
 }
 .admin-table-wrap {
   overflow-x: auto;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-subtle);
   border-radius: var(--radius-cards);
   margin-bottom: 18px;
 }
@@ -855,18 +855,18 @@ textarea {
   text-align: left;
   min-width: 650px;
   background: var(--surface-solid-white);
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .admin-table th {
   background: var(--surface-subtle);
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 400;
+  font-size: var(--text-label);
+  font-weight: 600;
   white-space: nowrap;
 }
 .admin-table th,
 .admin-table td {
-  padding: 17px 20px;
+  padding: 16px;
   border-bottom: 1px solid var(--line-subtle);
   vertical-align: middle;
 }
@@ -888,12 +888,12 @@ textarea {
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
-  font-weight: 400;
+  font-weight: 600;
   line-height: 1.7;
 }
 .admin-table td > span,
 .admin-table td > a {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .admin-table .price {
@@ -902,16 +902,16 @@ textarea {
   font-weight: 550;
 }
 .admin-table .price-unit {
-  font-size: 12px;
+  font-size: var(--text-label);
   white-space: normal;
 }
 .admin-table tbody tr:hover {
-  background: var(--surface-subtle);
+  background: var(--surface-row-hover);
 }
 .admin-table .button-outline {
-  min-height: 33px;
+  min-height: 36px;
   padding: 7px 12px;
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .status-pill,
 .pill {
@@ -921,12 +921,12 @@ textarea {
   border-radius: var(--radius-items);
   background: var(--surface-subtle);
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
   font-weight: 400;
 }
 .status-published {
-  background: var(--soft);
-  color: var(--blue);
+  background: var(--success-surface);
+  color: var(--success-ink);
 }
 .status-pending {
   background: var(--caution-surface);
@@ -943,11 +943,11 @@ textarea {
 }
 .admin-empty h3 {
   font-size: 17px;
-  font-weight: 400;
-  color: var(--muted);
+  font-weight: 600;
+  color: var(--ink);
 }
 .admin-empty p {
-  font-size: 12px;
+  font-size: var(--text-label);
   margin-top: 12px;
 }
 .admin-empty .location-note {
@@ -960,19 +960,19 @@ textarea {
   border-left: 3px solid var(--line);
   padding: 14px 18px;
   margin-bottom: 24px;
-  font-size: 12px;
+  font-size: var(--text-label);
   border-radius: var(--radius-cards);
 }
 .location-note strong {
   display: block;
   color: var(--blue);
-  font-size: 12px;
+  font-size: var(--text-label);
   font-weight: 600;
 }
 .location-note span {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
   margin-top: 5px;
   line-height: 1.8;
 }
@@ -981,7 +981,7 @@ textarea {
   background: var(--surface-subtle);
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius-cards);
-  font-size: 12px;
+  font-size: var(--text-label);
   line-height: 1.8;
   margin: 24px 0;
 }
@@ -1010,23 +1010,26 @@ textarea {
   text-align: left;
   gap: 7px;
   padding: 17px 19px;
-  background: white;
+  background: var(--surface-card);
   border: 1px solid var(--line);
   border-radius: var(--radius-buttons);
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .admin-resource-list button.active {
-  border-color: var(--line);
+  border-color: var(--line-accent);
   background: var(--soft);
   color: var(--blue);
 }
 .admin-resource-list button strong {
-  font-weight: 400;
+  font-weight: 600;
+}
+.admin-resource-list button:hover:not(.active) {
+  background: var(--surface-row-hover);
 }
 .admin-resource-list button span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .admin-resource-form {
   padding: 28px;
@@ -1057,7 +1060,7 @@ textarea {
   padding: 16px 18px;
   border-radius: var(--radius-cards);
   margin: 24px 0;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .admin-advanced summary {
@@ -1065,7 +1068,7 @@ textarea {
   font-weight: 400;
 }
 .admin-advanced p {
-  font-size: 12px;
+  font-size: var(--text-label);
   line-height: 1.8;
   margin: 12px 0;
 }
@@ -1081,17 +1084,17 @@ textarea {
   margin-bottom: 10px;
 }
 .admin-notice p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--caution-ink);
   margin-top: 10px;
 }
 .admin-success {
-  color: var(--blue);
-  background: var(--soft);
+  color: var(--success-ink);
+  background: var(--success-surface);
   border-radius: var(--radius-cards);
   padding: 13px 16px;
   margin: 16px 0;
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .admin-warning {
   background: var(--caution-surface);
@@ -1099,15 +1102,15 @@ textarea {
   padding: 13px 16px;
   border-radius: var(--radius-cards);
   color: var(--caution-ink);
-  font-size: 12px;
+  font-size: var(--text-label);
   margin: 16px 0;
   line-height: 1.8;
 }
 .admin-layout .form-error {
   background: var(--error-surface);
   padding: 13px 16px;
-  border-radius: var(--radius-cards);
-  font-size: 12px;
+  border-radius: var(--radius-items);
+  font-size: var(--text-body);
 }
 .admin-qr-preview {
   width: 160px;
@@ -1126,7 +1129,7 @@ textarea {
 }
 .admin-purposes legend {
   margin-bottom: 14px;
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .save-bar {
   display: flex;
@@ -1143,7 +1146,7 @@ textarea {
   flex-wrap: wrap;
 }
 .save-bar > span {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   margin-right: auto;
 }
@@ -1197,7 +1200,7 @@ textarea {
   border-radius: var(--radius-cards);
 }
 .home-map .section-heading {
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .home-wireframe {
   background: var(--surface-solid-white);
@@ -1209,7 +1212,7 @@ textarea {
 .wireframe-top {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   border-bottom: 1px solid var(--line);
   padding: 6px 3px 12px;
@@ -1220,7 +1223,7 @@ textarea {
 }
 .wireframe-hero small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 12px;
   display: block;
 }
 .wireframe-hero strong {
@@ -1243,26 +1246,26 @@ textarea {
 }
 .wire-zone.selected {
   border-color: var(--line-accent);
-  box-shadow: 0 0 0 2px #00000055;
-  background: var(--surface-subtle);
+  box-shadow: inset 3px 0 var(--accent);
+  background: var(--surface-selected);
 }
 .wire-zone:hover {
   border-color: var(--line);
 }
 .wire-zone > .zone-tag {
-  font-size: 8px;
+  font-size: 12px;
   color: var(--blue);
   display: block;
   margin-bottom: 7px;
 }
 .wire-zone > strong {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-label);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .wire-zone > small {
-  font-size: 8px;
+  font-size: 12px;
   color: var(--muted);
   display: block;
   line-height: 1.8;
@@ -1276,12 +1279,12 @@ textarea {
   justify-content: center;
   background: var(--surface-subtle);
   border-radius: var(--radius-cards);
-  font-size: 8px;
+  font-size: 12px;
   color: var(--muted);
   position: relative;
 }
 .wire-carousel i {
-  font-size: 7px;
+  font-size: 12px;
   position: absolute;
   right: 6px;
   bottom: 6px;
@@ -1296,7 +1299,7 @@ textarea {
   background: var(--surface-subtle);
   text-align: center;
   padding: 8px 1px;
-  font-size: 7px;
+  font-size: 12px;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -1312,14 +1315,14 @@ textarea {
   flex: 1;
   height: 45px;
   border-radius: var(--radius-cards);
-  font-size: 8px;
+  font-size: 12px;
   color: var(--muted);
 }
 .wire-cta {
   display: inline-block !important;
   background: var(--soft);
   color: var(--blue) !important;
-  font-size: 8px;
+  font-size: 12px;
   padding: 4px 8px;
   border-radius: var(--radius-cards);
   margin-top: 9px;
@@ -1338,7 +1341,7 @@ textarea {
   border: 0;
   border-radius: var(--radius-buttons);
   background: var(--surface-subtle);
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   padding: 9px 12px;
 }
@@ -1356,12 +1359,12 @@ textarea {
   gap: 15px;
 }
 .switch-row strong {
-  font-size: 13px;
+  font-size: var(--text-body);
   font-weight: 400;
 }
 .switch-row small {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   margin-top: 6px;
 }
@@ -1369,7 +1372,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .reorder-controls > span {
@@ -1454,7 +1457,7 @@ textarea {
   line-height: 1.7;
 }
 .product-review-card p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   margin: 7px 0;
 }
@@ -1468,7 +1471,7 @@ textarea {
   list-style: none;
   padding: 22px 0;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .review-checklist li {
@@ -1491,7 +1494,7 @@ textarea {
   background: var(--surface-subtle);
 }
 .attribute-options .agreement-check {
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .help-tabs {
   display: flex;
@@ -1503,7 +1506,7 @@ textarea {
   border: 1px solid var(--line-subtle);
   padding: 11px 17px;
   border-radius: var(--radius-buttons);
-  font-size: 12px;
+  font-size: var(--text-label);
   background: var(--surface-solid-white);
   color: var(--muted);
 }
@@ -1538,7 +1541,7 @@ textarea {
   font-weight: 600;
 }
 .guide-intro p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   margin-bottom: 25px;
 }
@@ -1576,7 +1579,7 @@ textarea {
   border-radius: var(--radius-buttons);
   padding: 14px 18px;
   width: 100%;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   text-align: left;
 }
@@ -1587,7 +1590,7 @@ textarea {
   background: var(--surface-subtle);
   display: grid;
   place-items: center;
-  font-size: 12px;
+  font-size: var(--text-label);
   flex-shrink: 0;
 }
 .stepper li.active button {
@@ -1597,7 +1600,7 @@ textarea {
 }
 .stepper li.active button > span {
   background: var(--color-fluent-blue);
-  color: var(--surface-solid-white);
+  color: var(--on-accent);
 }
 .stepper li.done button > span {
   background: var(--soft);
@@ -1617,7 +1620,7 @@ textarea {
   margin: 18px 0 13px;
 }
 .demo-instructions > p {
-  font-size: 13px;
+  font-size: var(--text-body);
   color: var(--muted);
   line-height: 1.9;
 }
@@ -1648,7 +1651,7 @@ textarea {
 }
 .demo-window-bar span {
   margin-left: 6px;
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .demo-result {
@@ -1659,7 +1662,7 @@ textarea {
   margin-top: 18px;
 }
 .demo-result > span {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .demo-result strong {
@@ -1669,12 +1672,12 @@ textarea {
   overflow-wrap: anywhere;
 }
 .demo-result p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   margin-top: 18px;
 }
 .demo-result small {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .demo-image-slots {
@@ -1689,7 +1692,7 @@ textarea {
   flex: 1;
   background: var(--surface-subtle);
   border-radius: var(--radius-cards);
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .demo-confirm {
@@ -1710,7 +1713,7 @@ textarea {
   font-size: 18px;
 }
 .demo-confirm p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   margin: 12px 0;
   overflow-wrap: anywhere;
@@ -1748,10 +1751,10 @@ textarea {
 }
 .help-faq summary {
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .help-faq p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   line-height: 1.9;
   margin: 14px 0 0;
@@ -1770,7 +1773,7 @@ textarea {
   margin: 0 0 12px;
 }
 .recommendation-summary p {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
   line-height: 1.9;
 }
@@ -1821,13 +1824,13 @@ textarea {
   .recommendation-table td::before {
     content: attr(data-label);
     display: block;
-    font-size: 12px;
+    font-size: var(--text-label);
     color: var(--muted);
     margin-bottom: 5px;
   }
 }
 .ranking-advanced > summary {
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .ranking-advanced .admin-resource-form {
   padding: 20px 0 0;
@@ -1872,7 +1875,7 @@ textarea {
     padding: 18px;
   }
   .stat-card p {
-    font-size: 12px;
+    font-size: var(--text-label);
   }
 }
 @media (max-width: 1000px) {
@@ -1929,7 +1932,7 @@ textarea {
   }
   .stepper li button {
     padding: 13px 10px;
-    font-size: 12px;
+    font-size: var(--text-label);
   }
   .editor-step-body {
     padding: 22px;
@@ -1977,7 +1980,7 @@ textarea {
     margin: 13px 0;
   }
   .stat-card p {
-    font-size: 12px;
+    font-size: var(--text-label);
   }
   .stat-card p svg {
     display: none;
@@ -1993,14 +1996,14 @@ textarea {
     display: none;
   }
   .task-card strong {
-    font-size: 13px;
+    font-size: var(--text-body);
   }
   .task-card p {
-    font-size: 12px;
+    font-size: var(--text-label);
   }
   .dashboard-foot {
     flex-direction: column;
-    font-size: 12px;
+    font-size: var(--text-label);
   }
   .admin-grid {
     grid-template-columns: 1fr;
@@ -2056,7 +2059,7 @@ textarea {
   }
   .zone-tabs button {
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: var(--text-label);
   }
   .save-bar {
     bottom: 8px;
@@ -2065,11 +2068,11 @@ textarea {
   }
   .save-bar > span {
     flex-basis: 100%;
-    font-size: 12px;
+    font-size: var(--text-label);
   }
   .save-bar .button-white,
   .save-bar .button-outline {
-    font-size: 12px;
+    font-size: var(--text-label);
     padding: 10px 12px;
   }
   .full-width-resource fieldset > .save-bar {
@@ -2086,7 +2089,7 @@ textarea {
     align-items: flex-start;
     gap: 8px;
     padding: 12px;
-    font-size: 12px;
+    font-size: var(--text-label);
   }
   .product-review-card {
     flex-direction: column;
@@ -2134,7 +2137,7 @@ textarea {
   }
   .guide-controls .button-white,
   .guide-controls .button-outline {
-    font-size: 12px;
+    font-size: var(--text-label);
     padding: 9px 12px;
   }
   .admin-purposes {
@@ -2195,7 +2198,7 @@ textarea {
 }
 .admin-product-image-tools span,
 .admin-product-meta code {
-  font-family: var(--font-sans);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .admin-product-image-tools button {
@@ -2233,7 +2236,7 @@ textarea {
   justify-content: space-between;
   gap: 12px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--text-label);
   overflow-wrap: anywhere;
 }
 .admin-product-facts {
@@ -2243,7 +2246,7 @@ textarea {
   margin: 24px 0;
 }
 .admin-product-facts dt {
-  font-size: 12px;
+  font-size: var(--text-label);
   color: var(--muted);
 }
 .admin-product-facts dd {
@@ -2265,7 +2268,7 @@ textarea {
   padding: 4px 8px;
   background: var(--surface-subtle);
   border-radius: var(--radius-items);
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .admin-product-lightbox {
   width: min(1100px, 95vw);
@@ -2317,7 +2320,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: var(--radius-cards);
   padding: 0 12px;
-  background: white;
+  background: var(--surface-card);
 }
 .dictionary-search input {
   border: 0 !important;
@@ -2394,17 +2397,17 @@ textarea {
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .carousel-selected-product span {
   display: flex;
   align-items: center;
   gap: 5px;
   color: var(--blue);
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .carousel-selected-product small {
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .carousel-search-panel {
   margin-top: 15px;
@@ -2435,10 +2438,10 @@ textarea {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--line);
-  background: white;
+  background: var(--surface-card);
   padding: 8px 10px;
   border-radius: var(--radius-buttons);
-  font-size: 12px;
+  font-size: var(--text-label);
 }
 .preview-drag-tools button.active {
   background: var(--soft);
@@ -2458,7 +2461,7 @@ textarea {
   color: var(--ink);
   padding: 12px 18px;
   border-radius: var(--radius-cards);
-  font-size: 13px;
+  font-size: var(--text-body);
   white-space: nowrap;
 }
 .carousel-advanced {
@@ -2541,7 +2544,7 @@ textarea {
 .media-access-panel .helper {
   margin-block: 8px 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-body);
 }
 .media-access-metrics {
   display: flex;
@@ -2557,7 +2560,8 @@ textarea {
 }
 .media-access-metrics dd {
   margin: 4px 0 0;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 .media-access-filter {

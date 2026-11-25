@@ -77,7 +77,8 @@ func (a *CatalogStore) ProductView(ctx context.Context, id string, private bool)
 
 // Owner reads deliberately keep ProductJSON; operational recommendation fields
 // are visible only through the management projection.
-const AdminProductJSON = ProductJSON + ` || jsonb_build_object('recommendation_boost',p.recommendation_boost,'recommendation_version',p.recommendation_version)`
+const AdminProductJSON = ProductJSON + ` || jsonb_build_object('recommendation_boost',p.recommendation_boost,'recommendation_version',p.recommendation_version,
+ 'is_publicly_visible',(` + VisibleSQL + `) IS TRUE)`
 
 func (a *CatalogStore) AdminProductView(ctx context.Context, id string) (map[string]any, error) {
 	return a.productView(ctx, id, true, AdminProductJSON)

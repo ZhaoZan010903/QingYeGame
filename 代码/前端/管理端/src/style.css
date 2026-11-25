@@ -1,52 +1,75 @@
+@font-face {
+  font-family: Inter;
+  src: url("/assets/Inter.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/JetBrains-Mono.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+}
+
 :root {
-  color-scheme: light;
-  --color-fluent-blue: #0078d4;
-  --color-deep-blue: #106ebe;
-  --color-caution: #ffb900;
-  --color-error: #e81123;
-  --color-success: #00cc6a;
-  --surface-page: #f3f2f1;
-  --surface-acrylic: rgba(255, 255, 255, 0.7);
-  --surface-acrylic-hover: rgba(255, 255, 255, 0.85);
-  --acrylic-line: rgba(255, 255, 255, 0.3);
-  --surface-solid-white: #ffffff;
-  --surface-subtle: #f8f7f6;
-  --surface-selected: #e8f2fa;
-  --surface-pressed: #dceaf5;
-  --ink: #201f1e;
-  --muted: #605e5c;
-  --line: #d1d1d1;
-  --line-subtle: #e4e2df;
-  --line-accent: #bad9ed;
-  --blue: var(--color-deep-blue);
+  color-scheme: dark;
+  --surface-page: #121212;
+  --surface-card: #1e1e1e;
+  --surface-row-hover: #252525;
+  --surface-subtle: #191919;
+  --surface-selected: #113037;
+  --surface-pressed: #26383b;
+  --grid-line: #2c2c2e;
+  --line-subtle: var(--grid-line);
+  --line: #45464a;
+  --line-accent: #35636a;
+  --ink: #ffffff;
+  --muted: #98989d;
+  --accent: #00e5ff;
+  --on-accent: #071719;
+  --accent-hover: #57edff;
+  --color-caution: #ffbc60;
+  --color-error: #ff453a;
+  --color-success: #32d74b;
+  --caution-ink: #ffbc60;
+  --caution-surface: #33281b;
+  --caution-line: #674c2c;
+  --error-ink: var(--color-error);
+  --error-surface: #3a1c1c;
+  --error-line: #81433d;
+  --success-ink: var(--color-success);
+  --success-surface: #172c1c;
+  --success-line: #335b3e;
+
+  /* Existing components consume these shared control and surface tokens. */
+  --color-fluent-blue: var(--accent);
+  --color-deep-blue: var(--accent-hover);
+  --blue: var(--accent);
   --soft: var(--surface-selected);
-  --caution-ink: #6d4f00;
-  --caution-surface: #fff6dd;
-  --caution-line: #eed499;
-  --error-ink: #a4262c;
-  --error-surface: #fdf0f1;
-  --error-line: #e4b9bd;
-  --success-ink: #107c41;
-  --success-surface: #eaf5ed;
-  --success-line: #b6d8c0;
-  --elevation-card: 0 2px 4px #0000000a, 0 8px 16px #00000014;
-  --elevation-hover: 0 4px 8px #0000000f, 0 16px 32px #00000024;
-  --elevation-flyout: 0 8px 24px #0000001f;
-  --elevation-dialog: 0 16px 48px #00000029;
-  --overlay: #201f1e66;
-  --radius-cards: 8px;
-  --radius-buttons: 2px;
-  --radius-inputs: 2px;
-  --radius-items: 4px;
+  --surface-solid-white: var(--surface-card);
+  --surface-acrylic: var(--surface-card);
+  --surface-acrylic-hover: var(--surface-row-hover);
+  --acrylic-line: var(--grid-line);
+  --elevation-card: 0 2px 6px #00000014;
+  --elevation-hover: 0 4px 12px #00000024;
+  --elevation-flyout: 0 12px 32px #0000006b;
+  --elevation-dialog: 0 24px 64px #00000075;
+  --overlay: rgb(0 0 0 / 64%);
+  --radius-cards: 16px;
+  --radius-buttons: 8px;
+  --radius-inputs: 8px;
+  --radius-items: 6px;
   --radius-pills: 999px;
   --font-sans:
-    "Segoe UI Variable", "Segoe UI", system-ui, "Microsoft YaHei",
-    "PingFang SC", sans-serif;
-  --font-mono: var(--font-sans);
-  --text-heading: 28px;
-  --text-subheading: 20px;
+    Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono:
+    "JetBrains Mono", "SFMono-Regular", Consolas, "Microsoft YaHei", monospace;
+  --text-heading: 24px;
+  --text-subheading: 18px;
   --text-body: 14px;
-  --text-label: 12px;
+  --text-label: 13px;
   --page-max-width: 1200px;
   --frame-max-width: 1428px;
   --topbar-height: 64px;
@@ -115,7 +138,7 @@ button svg {
   flex-shrink: 0;
 }
 .admin-app svg.lucide {
-  stroke-width: 1.5;
+  stroke-width: 1.65;
 }
 
 :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
@@ -152,10 +175,8 @@ button:disabled:not(.button-white, .button-outline) {
   min-width: 0;
   border: 1px solid var(--acrylic-line);
   border-radius: var(--radius-cards);
-  background: var(--surface-acrylic);
+  background: var(--surface-card);
   box-shadow: var(--elevation-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
 }
 .fluent-interactive {
   transition:
@@ -166,26 +187,16 @@ button:disabled:not(.button-white, .button-outline) {
 }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
   .fluent-card.fluent-interactive:hover {
-    transform: translateY(-4px);
-    border-color: #ffffff80;
-    background: var(--surface-acrylic-hover);
+    border-color: var(--line);
+    background: var(--surface-row-hover);
     box-shadow: var(--elevation-hover);
   }
 }
 .fluent-flyout {
-  border: 1px solid #ffffff66;
+  border: 1px solid var(--line);
   border-radius: var(--radius-cards);
-  background: var(--surface-acrylic-hover);
+  background: var(--surface-card);
   box-shadow: var(--elevation-flyout);
-  backdrop-filter: blur(30px);
-  -webkit-backdrop-filter: blur(30px);
-}
-@supports not (backdrop-filter: blur(1px)) {
-  .panel,
-  .fluent-card,
-  .fluent-flyout {
-    background: var(--surface-solid-white);
-  }
 }
 
 .button-white,
@@ -203,11 +214,10 @@ button:disabled:not(.button-white, .button-outline) {
   text-align: center;
 }
 .button-white {
-  padding: 10px 24px;
-  color: var(--surface-solid-white);
-  background: var(--color-fluent-blue);
-  border-color: var(--color-fluent-blue);
-  box-shadow: 0 2px 4px #0078d44d;
+  padding: 9px 16px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: transparent;
   transition:
     background-color var(--ease-quick),
     border-color var(--ease-quick),
@@ -215,22 +225,19 @@ button:disabled:not(.button-white, .button-outline) {
     transform var(--ease-quick);
 }
 .button-white:hover:not(:disabled) {
-  background: var(--color-deep-blue);
-  border-color: var(--color-deep-blue);
-  box-shadow: 0 4px 8px #0078d466;
-  transform: translateY(-2px);
+  background: var(--accent-hover);
 }
 .button-white:active:not(:disabled) {
-  box-shadow: none;
-  transform: scale(0.97);
+  transform: translateY(1px);
 }
 .button-outline {
-  padding: 8px 12px;
+  padding: 8px 14px;
   color: var(--ink);
   background: var(--surface-solid-white);
 }
 .button-outline:hover:not(:disabled) {
-  background: var(--surface-subtle);
+  border-color: var(--muted);
+  background: var(--surface-row-hover);
 }
 .button-outline:active:not(:disabled) {
   background: var(--surface-page);
@@ -264,8 +271,9 @@ button:disabled:not(.button-white, .button-outline) {
 code,
 time,
 input[type="number"],
-.admin-stat-card strong {
-  font-family: var(--font-sans);
+.admin-stat-card strong,
+.price {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .form-field {
@@ -284,7 +292,7 @@ select {
   min-width: 0;
   padding: 8px 12px;
   border: 1px solid var(--line);
-  background: var(--surface-solid-white);
+  background: var(--surface-subtle);
   color: var(--ink);
   border-radius: var(--radius-inputs);
   accent-color: var(--color-fluent-blue);
@@ -300,7 +308,7 @@ select {
   textarea,
   select
 ) {
-  box-shadow: inset 0 -1px 0 var(--line);
+  min-height: 40px;
 }
 :is(
   input:not(
@@ -314,8 +322,7 @@ select {
   select
 ):focus {
   border-color: var(--color-fluent-blue);
-  box-shadow: inset 0 -2px 0 var(--color-fluent-blue);
-  outline: 2px solid var(--color-fluent-blue);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 :is(input, select, textarea):disabled {
@@ -377,12 +384,6 @@ select {
     background: var(--surface-solid-white);
     box-shadow: var(--elevation-flyout);
   }
-  @supports (backdrop-filter: blur(1px)) {
-    .admin-app select:not([multiple], [size])::picker(select) {
-      background: var(--surface-acrylic-hover);
-      backdrop-filter: blur(30px);
-    }
-  }
   .admin-app select:not([multiple], [size]) option {
     position: relative;
     min-height: 36px;
@@ -394,7 +395,7 @@ select {
     cursor: pointer;
   }
   .admin-app option:enabled:is(:hover, :focus-visible) {
-    background: var(--surface-subtle);
+    background: var(--surface-row-hover);
   }
   .admin-app option:focus-visible {
     outline: 2px solid var(--color-fluent-blue);
@@ -489,6 +490,10 @@ textarea::placeholder {
 }
 .form-error {
   color: var(--error-ink);
+  background: var(--error-surface);
+  border-inline-start: 4px solid var(--color-error);
+  padding: 12px 16px;
+  border-radius: var(--radius-items);
   line-height: 1.65;
   margin: 16px 0;
 }
@@ -551,9 +556,7 @@ textarea::placeholder {
   top: 0;
   z-index: 30;
   border-bottom: 1px solid var(--line-subtle);
-  background: var(--surface-acrylic-hover);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--surface-page);
 }
 .admin-topbar-inner,
 .admin-footer-inner {
@@ -581,9 +584,10 @@ textarea::placeholder {
   width: 36px;
   height: 36px;
   place-items: center;
-  border-radius: var(--radius-cards);
-  background: var(--color-fluent-blue);
-  color: var(--surface-solid-white);
+  border-radius: 10px;
+  border: 1px solid var(--line-accent);
+  background: var(--surface-selected);
+  color: var(--accent);
 }
 .admin-brand svg {
   width: 28px;
@@ -591,14 +595,14 @@ textarea::placeholder {
   stroke-width: 1.5;
 }
 .admin-brand strong {
-  font-size: var(--text-subheading);
+  font-size: 20px;
 }
 .admin-brand-label {
   color: var(--muted);
   border-left: 1px solid var(--line-subtle);
   padding-left: 12px;
   margin-left: 4px;
-  font-size: var(--text-label);
+  font-size: var(--text-body);
 }
 .admin-session {
   display: flex;
@@ -614,15 +618,16 @@ textarea::placeholder {
   background: var(--surface-subtle);
   color: var(--muted);
   padding: 4px 8px;
-  border-radius: var(--radius-items);
+  border-radius: var(--radius-pills);
   font-size: var(--text-label);
 }
 .topbar-help {
   padding: 8px;
-  color: var(--blue);
+  color: var(--muted);
   border-radius: var(--radius-buttons);
 }
 .topbar-help:hover {
+  color: var(--ink);
   background: var(--soft);
 }
 .admin-account {
@@ -638,9 +643,10 @@ textarea::placeholder {
   width: 32px;
   height: 32px;
   flex-shrink: 0;
-  border-radius: var(--radius-items);
-  background: var(--soft);
-  color: var(--blue);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface-card);
+  color: var(--ink);
   font-weight: 600;
 }
 .admin-account-name {
@@ -704,8 +710,9 @@ textarea::placeholder {
   height: 48px;
   margin-bottom: 16px;
   border-radius: var(--radius-cards);
-  background: var(--color-fluent-blue);
-  color: var(--surface-solid-white);
+  border: 1px solid var(--line-accent);
+  background: var(--surface-selected);
+  color: var(--accent);
 }
 .admin-login h1 {
   font-size: var(--text-heading);
@@ -717,6 +724,14 @@ textarea::placeholder {
 }
 .admin-login .button-white {
   width: 100%;
+}
+.admin-login-notice {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-inline-start: 3px solid var(--accent);
+  border-radius: var(--radius-items);
+  color: var(--ink);
+  background: var(--surface-selected);
 }
 
 .upload-zone {
@@ -781,8 +796,8 @@ textarea::placeholder {
   inset: 8px auto auto 8px;
   padding: 4px 8px;
   font-size: var(--text-label);
-  color: var(--surface-solid-white);
-  background: var(--ink);
+  color: var(--ink);
+  background: rgb(18 18 18 / 92%);
   border-radius: var(--radius-items);
 }
 .upload-caption {
@@ -861,7 +876,7 @@ textarea::placeholder {
 .admin-app .read-safety-notice button {
   border-radius: var(--radius-buttons);
   background: var(--color-fluent-blue);
-  color: var(--surface-solid-white);
+  color: var(--on-accent);
 }
 .admin-app .read-safety-label {
   color: var(--blue);
