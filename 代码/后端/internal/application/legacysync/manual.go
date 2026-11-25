@@ -26,6 +26,17 @@ func NewManualRunner(ctx context.Context, service *Service) *ManualRunner {
 }
 
 func (r *ManualRunner) Start(actor, id string) (Batch, error) {
+	return r.start(actor, id, "")
+}
+
+func (r *ManualRunner) Continue(actor, id, parent string) (Batch, error) {
+	if !manualBatchID.MatchString(parent) {
+		return Batch{}, fault.New(fault.Invalid, "INVALID_REQUEST", "请选择有效的待复核批次")
+	}
+	return r.start(actor, id, parent)
+}
+
+func (r *ManualRunner) start(actor, id, parent string) (Batch, error) {
 	if !manualBatchID.MatchString(id) {
 		return Batch{}, fault.New(fault.Invalid, "INVALID_REQUEST", "同步请求标识无效，请刷新后重试")
 	}
@@ -37,7 +48,14 @@ func (r *ManualRunner) Start(actor, id string) (Batch, error) {
 	// Committing the reservation does not depend on the browser staying connected.
 	reserve, closeReserve := context.WithTimeout(context.WithoutCancel(r.ctx), 5*time.Second)
 	defer closeReserve()
-	batch, started, err := r.service.Store.BeginManualBatch(reserve, id, actor)
+	var batch Batch
+	var started bool
+	var err error
+	if parent == "" {
+		batch, started, err = r.service.Store.BeginManualBatch(reserve, id, actor)
+	} else {
+		batch, started, err = r.service.Store.BeginReviewedBatch(reserve, id, actor, parent)
+	}
 	if err != nil || !started {
 		return batch, err
 	}

@@ -115,7 +115,7 @@ func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batc
 			}
 		}
 	}
-	if len(unavailable) > 0 {
+	if len(unavailable) > 0 || batch.Approval != nil {
 		// Fresh complete membership is required even when additions offset the removals.
 		source = Inventory{}
 		verified, _, verifiedDigest, err := read(VerifySource)
@@ -127,14 +127,24 @@ func (s *Service) complete(ctx context.Context, batch Batch, actor string) (Batc
 		}
 		source = verified
 	}
-	if len(unavailable) >= max(12, (visible+9)/10) ||
-		len(unavailable) >= 2 && len(source.Records)*2 < visible {
+	bulk := len(unavailable) >= max(12, (visible+9)/10) ||
+		len(unavailable) >= 2 && len(source.Records)*2 < visible
+	approved := actor != "" && batch.Approval.matches(digest, unavailable, current)
+	if bulk && !approved {
+		batch.ReviewKind = "bulk_offline"
 		for _, id := range unavailable {
 			product := current[id]
 			items = append(items, Item{LegacyID: id, Code: product.Code, Action: "hold", Blocking: true,
 				Notices: []string{"旧站目录未显示在售，已触发整批下架保护"}})
 		}
-		return finish("blocked", fmt.Sprintf("本次有 %d 件在售商品拟下架，触发批量下架保护，请核对旧站目录范围", len(unavailable)))
+		reason := fmt.Sprintf("本次有 %d 件在售商品拟下架，触发批量下架保护，请核对旧站目录范围", len(unavailable))
+		if batch.Approval != nil {
+			reason = fmt.Sprintf("目录或商品已变化，原确认失效。请重新核对本批 %d 件拟下架商品", len(unavailable))
+		}
+		return finish("blocked", reason)
+	}
+	if batch.Approval != nil && !approved {
+		return finish("blocked", "目录或商品已变化，原确认失效。请按最新目录重新同步")
 	}
 	total := len(source.Records) + missing
 	if err = reporter.update(ctx, Compare, 0, total); err != nil {

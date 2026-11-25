@@ -29,7 +29,8 @@ type BatchStatus =
   | "applied"
   | "no_change"
   | "rolled_back"
-  | "superseded";
+  | "superseded"
+  | "cancelled";
 type Summary = {
   created: number;
   updated: number;
@@ -48,6 +49,9 @@ type Batch = {
   rollback_until: string | null;
   source_count: number;
   reason: string;
+  review_kind: "" | "bulk_offline";
+  can_continue: boolean;
+  can_cancel: boolean;
   summary: Summary;
   progress: SyncProgress;
 };
@@ -69,7 +73,7 @@ type Change = {
   images_changed: boolean;
   attributes_changed: boolean;
   description_changed: boolean;
-  notices: string[];
+  notices: string[] | null;
   blocking: boolean;
 };
 type Controls = { schedule_enabled: boolean; version: number };
@@ -90,6 +94,7 @@ const states: Record<BatchStatus, string> = {
   no_change: "无变化",
   rolled_back: "已回滚",
   superseded: "已归档",
+  cancelled: "已取消",
 };
 const productStates: Record<string, string> = {
   published: "已上架",
@@ -135,6 +140,68 @@ const applied = (batch: Batch) =>
   batch.status === "rolled_back";
 const stopped = (batch: Batch) =>
   batch.status === "blocked" || batch.status === "failed";
+const awaitingReview = (batch: Batch) =>
+  batch.status === "blocked" &&
+  batch.review_kind === "bulk_offline" &&
+  batch.can_continue;
+const batchLabel = (batch: Batch) =>
+  awaitingReview(batch) ? "待确认批量下架" : states[batch.status];
+const issueLabel = (batch: Batch) =>
+  batch.review_kind === "bulk_offline" ? "拟下架清单" : "商品提示";
+
+type BatchOperation = "start" | "schedule" | "rollback" | "continue" | "cancel";
+export function BatchReviewActions({
+  batch,
+  canStart,
+  pending,
+  expanded,
+  showItems,
+  review,
+}: {
+  batch: Batch;
+  canStart: boolean;
+  pending: BatchOperation | null;
+  expanded: boolean;
+  showItems: () => void;
+  review: (action: "continue" | "cancel") => void;
+}) {
+  const canContinue = canStart && awaitingReview(batch);
+  if (!batch.summary.review && !canContinue && !batch.can_cancel) return null;
+  return (
+    <div className="legacy-sync-review-actions">
+      {batch.summary.review > 0 && (
+        <button
+          type="button"
+          className="button-outline legacy-sync-issues"
+          aria-expanded={expanded}
+          onClick={showItems}
+        >
+          {issueLabel(batch)}（{batch.summary.review}）
+        </button>
+      )}
+      {canContinue && (
+        <button
+          type="button"
+          className="button-white"
+          disabled={pending !== null}
+          onClick={() => review("continue")}
+        >
+          {pending === "continue" ? "正在提交…" : "确认并继续同步"}
+        </button>
+      )}
+      {batch.can_cancel && (
+        <button
+          type="button"
+          className="button-outline"
+          disabled={pending !== null}
+          onClick={() => review("cancel")}
+        >
+          {pending === "cancel" ? "正在取消…" : "取消本批"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function price(product: Product) {
   if (product.quotes?.length) {
@@ -157,7 +224,13 @@ function price(product: Product) {
   return "¥" + formatRentalAmount(product.price) + (unit ? " / " + unit : "");
 }
 
-function ChangeRow({ item }: { item: Change }) {
+function ChangeRow({
+  item,
+  bulkReview,
+}: {
+  item: Change;
+  bulkReview: boolean;
+}) {
   const { before, after } = item;
   const fields =
     before && after
@@ -177,7 +250,7 @@ function ChangeRow({ item }: { item: Change }) {
         <b className="legacy-sync-numbers">{item.code || item.legacy_id}</b>
         {item.blocking && (
           <span className="legacy-sync-status" data-status="blocked">
-            需处理
+            {bulkReview ? "拟下架" : "需处理"}
           </span>
         )}
       </div>
@@ -204,7 +277,7 @@ function ChangeRow({ item }: { item: Change }) {
       )}
       {item.attributes_changed && <p>商品属性已更新</p>}
       {item.description_changed && <p>商品说明已更新</p>}
-      {item.notices.map((notice) => (
+      {item.notices?.map((notice) => (
         <p className="legacy-sync-note" key={notice}>
           {notice}
         </p>
@@ -259,13 +332,11 @@ export function AdminLegacySync() {
   const [detailError, setDetailError] = useState("");
   const [listError, setListError] = useState("");
   const [revision, setRevision] = useState(0);
-  const [pending, setPending] = useState<
-    "start" | "schedule" | "rollback" | null
-  >(null);
+  const [pending, setPending] = useState<BatchOperation | null>(null);
   const [confirmation, setConfirmation] = useState<LegacySyncConfirmation>();
   const [feedback, setFeedback] = useState<{ error: boolean; text: string }>();
   const work = useRef(false);
-  const requestID = useRef("");
+  const launchRequest = useRef<{ key: string; id: string } | null>(null);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const latest = data?.latest_batch ?? null;
   const running = latest?.status === "running";
@@ -292,8 +363,11 @@ export function AdminLegacySync() {
         setData(value);
         setNextBatch(response.next_cursor ?? null);
         setListError("");
-        if (value.latest_batch?.id === requestID.current) {
-          requestID.current = "";
+        if (
+          launchRequest.current &&
+          value.latest_batch?.id === launchRequest.current.id
+        ) {
+          launchRequest.current = null;
           setFeedback(undefined);
         }
         if (value.latest_batch?.status === "running") interval = 1_600;
@@ -356,17 +430,17 @@ export function AdminLegacySync() {
     try {
       await task();
     } catch (error) {
-      if (kind === "start") {
+      if (kind === "start" || kind === "continue") {
         if (
           error instanceof ApiError &&
           error.status >= 400 &&
           error.status < 500
         ) {
-          requestID.current = "";
+          launchRequest.current = null;
         } else {
           setFeedback({
             error: true,
-            text: "暂未收到本次启动结果。可再次点击，系统会核对同一条请求。",
+            text: "暂未收到启动结果，正在刷新同步记录。若状态未更新，可再次执行同一操作。",
           });
           return;
         }
@@ -382,19 +456,66 @@ export function AdminLegacySync() {
     }
   }
 
-  const start = () =>
-    mutate("start", async () => {
-      requestID.current ||= createRequestId();
-      const response = await request(batchesURL, "POST", {
-        request_id: requestID.current,
+  const start = (batch?: Batch) =>
+    mutate(batch ? "continue" : "start", async () => {
+      const path = batch ? batchURL(batch.id) + "/continue" : batchesURL;
+      if (launchRequest.current?.key !== path) {
+        launchRequest.current = { key: path, id: createRequestId() };
+      }
+      const response = await request(path, "POST", {
+        request_id: launchRequest.current.id,
+        ...(batch ? { confirm: true } : {}),
       });
-      requestID.current = "";
+      launchRequest.current = null;
       setSelection(null);
       setBatchPages([null]);
       setData(
         (previous) => previous && { ...previous, latest_batch: response.data },
       );
     });
+
+  function review(batch: Batch, action: "continue" | "cancel") {
+    const count = batch.summary.review;
+    if (action === "continue") {
+      setConfirmation({
+        title: `确认继续同步这 ${count} 件拟下架商品？`,
+        message: `系统会重新核对 ${date(batch.started_at)} 这批的旧站目录和拟下架清单。核对通过后，这 ${count} 件商品将与本次其他变更一起生效。`,
+        confirmLabel: "确认清单并继续",
+        dismissLabel: "返回核对",
+        confirm: () => void start(batch),
+      });
+      return;
+    }
+    setConfirmation({
+      title: "取消这一批同步？",
+      message: `取消 ${date(batch.started_at)} 的未生效批次后，商品保持现状。历史记录保留，可另行发起同步。`,
+      confirmLabel: "确认取消本批",
+      dismissLabel: "保留本批",
+      confirm: () =>
+        void mutate("cancel", async () => {
+          const response = await request(
+            batchURL(batch.id) + "/cancel",
+            "POST",
+            { confirm: true },
+          );
+          const cancelled: Batch = response.data;
+          setData(
+            (previous) =>
+              previous && {
+                ...previous,
+                latest_batch:
+                  previous.latest_batch?.id === cancelled.id
+                    ? cancelled
+                    : previous.latest_batch,
+                batches: previous.batches.map((row) =>
+                  row.id === cancelled.id ? cancelled : row,
+                ),
+              },
+          );
+          setFeedback({ error: false, text: "已取消本批，商品保持现状。" });
+        }),
+    });
+  }
 
   function choose(batch: Batch, filter: Filter) {
     setSelection((previous) =>
@@ -453,15 +574,23 @@ export function AdminLegacySync() {
           <h1>旧站商品同步</h1>
           <p>根据旧站目录核对商品，新上架和下架的商品随同一批次生效。</p>
         </div>
-        <button
-          type="button"
-          className="button-white legacy-sync-start"
-          disabled={!data?.can_start || running || pending !== null}
-          onClick={() => void start()}
-        >
-          <RefreshCw size={16} aria-hidden="true" />
-          {running ? "正在同步" : pending === "start" ? "正在启动" : "立即同步"}
-        </button>
+        {(!latest || !awaitingReview(latest) || !data?.can_start) && (
+          <button
+            type="button"
+            className="button-white legacy-sync-start"
+            disabled={!data?.can_start || running || pending !== null}
+            onClick={() => void start()}
+          >
+            <RefreshCw size={16} aria-hidden="true" />
+            {running
+              ? "正在同步"
+              : pending === "start"
+                ? "正在启动"
+                : latest && stopped(latest)
+                  ? "重新同步"
+                  : "立即同步"}
+          </button>
+        )}
       </header>
 
       {confirmation && (
@@ -494,7 +623,7 @@ export function AdminLegacySync() {
                   !changed(latest) &&
                   !latest.summary.review
                   ? "商品已是最新"
-                  : states[latest.status]
+                  : batchLabel(latest)
                 : data
                   ? "暂无同步记录"
                   : "正在读取状态"}
@@ -561,18 +690,23 @@ export function AdminLegacySync() {
               " · 旧站最新更新 " + date(latest.source_updated_at)}
           </p>
         )}
-        {latest && latest.summary.review > 0 && (
-          <button
-            type="button"
-            className="button-outline legacy-sync-issues"
-            aria-pressed={
-              selectionID === latest.id && selectionFilter === "issues"
-            }
-            onClick={() => choose(latest, "issues")}
-          >
-            {latest.summary.review} 条商品提示
-          </button>
+        {latest && (
+          <BatchReviewActions
+            batch={latest}
+            canStart={Boolean(data?.can_start)}
+            pending={pending}
+            expanded={selectionID === latest.id && selectionFilter === "issues"}
+            showItems={() => choose(latest, "issues")}
+            review={(action) => review(latest, action)}
+          />
         )}
+        {latest?.status === "blocked" &&
+          latest.review_kind === "bulk_offline" &&
+          !latest.can_continue && (
+            <p className="legacy-sync-note">
+              这份清单已无法继续使用。重新同步可按当前旧站目录生成新的结果。
+            </p>
+          )}
         {data && !data.can_start && (
           <p className="legacy-sync-note">当前环境未启用商品同步服务。</p>
         )}
@@ -590,12 +724,13 @@ export function AdminLegacySync() {
                 ref={detailHeading}
                 tabIndex={-1}
               >
-                {filterNames[selection.filter]}
+                {selection.filter === "issues" && detail
+                  ? issueLabel(detail.batch)
+                  : filterNames[selection.filter]}
               </h2>
               {detail && (
                 <span>
-                  {date(detail.batch.started_at)} ·{" "}
-                  {states[detail.batch.status]}
+                  {date(detail.batch.started_at)} · {batchLabel(detail.batch)}
                 </span>
               )}
             </div>
@@ -617,7 +752,11 @@ export function AdminLegacySync() {
           ) : detail.items.length > 0 ? (
             <ul className="legacy-sync-changes">
               {detail.items.map((item) => (
-                <ChangeRow item={item} key={item.legacy_id} />
+                <ChangeRow
+                  item={item}
+                  bulkReview={detail.batch.review_kind === "bulk_offline"}
+                  key={item.legacy_id}
+                />
               ))}
             </ul>
           ) : (
@@ -694,7 +833,7 @@ export function AdminLegacySync() {
                   </span>
                 </div>
                 <span className="legacy-sync-status" data-status={batch.status}>
-                  {states[batch.status]}
+                  {batchLabel(batch)}
                 </span>
                 <div className="legacy-sync-history-actions">
                   {applied(batch) &&
@@ -723,7 +862,17 @@ export function AdminLegacySync() {
                       }
                       onClick={() => choose(batch, "issues")}
                     >
-                      提示 {batch.summary.review}
+                      {issueLabel(batch)} {batch.summary.review}
+                    </button>
+                  )}
+                  {batch.id !== latest?.id && batch.can_cancel && (
+                    <button
+                      type="button"
+                      className="button-outline"
+                      disabled={pending !== null}
+                      onClick={() => review(batch, "cancel")}
+                    >
+                      取消本批
                     </button>
                   )}
                   {batch.status === "applied" &&

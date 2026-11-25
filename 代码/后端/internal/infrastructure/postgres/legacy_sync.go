@@ -23,12 +23,16 @@ const legacyBatchColumns = `id,planned_at,started_at,source_updated_at,
  CASE WHEN ` + staleLegacyBatch + ` THEN ` + legacyLeaseEnd + ` ELSE finished_at END,
  applied_at,rolled_back_at,rollback_until,CASE WHEN ` + staleLegacyBatch + ` THEN 'failed' ELSE status END,source_count,source_digest,summary,
  CASE WHEN ` + staleLegacyBatch + ` THEN '任务中断或超时，请重新发起' ELSE reason END,
- progress_stage,progress_completed,progress_total`
+ progress_stage,progress_completed,progress_total,review_kind,coalesce(review_of,''),
+ status='blocked' AND review_kind='bulk_offline'
+ AND id=(SELECT recent.id FROM legacy_sync_batches recent ORDER BY recent.started_at DESC,recent.id DESC LIMIT 1),
+ status='blocked'`
 
 func scanLegacyBatch(row pgx.Row, batch *syncapp.Batch) error {
 	return row.Scan(&batch.ID, &batch.PlannedAt, &batch.StartedAt, &batch.SourceUpdated, &batch.FinishedAt,
 		&batch.AppliedAt, &batch.RolledBackAt, &batch.RollbackUntil, &batch.Status, &batch.SourceCount,
-		&batch.SourceDigest, &batch.Summary, &batch.Reason, &batch.Progress.Stage, &batch.Progress.Completed, &batch.Progress.Total)
+		&batch.SourceDigest, &batch.Summary, &batch.Reason, &batch.Progress.Stage, &batch.Progress.Completed, &batch.Progress.Total,
+		&batch.ReviewKind, &batch.ReviewOf, &batch.CanContinue, &batch.CanCancel)
 }
 
 func legacyConflict(message string) error {
@@ -58,17 +62,24 @@ func legacyAudit(ctx context.Context, tx pgx.Tx, actor, action, target string, d
 }
 
 func (s LegacySyncStore) BeginScheduledBatch(ctx context.Context, id string, planned time.Time) (syncapp.Batch, bool, error) {
-	return s.beginBatch(ctx, id, &planned, "")
+	return s.beginBatch(ctx, id, &planned, "", "")
 }
 
 func (s LegacySyncStore) BeginManualBatch(ctx context.Context, id, actor string) (syncapp.Batch, bool, error) {
 	if actor == "" {
 		return syncapp.Batch{}, false, fault.New(fault.Forbidden, "FORBIDDEN", "需要启用的管理员账号")
 	}
-	return s.beginBatch(ctx, id, nil, actor)
+	return s.beginBatch(ctx, id, nil, actor, "")
 }
 
-func (s LegacySyncStore) beginBatch(ctx context.Context, id string, planned *time.Time, actor string) (syncapp.Batch, bool, error) {
+func (s LegacySyncStore) BeginReviewedBatch(ctx context.Context, id, actor, parent string) (syncapp.Batch, bool, error) {
+	if actor == "" || parent == "" || parent == id {
+		return syncapp.Batch{}, false, legacyConflict("请使用新的请求标识并选择待复核批次")
+	}
+	return s.beginBatch(ctx, id, nil, actor, parent)
+}
+
+func (s LegacySyncStore) beginBatch(ctx context.Context, id string, planned *time.Time, actor, parent string) (syncapp.Batch, bool, error) {
 	var batch syncapp.Batch
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
@@ -95,6 +106,9 @@ func (s LegacySyncStore) beginBatch(ctx context.Context, id string, planned *tim
  SELECT 1 FROM admin_logs a WHERE a.resource_id=b.id AND a.action='legacy.sync.start' AND a.user_id=$2)`,
 			id, actor), &batch)
 		if err == nil {
+			if batch.ReviewOf != parent {
+				return batch, false, legacyConflict("该请求标识已用于其他操作")
+			}
 			return batch, false, tx.Commit(ctx)
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -112,8 +126,15 @@ func (s LegacySyncStore) beginBatch(ctx context.Context, id string, planned *tim
 		}
 		return batch, false, syncapp.ErrBusy
 	}
-	err = scanLegacyBatch(tx.QueryRow(ctx, `INSERT INTO legacy_sync_batches(id,planned_at) VALUES($1,$2)
- ON CONFLICT DO NOTHING RETURNING `+legacyBatchColumns, id, planned), &batch)
+	var approval *syncapp.OfflineApproval
+	if parent != "" {
+		approval, err = reserveOfflineReview(ctx, tx, parent)
+		if err != nil {
+			return batch, false, err
+		}
+	}
+	err = scanLegacyBatch(tx.QueryRow(ctx, `INSERT INTO legacy_sync_batches(id,planned_at,review_of) VALUES($1,$2,nullif($3,''))
+ ON CONFLICT DO NOTHING RETURNING `+legacyBatchColumns, id, planned, parent), &batch)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if actor != "" {
 			return batch, false, legacyConflict("该同步请求标识已被使用，请刷新记录")
@@ -124,11 +145,77 @@ func (s LegacySyncStore) beginBatch(ctx context.Context, id string, planned *tim
 		return batch, false, err
 	}
 	if actor != "" {
-		if err = legacyAudit(ctx, tx, actor, "legacy.sync.start", id, map[string]string{"trigger": "manual"}); err != nil {
+		if err = legacyAudit(ctx, tx, actor, "legacy.sync.start", id, map[string]string{"trigger": "manual", "review_of": parent}); err != nil {
 			return batch, false, err
 		}
 	}
+	batch.Approval = approval
 	return batch, true, tx.Commit(ctx)
+}
+
+// Called under the same control lock that serializes manual, scheduled and
+// rollback operations. Parent consumption and child reservation commit together.
+func reserveOfflineReview(ctx context.Context, tx pgx.Tx, id string) (*syncapp.OfflineApproval, error) {
+	var parent syncapp.Batch
+	err := scanLegacyBatch(tx.QueryRow(ctx, `SELECT `+legacyBatchColumns+` FROM legacy_sync_batches WHERE id=$1 FOR UPDATE`, id), &parent)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !parent.CanContinue {
+		return nil, legacyConflict("该批次已处理或已有更新的目录，请刷新同步记录")
+	}
+	if err != nil {
+		return nil, err
+	}
+	approval := &syncapp.OfflineApproval{Digest: parent.SourceDigest, ComparedAt: parent.StartedAt, Candidates: make(map[string]string)}
+	rows, err := tx.Query(ctx, `SELECT legacy_id,product_code FROM legacy_sync_items WHERE batch_id=$1 AND blocking AND action='hold'`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var legacyID, code string
+		if err := rows.Scan(&legacyID, &code); err != nil {
+			return nil, err
+		}
+		approval.Candidates[legacyID] = code
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(approval.Digest) != 64 || len(approval.Candidates) == 0 || len(approval.Candidates) != parent.Summary.Review {
+		return nil, legacyConflict("批次复核依据不完整，请重新同步")
+	}
+	_, err = tx.Exec(ctx, `UPDATE legacy_sync_batches SET status='superseded',reason='管理员已确认清单，转入新批次重新核对目录' WHERE id=$1`, id)
+	return approval, err
+}
+
+func (s LegacySyncStore) CancelBlocked(ctx context.Context, id, actor string) (syncapp.Batch, error) {
+	var batch syncapp.Batch
+	tx, err := s.DB.Begin(ctx)
+	if err != nil {
+		return batch, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = lockLegacyControls(ctx, tx); err != nil {
+		return batch, err
+	}
+	if err = legacyActor(ctx, tx, actor); err != nil {
+		return batch, err
+	}
+	err = scanLegacyBatch(tx.QueryRow(ctx, `UPDATE legacy_sync_batches SET status='cancelled'
+ WHERE id=$1 AND status='blocked' RETURNING `+legacyBatchColumns, id), &batch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = scanLegacyBatch(tx.QueryRow(ctx, `SELECT `+legacyBatchColumns+` FROM legacy_sync_batches WHERE id=$1`, id), &batch)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && batch.Status != "cancelled" {
+			return batch, legacyConflict("仅能取消尚未处理的校验中止批次，请刷新记录")
+		}
+		return batch, err
+	}
+	if err != nil {
+		return batch, err
+	}
+	if err = legacyAudit(ctx, tx, actor, "legacy.sync.cancel", id, map[string]string{"review_kind": batch.ReviewKind}); err != nil {
+		return batch, err
+	}
+	return batch, tx.Commit(ctx)
 }
 
 func (s LegacySyncStore) ReportProgress(ctx context.Context, id string, p syncapp.Progress) error {
@@ -173,9 +260,9 @@ func (s LegacySyncStore) CloseBatch(ctx context.Context, batch syncapp.Batch, it
 	defer tx.Rollback(ctx)
 	var saved syncapp.Batch
 	err = scanLegacyBatch(tx.QueryRow(ctx, `UPDATE legacy_sync_batches SET status=$2,reason=$3,
- finished_at=clock_timestamp(),source_updated_at=$4,source_count=$5,source_digest=$6,summary=$7
+ finished_at=clock_timestamp(),source_updated_at=$4,source_count=$5,source_digest=$6,summary=$7,review_kind=$8
  WHERE id=$1 AND status='running' RETURNING `+legacyBatchColumns,
-		batch.ID, batch.Status, batch.Reason, batch.SourceUpdated, batch.SourceCount, batch.SourceDigest, batch.Summary), &saved)
+		batch.ID, batch.Status, batch.Reason, batch.SourceUpdated, batch.SourceCount, batch.SourceDigest, batch.Summary, batch.ReviewKind), &saved)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// COMMIT may have succeeded even if the worker lost the database response.
 		err = scanLegacyBatch(tx.QueryRow(ctx, `SELECT `+legacyBatchColumns+` FROM legacy_sync_batches WHERE id=$1`, batch.ID), &saved)

@@ -42,12 +42,18 @@ export function LegacySyncProgress({
     progress.total > 0 && step.unit
       ? progress.completed + " / " + progress.total + " " + step.unit
       : "";
+  if (failed) {
+    return (
+      <p className="legacy-sync-stopped-stage">
+        停止阶段 · {step.label}
+        {count && <span className="legacy-sync-numbers">{count}</span>}
+      </p>
+    );
+  }
   return (
     <div className="legacy-sync-progress">
       <div className="legacy-sync-progress-caption">
-        <strong aria-live="polite">
-          {failed ? "中止于" + step.label : step.label}
-        </strong>
+        <strong aria-live="polite">{step.label}</strong>
         <span className="legacy-sync-numbers">
           {count && <span>{count}</span>}
           <b>{percent}%</b>
@@ -64,7 +70,6 @@ export function LegacySyncProgress({
           .filter(Boolean)
           .join("，")}
         data-running={running}
-        data-failed={failed}
       >
         <span style={{ width: percent + "%" }} />
       </div>
@@ -76,6 +81,7 @@ export type LegacySyncConfirmation = {
   title: string;
   message: string;
   confirmLabel: string;
+  dismissLabel?: string;
   confirm: () => void;
 };
 
@@ -132,7 +138,7 @@ export function LegacySyncConfirm({
             className="button-outline"
             onClick={onClose}
           >
-            取消
+            {confirmation.dismissLabel ?? "取消"}
           </button>
           <button type="submit" className="button-white">
             {confirmation.confirmLabel}

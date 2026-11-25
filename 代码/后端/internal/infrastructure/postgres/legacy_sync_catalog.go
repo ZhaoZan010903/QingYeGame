@@ -69,7 +69,7 @@ func (s LegacySyncStore) LoadCatalog(ctx context.Context) (map[string]syncapp.Cu
 	}
 	defer tx.Rollback(ctx)
 	products := map[string]syncapp.Current{}
-	rows, err := tx.Query(ctx, `SELECT `+syncProductColumns+`,last.after_state,coalesce(last.ownership,'{}'::jsonb)
+	rows, err := tx.Query(ctx, `SELECT `+syncProductColumns+`,last.after_state,coalesce(last.ownership,'{}'::jsonb),p.updated_at
  FROM products p LEFT JOIN LATERAL (
  SELECT i.after_state,i.ownership FROM legacy_sync_items i JOIN legacy_sync_batches b ON b.id=i.batch_id
  WHERE i.legacy_id=p.legacy_id AND i.after_state IS NOT NULL AND b.status='applied'
@@ -82,7 +82,7 @@ func (s LegacySyncStore) LoadCatalog(ctx context.Context) (map[string]syncapp.Cu
 	for rows.Next() {
 		var p syncapp.Current
 		var previous []byte
-		if err = rows.Scan(append(productDest(&p), &previous, &p.Ownership)...); err != nil {
+		if err = rows.Scan(append(productDest(&p), &previous, &p.Ownership, &p.UpdatedAt)...); err != nil {
 			return nil, nil, nil, err
 		}
 		if len(previous) > 0 {

@@ -67,6 +67,7 @@ func (p Product) Input() catalog.ProductInput {
 
 type Current struct {
 	Product
+	UpdatedAt   time.Time
 	Deleted     bool
 	Legacy      bool
 	Baseline    json.RawMessage
@@ -118,20 +119,47 @@ type Progress struct {
 }
 
 type Batch struct {
-	ID            string     `json:"id"`
-	PlannedAt     *time.Time `json:"planned_at"`
-	StartedAt     time.Time  `json:"started_at"`
-	SourceUpdated *time.Time `json:"source_updated_at"`
-	FinishedAt    *time.Time `json:"finished_at"`
-	AppliedAt     *time.Time `json:"applied_at"`
-	RolledBackAt  *time.Time `json:"rolled_back_at"`
-	RollbackUntil *time.Time `json:"rollback_until"`
-	Status        string     `json:"status"`
-	SourceCount   int        `json:"source_count"`
-	SourceDigest  string     `json:"-"`
-	Summary       Summary    `json:"summary"`
-	Reason        string     `json:"reason"`
-	Progress      Progress   `json:"progress"`
+	ID            string           `json:"id"`
+	PlannedAt     *time.Time       `json:"planned_at"`
+	StartedAt     time.Time        `json:"started_at"`
+	SourceUpdated *time.Time       `json:"source_updated_at"`
+	FinishedAt    *time.Time       `json:"finished_at"`
+	AppliedAt     *time.Time       `json:"applied_at"`
+	RolledBackAt  *time.Time       `json:"rolled_back_at"`
+	RollbackUntil *time.Time       `json:"rollback_until"`
+	Status        string           `json:"status"`
+	SourceCount   int              `json:"source_count"`
+	SourceDigest  string           `json:"-"`
+	Summary       Summary          `json:"summary"`
+	Reason        string           `json:"reason"`
+	Progress      Progress         `json:"progress"`
+	ReviewKind    string           `json:"review_kind"`
+	ReviewOf      string           `json:"review_of,omitempty"`
+	CanContinue   bool             `json:"can_continue"`
+	CanCancel     bool             `json:"can_cancel"`
+	Approval      *OfflineApproval `json:"-"`
+}
+
+// OfflineApproval is attached only to the new manual job reserved by Continue.
+// It never changes the rules for a scheduled or unrelated manual run.
+type OfflineApproval struct {
+	Digest     string
+	ComparedAt time.Time
+	Candidates map[string]string // legacy ID -> displayed product code
+}
+
+func (a *OfflineApproval) matches(digest string, unavailable []string, current map[string]Current) bool {
+	if a == nil || a.Digest != digest || len(a.Candidates) != len(unavailable) {
+		return false
+	}
+	for _, id := range unavailable {
+		code, ok := a.Candidates[id]
+		p := current[id]
+		if !ok || code != p.Code || p.UpdatedAt.After(a.ComparedAt) {
+			return false
+		}
+	}
+	return true
 }
 
 type Controls struct {
@@ -159,6 +187,7 @@ type Asset struct {
 type Store interface {
 	BeginScheduledBatch(context.Context, string, time.Time) (Batch, bool, error)
 	BeginManualBatch(context.Context, string, string) (Batch, bool, error)
+	BeginReviewedBatch(context.Context, string, string, string) (Batch, bool, error)
 	ReportProgress(context.Context, string, Progress) error
 	Heartbeat(context.Context, string) error
 	LoadCatalog(context.Context) (map[string]Current, map[string]catalog.CategoryRules, map[string]string, error)

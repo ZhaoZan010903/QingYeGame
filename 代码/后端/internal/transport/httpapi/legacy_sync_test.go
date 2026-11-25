@@ -14,6 +14,8 @@ func TestLegacySyncRoutesAreAdminOnly(t *testing.T) {
 		{http.MethodPost, batches},
 		{http.MethodGet, batches + "/one"},
 		{http.MethodPost, batches + "/one/rollback"},
+		{http.MethodPost, batches + "/one/continue"},
+		{http.MethodPost, batches + "/one/cancel"},
 		{http.MethodPut, "/api/v1/admin/legacy-sync/schedule"},
 	} {
 		statusIs(t, surfaceRequest(t, public, route.method, route.path, "", nil), http.StatusNotFound)

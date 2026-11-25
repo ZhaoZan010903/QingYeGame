@@ -14,6 +14,8 @@ import (
 func (a *App) registerLegacySync(m routeRegistrar) {
 	m.HandleFunc("GET /api/v1/admin/legacy-sync/batches", a.adminOnly(a.legacySyncBatches))
 	m.HandleFunc("POST /api/v1/admin/legacy-sync/batches", a.adminOnly(a.legacySyncStart))
+	m.HandleFunc("POST /api/v1/admin/legacy-sync/batches/{id}/continue", a.adminOnly(a.legacySyncContinue))
+	m.HandleFunc("POST /api/v1/admin/legacy-sync/batches/{id}/cancel", a.adminOnly(a.legacySyncCancel))
 	m.HandleFunc("GET /api/v1/admin/legacy-sync/batches/{id}", a.adminOnly(a.legacySyncDetails))
 	m.HandleFunc("POST /api/v1/admin/legacy-sync/batches/{id}/rollback", a.adminOnly(a.legacySyncRollback))
 	m.HandleFunc("PUT /api/v1/admin/legacy-sync/schedule", a.adminOnly(a.legacySyncSchedule))
@@ -54,6 +56,55 @@ func (a *App) legacySyncStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	batch, err := a.LegacySync.Start(user.ID, input.RequestID)
+	legacySyncStartResponse(w, batch, err)
+}
+
+func (a *App) legacySyncContinue(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	user, ok := a.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		RequestID string `json:"request_id"`
+		Confirm   bool   `json:"confirm"`
+	}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	if !input.Confirm {
+		fail(w, 422, "CONFIRM_REQUIRED", "请先确认本批拟下架清单")
+		return
+	}
+	if a.LegacySync == nil {
+		fail(w, http.StatusServiceUnavailable, "LEGACY_SYNC_UNAVAILABLE", "当前环境暂不能启动同步")
+		return
+	}
+	batch, err := a.LegacySync.Continue(user.ID, input.RequestID, r.PathValue("id"))
+	legacySyncStartResponse(w, batch, err)
+}
+
+func (a *App) legacySyncCancel(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	user, ok := a.requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Confirm bool `json:"confirm"`
+	}
+	if !readJSON(w, r, &input) {
+		return
+	}
+	if !input.Confirm {
+		fail(w, 422, "CONFIRM_REQUIRED", "请确认取消本批同步")
+		return
+	}
+	batch, err := a.legacyStore().CancelBlocked(r.Context(), r.PathValue("id"), user.ID)
+	memberResponse(w, map[string]any{"data": batch}, err)
+}
+
+func legacySyncStartResponse(w http.ResponseWriter, batch syncapp.Batch, err error) {
 	if errors.Is(err, syncapp.ErrBusy) {
 		fail(w, http.StatusConflict, "LEGACY_SYNC_BUSY", "已有同步任务在运行")
 		return
