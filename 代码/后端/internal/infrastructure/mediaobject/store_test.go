@@ -33,7 +33,7 @@ func (b *memoryBackend) open(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(b.data)), nil
 }
 func (b *memoryBackend) remove(context.Context, string) error { b.calls++; return b.err }
-func (b *memoryBackend) sign(context.Context, string, time.Duration) (string, error) {
+func (b *memoryBackend) sign(context.Context, string, string, time.Duration) (string, error) {
 	b.calls++
 	return "https://example.invalid/image", b.err
 }

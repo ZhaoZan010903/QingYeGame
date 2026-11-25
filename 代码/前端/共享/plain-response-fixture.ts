@@ -10,6 +10,7 @@ export const plainResponseFixture = {
   validateChat: async () => ({ enabled: false }),
   decodeChat: async (value: unknown) => value,
   epoch: () => 0,
+  imageCacheIdentity: () => undefined,
   reset: () => {},
   setIdentity: () => {},
   subscribeIdentity: () => () => {},

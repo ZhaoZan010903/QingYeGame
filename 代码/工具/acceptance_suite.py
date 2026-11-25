@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import datetime as dt
+import hashlib
 import http.cookies
 import ipaddress
 import json
@@ -240,6 +241,18 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
     def admin_product(self, product_id):
         return self.call("admin", "GET", f"/api/v1/admin/products/{product_id}").data
 
+    def public_thumbnail(self, media_id, product):
+        path = f"/api/v1/media/{media_id}/file?variant=thumb"
+        if self.args.response_crypto and not self.args.no_oss_delivery:
+            item = {"id": media_id, "variant": "thumb", "product_id": product["id"], "product_version": product["version"]}
+            plan = self.call("anonymous", "POST", "/api/v1/media/access-plan", {"items": [item]}).data["items"][0]
+            self.check("visible product thumbnail receives an OSS plan", plan["id"] == media_id and plan["variant"] == "thumb"
+                       and plan["mode"] == "oss" and len(plan.get("cache_key", "")) == 64 and plan["mime_type"] == "image/webp")
+            denied = self.call("anonymous", "GET", path, status=409)
+            self.check("public thumbnail bytes require an OSS plan", denied.json.get("code") == "MEDIA_PLAN_REQUIRED")
+        else:
+            self.call("anonymous", "GET", path)
+
     def upload(self, actor="member", raw=None, *, filename="acceptance.png", mime="image/png", complete_status=200, purpose="product"):
         raw = png_bytes() if raw is None else raw
         ticket = self.call(actor, "POST", "/api/v1/uploads", {"filename": filename, "mime_type": mime, "byte_size": len(raw), "purpose": purpose}, status=(200, 201)).data
@@ -321,7 +334,7 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
         self.call("member", "PATCH", f"/api/v1/me/products/{pid}", edit)
         product = self.submit_approve(pid)
         self.call("anonymous", "GET", f"/api/v1/products/{pid}")
-        self.call("anonymous", "GET", f"/api/v1/media/{second}/file?variant=thumb")
+        self.public_thumbnail(second, product)
         self.call("admin", "POST", f"/api/v1/admin/products/{pid}/publish", {"expected_version": product["version"]}, status=409)
         for _ in range(2):
             self.call("other", "PUT", f"/api/v1/me/favorites/{pid}")
@@ -343,6 +356,12 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
         self.submit_approve(pid)
         platform = self.call("admin", "POST", "/api/v1/admin/products", self.product_input(prefix + " platform")).data
         platform_image = self.upload("admin")
+        if self.args.response_crypto:
+            # The source upload is sanitized before publication. Pin those actual
+            # authorized bytes so OSS is compared with an independent reference.
+            reference = self.call("admin", "GET", f"/api/v1/media/{platform_image}/file")
+            self.check("draft fixture yields sanitized PNG bytes", reference.raw.startswith(b"\x89PNG\r\n\x1a\n"))
+            self.fixtures["r24_platform_image_sha256"] = hashlib.sha256(reference.raw).hexdigest()
         platform = self.call("admin", "POST", f"/api/v1/admin/products/{platform['id']}/images", {"media_ids": [platform_image], "expected_version": platform["version"], "request_id": str(uuid.uuid4())}).data
         platform = self.call("admin", "POST", f"/api/v1/admin/products/{platform['id']}/publish", {"expected_version": platform["version"]}).data
         platform = self.wait_published(platform['id'], platform)
@@ -676,8 +695,8 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
         ticket = self.call("admin", "POST", "/api/v1/uploads", {"filename": "admin-only.png", "mime_type": "image/png", "byte_size": len(png_bytes())}, status=(200, 201)).data
         self.expect("admin upload ticket cannot cross into public API", public.request("PUT", ticket["upload_url"], png_bytes(), content_type="image/png"), 403)
         pid, mid = self.fixtures["product_id"], self.fixtures["media_id"]
-        self.call("anonymous", "GET", f"/api/v1/media/{mid}/file?variant=thumb")
         product = self.own(pid)
+        self.public_thumbnail(mid, product)
         self.call("member", "POST", f"/api/v1/me/products/{pid}/withdraw", {"expected_version": product["version"]})
         self.call("anonymous", "GET", f"/api/v1/products/{pid}", status=410)
         self.call("anonymous", "GET", f"/api/v1/media/{mid}/file", status=404)
@@ -752,6 +771,7 @@ def parser():
     p.add_argument("--phase", choices=("functional", "concurrency", "security"), required=True)
     p.add_argument("--max-upload-bytes", type=int, default=10 * 1024 * 1024)
     p.add_argument("--response-crypto", action="store_true", help="require the R24 encrypted response protocol")
+    p.add_argument("--no-oss-delivery", action="store_true", help="expect the encrypted deployment to have MEDIA_DELIVERY_ENABLED=false")
     return p
 
 

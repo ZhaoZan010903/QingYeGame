@@ -2,6 +2,7 @@
 import concurrent.futures
 import datetime
 import hashlib
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -9,6 +10,22 @@ import urllib.request
 import uuid
 
 from response_crypto_acceptance import INIT_PATH, request_headers
+
+
+def signed_public_plan(plan, media_id, variant, server_time):
+    parsed = urllib.parse.urlsplit(plan["url"])
+    query = urllib.parse.parse_qs(parsed.query)
+    stamp = lambda raw: datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    lifetime = (stamp(plan["expires_at"]) - stamp(server_time)).total_seconds()
+    return (plan["mode"] == "oss" and plan["id"] == media_id and plan["variant"] == variant
+            and parsed.scheme == "https" and parsed.hostname and parsed.hostname.endswith(".oss-cn-beijing.aliyuncs.com")
+            and not parsed.username and not parsed.password and not parsed.fragment and parsed.port in (None, 443)
+            and 0 < lifetime <= 5 and query.get("x-oss-expires") == ["5"]
+            and bool(re.fullmatch(r"[0-9a-f]{64}", query.get("x-oss-signature", [""])[0]))
+            and bool(re.fullmatch(r"[0-9a-f]{64}", plan.get("cache_key", "")))
+            and ((variant == "original" and plan["mime_type"] == "image/png" and "x-oss-process" not in query)
+                 or (variant == "thumb" and plan["mime_type"] == "image/webp" and
+                     query.get("x-oss-process") == ["image/resize,m_lfit,w_720,h_720,limit_1/format,webp"])))
 
 
 class SecurityR24Checks:
@@ -34,7 +51,8 @@ class SecurityR24Checks:
         media = self.upload("admin")
         self.fixtures["r24_private_media_id"] = media
         private = self.r24_plan("admin", [{"id": media}]).data["items"][0]
-        self.check("R24 private media stays on Go", private["mode"] == "go" and private["url"].startswith("/api/v1/media/"))
+        self.check("R24 private media stays on Go", private["mode"] == "go" and private["url"].startswith("/api/v1/media/")
+                   and "cache_key" not in private)
         reply = self.call("admin", "GET", private["url"])
         self.check("R24 local Go image is the explicit plaintext-image exception",
                    getattr(reply, "was_local_image", False) and reply.raw.startswith(b"\x89PNG\r\n\x1a\n"))
@@ -44,25 +62,37 @@ class SecurityR24Checks:
         media = self.fixtures["admin_media_id"]
         product = self.admin_product(self.fixtures["platform_product_id"])
         item = {"id": media, "product_id": product["id"], "product_version": product["version"]}
-        plan = self.r24_plan("anonymous", [item]).data["items"][0]
-        self.check("R24 single public image prefers OSS", plan["mode"] == "oss")
-        parsed = urllib.parse.urlsplit(plan["url"])
-        self.check("R24 signed URL is a bounded HTTPS OSS object",
-                   parsed.scheme == "https" and bool(parsed.hostname) and parsed.hostname.endswith(".aliyuncs.com")
-                   and not parsed.username and not parsed.password)
-        reference = self.call("anonymous", "GET", f"/api/v1/media/{media}/file")
-        self.check("R24 OSS image relayed by Go remains encrypted",
-                   getattr(reference, "was_encrypted", False) and not getattr(reference, "was_local_image", False))
-        # Sign immediately before use: obtaining a separate Go reference can consume the five-second window.
-        plan = self.r24_plan("anonymous", [item]).data["items"][0]
+        expected = self.fixtures["r24_platform_image_sha256"]
+        if self.args.no_oss_delivery:
+            plan = self.r24_plan("anonymous", [item]).data["items"][0]
+            self.check("disabled direct delivery uses a Go grant", plan["mode"] == "go" and "cache_key" not in plan)
+            reference = self.call("anonymous", "GET", plan["url"])
+            self.check("Go delivery matches sanitized original", getattr(reference, "was_encrypted", False)
+                       and not getattr(reference, "was_local_image", False) and hashlib.sha256(reference.raw).hexdigest() == expected)
+            return
+        denied = self.call("anonymous", "GET", f"/api/v1/media/{media}/file", status=409)
+        self.check("public original bytes require an OSS plan", denied.json.get("code") == "MEDIA_PLAN_REQUIRED")
+        fresh = self.r24_plan("anonymous", [item, dict(item, variant="thumb")]).data
+        plan, thumb = fresh["items"]
+        self.check("direct original is five-second OSS representation", signed_public_plan(plan, media, "original", fresh["server_time"]))
+        self.check("direct thumbnail is a separate signed representation", signed_public_plan(thumb, media, "thumb", fresh["server_time"])
+                   and thumb["cache_key"] != plan["cache_key"])
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *args, **kwargs):
                 return None
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         with opener.open(plan["url"], timeout=10) as response:
             direct = response.read(1024 * 1024)
-            self.check("R24 direct OSS bytes equal controlled Go bytes",
-                       response.status == 200 and hashlib.sha256(direct).digest() == hashlib.sha256(reference.raw).digest())
+            self.check("direct OSS bytes equal the sanitized pre-publication fixture",
+                       response.status == 200 and hashlib.sha256(direct).hexdigest() == expected)
+        refreshed = self.r24_plan("anonymous", [dict(item, variant="thumb")]).data
+        repeat = refreshed["items"][0]
+        self.check("thumbnail reauthorization preserves only matching representation identity",
+                   signed_public_plan(repeat, media, "thumb", refreshed["server_time"]) and repeat["cache_key"] == thumb["cache_key"])
+        with opener.open(repeat["url"], timeout=10) as response:
+            preview = response.read(1024 * 1024)
+            self.check("OSS returns the requested WebP rendition", response.status == 200 and
+                       preview[:4] == b"RIFF" and preview[8:12] == b"WEBP")
         expiry = datetime.datetime.fromisoformat(plan["expires_at"].replace("Z", "+00:00")).timestamp()
         time.sleep(max(0, min(7, expiry - time.time() + 1)))
         try:

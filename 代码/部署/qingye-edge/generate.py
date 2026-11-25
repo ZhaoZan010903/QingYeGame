@@ -129,7 +129,7 @@ def app_server(surface: str, *, domain: bool, staging: bool) -> str:
         "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; "
         "frame-src https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; "
         "img-src 'self' blob: data: https://qingye-images-20261.oss-cn-beijing.aliyuncs.com; "
-        f"connect-src 'self' wss://{endpoint} https://{IP}:{port}; "
+        f"connect-src 'self' wss://{endpoint} https://{IP}:{port} https://qingye-images-20261.oss-cn-beijing.aliyuncs.com; "
         "font-src 'self'; base-uri 'none'; form-action 'self'; object-src 'none'; frame-ancestors 'none'"
     )
     hsts = 'add_header Strict-Transport-Security "max-age=31536000" always;' if domain else ""

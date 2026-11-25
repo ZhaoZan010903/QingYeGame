@@ -24,6 +24,7 @@ import "./media-security.css";
 import { responseCrypto } from "./response-crypto";
 import {
   acquireMediaSlot,
+  ExpiredImageLink,
   resolveMediaImage,
   type DeliveredImage,
   type ProductMediaScope,
@@ -148,9 +149,19 @@ export function ProtectedImage({
           throw new Error("图片访问凭据已过期，请稍后重试。");
         }
         setDelivered(loaded);
-      })().catch(() => {
+      })().catch((error) => {
         clearTimeout(timeout);
         releaseSlot?.();
+        if (
+          !disposed &&
+          version === current.current &&
+          error instanceof ExpiredImageLink &&
+          ossRefreshes.current < 1
+        ) {
+          ossRefreshes.current++;
+          setAttempt((value) => value + 1);
+          return;
+        }
         if (!disposed && version === current.current)
           image.current?.dispatchEvent(new Event("error"));
       });
@@ -224,9 +235,10 @@ export function ProtectedImage({
     deliveryRelease.current?.();
     release.current?.();
     release.current = null;
+    delivered?.invalidate?.();
     if (
       protectedSource &&
-      delivered?.mode === "oss" &&
+      (delivered?.mode === "oss" || delivered?.mode === "oss-blob") &&
       ossRefreshes.current < 1
     ) {
       ossRefreshes.current++;

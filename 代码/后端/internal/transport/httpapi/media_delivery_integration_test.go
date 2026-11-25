@@ -18,12 +18,12 @@ type deliveryTestFiles struct {
 	signed int
 }
 
-func (f *deliveryTestFiles) SignPublished(_ context.Context, u media.Upload, ttl time.Duration) (string, bool, error) {
+func (f *deliveryTestFiles) SignPublished(_ context.Context, u media.Upload, variant string, ttl time.Duration) (media.SignedImage, bool, error) {
 	if !u.Public || !u.PublishedProduct || u.Purpose != "product" || ttl != 5*time.Second {
 		panic("unapproved direct image")
 	}
 	f.signed++
-	return "https://isolated-bucket.oss-cn-beijing.aliyuncs.com/fixture?temporary=5", true, nil
+	return media.SignedImage{URL: "https://isolated-bucket.oss-cn-beijing.aliyuncs.com/fixture?temporary=5", MIME: u.MIME, CacheKey: strings.Repeat("a", 64)}, true, nil
 }
 func decodeDelivery(t *testing.T, body []byte) mediaDelivery {
 	t.Helper()
@@ -58,8 +58,11 @@ func TestR24MediaPlanPublishedOSSAndPrivateGoStaySeparate(t *testing.T) {
 	response := surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, cookies...)
 	statusIs(t, response, 200)
 	out := decodeDelivery(t, response.Body.Bytes())
-	if out.Mode != "oss" || out.ID != public || out.Variant != "original" || out.ExpiresAt.Before(time.Now()) || out.ExpiresAt.After(time.Now().Add(5*time.Second)) || files.signed != 1 {
+	if out.Mode != "oss" || out.ID != public || out.CacheKey != strings.Repeat("a", 64) || out.Variant != "original" || out.ExpiresAt.Before(time.Now()) || out.ExpiresAt.After(time.Now().Add(5*time.Second)) || files.signed != 1 {
 		t.Fatal("published single image not short signed", out.Mode)
+	}
+	for _, suffix := range []string{"/file", "/preview"} {
+		statusIs(t, surfaceRequest(t, handler, "GET", "/api/v1/media/"+public+suffix, "", nil, cookies...), 409)
 	}
 	_, metrics, err := store.Records(ctx)
 	if err != nil || metrics["oss_plans_issued"] != "1" || metrics["bytes_sent"] != "" {
@@ -74,7 +77,7 @@ func TestR24MediaPlanPublishedOSSAndPrivateGoStaySeparate(t *testing.T) {
 	response = surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, memberCookies...)
 	statusIs(t, response, 200)
 	out = decodeDelivery(t, response.Body.Bytes())
-	if out.Mode != "go" || !strings.Contains(out.URL, "grant=") || files.signed != 1 {
+	if out.Mode != "go" || out.CacheKey != "" || !strings.Contains(out.URL, "grant=") || files.signed != 1 {
 		t.Fatal("private image signed directly")
 	}
 	statusIs(t, surfaceRequest(t, handler, "GET", out.URL, "", nil, cookies...), 404)
@@ -83,6 +86,22 @@ func TestR24MediaPlanPublishedOSSAndPrivateGoStaySeparate(t *testing.T) {
 	_, metrics, err = store.Records(ctx)
 	if err != nil || metrics["go_plans_issued"] != "1" || metrics["go_transfers_started"] != "1" {
 		t.Fatal("Go grant accounting lost", err, metrics)
+	}
+	// Local-only storage still has the source file, but a visible product may
+	// never fall back to an application-server transfer when an OSS map is absent.
+	f.a.MediaFiles = files.Files
+	body = map[string]any{"items": []map[string]any{{"id": public, "variant": "thumb"}}}
+	statusIs(t, surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, cookies...), 503)
+	// Some recycled records retain status and image associations. The same
+	// visibility rule as the catalog must withdraw public signing immediately.
+	if _, err := f.a.DB.Exec(ctx, "UPDATE products SET deleted_at=now() WHERE id=$1", f.product); err != nil {
+		t.Fatal(err)
+	}
+	f.a.MediaFiles = files
+	statusIs(t, surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, cookies...), 404)
+	out = decodeDelivery(t, surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, memberCookies...).Body.Bytes())
+	if out.Mode != "go" || out.CacheKey != "" || files.signed != 1 {
+		t.Fatal("recycled product admitted to public delivery")
 	}
 }
 

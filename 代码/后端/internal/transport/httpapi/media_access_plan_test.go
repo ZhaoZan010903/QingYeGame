@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"fmt"
 	"net/http/httptest"
 	"qingye/backend/internal/domain/media"
 	securitydomain "qingye/backend/internal/domain/security"
@@ -24,34 +23,21 @@ func TestMediaPlanRejectsUnboundedMalformedAndDuplicateRequests(t *testing.T) {
 	}
 }
 
-func TestMediaRouteStableIndependentOfBatchAndOptionalVersionHints(t *testing.T) {
-	a := &App{Config: Config{SessionSecret: strings.Repeat("s", 32), MediaDeliveryEnabled: true}}
-	w := securitydomain.ReadSubject{Binding: "visitor", Key: "account", IPKey: "ip", Surface: "public"}
-	u := media.Upload{ID: "id", Key: "legacy/key", Purpose: "product", Public: true, PublishedProduct: true}
-	oss := 0
-	for i := range 1000 {
-		item := mediaPlanItem{ID: fmt.Sprintf("id-%d", i), Variant: "original"}
-		initial := a.preferOSS(w, item, u)
-		item.Variant = "thumb"
-		item.ProductID = "p"
-		item.ProductVersion = 9
-		if a.preferOSS(w, item, u) != initial {
-			t.Fatal("client hint rerolled route")
-		}
-		if initial {
-			oss++
+func TestMediaRoutesAllPublishedProductImagesToOSS(t *testing.T) {
+	a := &App{Config: Config{MediaDeliveryEnabled: true}}
+	u := media.Upload{Purpose: "product", Public: true, PublishedProduct: true}
+	if !a.directProductImage(u) {
+		t.Fatal("published image not routed direct")
+	}
+	for _, purpose := range []string{"chat", "contact", "avatar"} {
+		u.Purpose = purpose
+		if a.directProductImage(u) {
+			t.Fatal("nonproduct image routed direct", purpose)
 		}
 	}
-	if oss < 740 || oss > 860 {
-		t.Fatal("routing departed target", oss)
-	}
-	u.SingleProductImage = true
-	if !a.preferOSS(w, mediaPlanItem{ID: "single"}, u) {
-		t.Fatal("actual single image did not prefer OSS")
-	}
-	u.PublishedProduct = false
-	if a.preferOSS(w, mediaPlanItem{ID: "single"}, u) {
-		t.Fatal("private/contact image routed direct")
+	u.Purpose, u.PublishedProduct = "product", false
+	if a.directProductImage(u) {
+		t.Fatal("unpublished product image routed direct")
 	}
 }
 

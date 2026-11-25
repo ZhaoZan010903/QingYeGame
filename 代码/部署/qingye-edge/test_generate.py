@@ -64,7 +64,7 @@ class EdgeConfigTests(unittest.TestCase):
     def test_same_origin_ws_and_explicit_cross_origin_wt(self):
         for surface, host, port in (("public", "www.qingyegame.com", 5179), ("admin", "admin.qingyegame.com", 5181)):
             section = block(self.config, "domain-" + surface)
-            self.assertIn(f"connect-src 'self' wss://{host} https://8.140.230.149:{port}", section)
+            self.assertIn(f"connect-src 'self' wss://{host} https://8.140.230.149:{port} https://qingye-images-20261.oss-cn-beijing.aliyuncs.com;", section)
             self.assertIn('proxy_set_header Upgrade $http_upgrade;', section)
             self.assertIn('proxy_set_header Connection "upgrade";', section)
             self.assertIn("proxy_read_timeout 75s;", section)

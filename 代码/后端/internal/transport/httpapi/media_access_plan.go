@@ -31,6 +31,7 @@ type mediaDelivery struct {
 	URL       string    `json:"url"`
 	ExpiresAt time.Time `json:"expires_at"`
 	MIME      string    `json:"mime_type"`
+	CacheKey  string    `json:"cache_key,omitempty"`
 }
 
 func readMediaPlan(w http.ResponseWriter, r *http.Request) ([]mediaPlanItem, bool) {
@@ -78,18 +79,8 @@ func (a *App) mediaPlanDescriptor(who securitydomain.ReadSubject, item mediaPlan
 	return a.mediaMAC(string(b))
 }
 
-func (a *App) preferOSS(who securitydomain.ReadSubject, item mediaPlanItem, u media.Upload) bool {
-	if !a.Config.MediaDeliveryEnabled || !u.Public || !u.PublishedProduct || u.Purpose != "product" {
-		return false
-	}
-	if u.SingleProductImage {
-		return true
-	}
-	// Batch length and client hints cannot reroll the distribution decision.
-	b, _ := json.Marshal([]string{"media-route-v1", who.Binding, item.ID, u.Key})
-	h := a.mediaMAC(string(b))
-	n, _ := strconv.ParseUint(h[:8], 16, 32)
-	return n%10 < 8
+func (a *App) directProductImage(u media.Upload) bool {
+	return a.Config.MediaDeliveryEnabled && u.Public && u.PublishedProduct && u.Purpose == "product"
 }
 
 func (a *App) mediaAccessPlan(w http.ResponseWriter, r *http.Request) {
@@ -183,16 +174,17 @@ func (a *App) issueMediaPlan(ctx context.Context, who securitydomain.ReadSubject
 	// OSS v4 dates and Redis TTLs use whole seconds; never advertise a later
 	// deadline than the signed capability actually has.
 	started := time.Now().UTC().Truncate(time.Second)
-	if store != nil && a.preferOSS(who, item, u) {
-		url, found, err := a.mediaService().SignPublished(ctx, u, 5*time.Second)
-		if err != nil {
+	if a.directProductImage(u) {
+		if store == nil {
+			return out, allowed, securitydomain.ErrUnavailable
+		}
+		image, found, err := a.mediaService().SignPublished(ctx, u, item.Variant, 5*time.Second)
+		if err != nil || !found {
 			return out, allowed, fault.New(fault.Unavailable, "MEDIA_UNAVAILABLE", "图片暂不可用，请稍后重试")
 		}
-		if found {
-			out.Mode = "oss"
-			out.URL = url
-			out.ExpiresAt = started.Add(5 * time.Second)
-		}
+		out.Mode = "oss"
+		out.URL, out.MIME, out.CacheKey = image.URL, image.MIME, image.CacheKey
+		out.ExpiresAt = started.Add(5 * time.Second)
 	}
 	token := randomToken()
 	if out.Mode == "go" {

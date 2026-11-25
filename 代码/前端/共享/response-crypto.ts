@@ -1,3 +1,5 @@
+import { clearProductImageIdentity } from "./product-image-cache";
+
 /** R24 only wraps server responses. Authentication and business request IDs stay unchanged. */
 export const RESPONSE_PROTOCOL = "qy-r24-aesgcm-v1";
 const ENCRYPTED_TYPE = "application/vnd.qingye.encrypted";
@@ -157,6 +159,8 @@ export class ResponseCryptoClient {
   }
   /** No keys or user data cross tabs; the server independently rechecks every new context. */
   reset(notify = false, announceLocal = true) {
+    if (this.identity)
+      void clearProductImageIdentity(this.identity).catch(() => {});
     this.generation++;
     this.policy = undefined;
     this.current = undefined;
@@ -187,6 +191,9 @@ export class ResponseCryptoClient {
   }
   epoch() {
     return this.generation;
+  }
+  imageCacheIdentity() {
+    return this.identity;
   }
   private assertGeneration(generation: number) {
     if (generation !== this.generation)

@@ -9,9 +9,9 @@ import (
 )
 
 // PublishedSigner signs only an exact, verified published object mapping.
-// A false result means this resource uses controlled local/staging delivery.
+// False means that there is no approved OSS mapping to deliver.
 type PublishedSigner interface {
-	SignPublished(context.Context, domain.Upload, time.Duration) (string, bool, error)
+	SignPublished(context.Context, domain.Upload, string, time.Duration) (domain.SignedImage, bool, error)
 }
 
 func (s *Service) CheckProductVersion(ctx context.Context, mediaID, productID string, version int64) error {
@@ -30,13 +30,13 @@ func (s *Service) CheckProductVersion(ctx context.Context, mediaID, productID st
 	return checker.CheckProductVersion(ctx, mediaID, productID, version)
 }
 
-func (s *Service) SignPublished(ctx context.Context, u domain.Upload, ttl time.Duration) (string, bool, error) {
+func (s *Service) SignPublished(ctx context.Context, u domain.Upload, variant string, ttl time.Duration) (domain.SignedImage, bool, error) {
 	if !u.Public || !u.PublishedProduct || u.Purpose != "product" {
-		return "", false, nil
+		return domain.SignedImage{}, false, nil
 	}
 	signer, ok := s.files.(PublishedSigner)
 	if !ok {
-		return "", false, nil
+		return domain.SignedImage{}, false, nil
 	}
-	return signer.SignPublished(ctx, u, ttl)
+	return signer.SignPublished(ctx, u, variant, ttl)
 }

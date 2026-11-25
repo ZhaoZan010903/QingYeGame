@@ -1,4 +1,9 @@
 import { responseCrypto, ResponseCryptoError } from "./response-crypto";
+import {
+  discardProductImage,
+  readProductImage,
+  storeProductImage,
+} from "./product-image-cache";
 
 const OSS_HOST = "qingye-images-20261.oss-cn-beijing.aliyuncs.com";
 const IMAGE_TYPES = new Set([
@@ -9,8 +14,9 @@ const IMAGE_TYPES = new Set([
 ]);
 export type DeliveredImage = {
   url: string;
-  mode: "legacy" | "oss" | "go";
+  mode: "legacy" | "oss" | "oss-blob" | "go";
   expiresAt?: number;
+  invalidate?: () => void;
   dispose: () => void;
 };
 export type ProductMediaScope = { productId?: string; productVersion?: number };
@@ -57,6 +63,30 @@ function failure(status: number, message?: string) {
     status,
   });
 }
+export class ExpiredImageLink extends Error {}
+class UnsupportedThumbnail extends Error {}
+
+function blobImage(
+  blob: Blob,
+  mode: "go" | "oss-blob",
+  key?: string,
+): DeliveredImage {
+  const url = URL.createObjectURL(blob);
+  let disposed = false;
+  return {
+    url,
+    mode,
+    invalidate: key
+      ? () => {
+          void discardProductImage(key).catch(() => {});
+        }
+      : undefined,
+    dispose: () => {
+      if (!disposed) URL.revokeObjectURL(url);
+      disposed = true;
+    },
+  };
+}
 async function requireOK(response: Response) {
   if (response.ok) return;
   let message: string | undefined;
@@ -93,18 +123,115 @@ async function goImage(
   if (signal.aborted) throw signal.reason;
   if (epoch !== responseCrypto.epoch())
     throw new DOMException("登录状态已变更", "AbortError");
-  const source = URL.createObjectURL(blob);
-  let disposed = false;
-  return {
-    url: source,
-    mode: "go",
-    dispose: () => {
-      if (!disposed) {
-        disposed = true;
-        URL.revokeObjectURL(source);
+  return blobImage(blob, "go");
+}
+
+type Download = {
+  abort: AbortController;
+  result: Promise<Blob | undefined>;
+  users: number;
+};
+const downloads = new Map<string, Download>();
+let retryCorsAt = 0;
+
+async function productBytes(
+  key: string,
+  url: URL,
+  mime: string,
+  expires: number,
+  epoch: number,
+  thumbnail: boolean,
+  signal: AbortSignal,
+) {
+  const cached = await readProductImage(key).catch(() => undefined);
+  signal.throwIfAborted();
+  if (cached && cached.type === mime) return cached;
+  if (expires <= performance.now()) throw new ExpiredImageLink();
+  if (Date.now() < retryCorsAt) return;
+  let response: Response;
+  try {
+    response = await fetch(url.href, {
+      mode: "cors",
+      credentials: "omit",
+      cache: "no-store",
+      redirect: "error",
+      referrerPolicy: "no-referrer",
+      signal,
+    });
+  } catch (error) {
+    signal.throwIfAborted();
+    if (!(error instanceof TypeError)) throw error;
+    // A bucket or browser may allow <img> while disallowing readable fetches.
+    retryCorsAt = Date.now() + 60000;
+    return;
+  }
+  if (response.status === 403) throw new ExpiredImageLink();
+  if (thumbnail && response.status === 400) throw new UnsupportedThumbnail();
+  if (
+    !response.ok ||
+    response.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !==
+      mime ||
+    Number(response.headers.get("Content-Length")) > 64 * 1024 * 1024
+  )
+    throw failure(502);
+  const bytes = await response.blob();
+  if (!bytes.size || bytes.size > 64 * 1024 * 1024) throw failure(502);
+  signal.throwIfAborted();
+  if (responseCrypto.epoch() !== epoch)
+    throw new DOMException("登录状态已变更", "AbortError");
+  const blob = bytes.type === mime ? bytes : bytes.slice(0, bytes.size, mime);
+  void storeProductImage(key, blob).catch(() => {});
+  return blob;
+}
+
+// Repeated covers (hero + catalog, or two fragments of an animated slide)
+// share image bytes. Unmounting one consumer cannot cancel another's request.
+function sharedProductBytes(
+  key: string,
+  get: (signal: AbortSignal) => Promise<Blob | undefined>,
+  signal: AbortSignal,
+) {
+  signal.throwIfAborted();
+  let download = downloads.get(key);
+  if (!download) {
+    const abort = new AbortController();
+    const entry = { abort, result: get(abort.signal), users: 0 };
+    download = entry;
+    downloads.set(key, entry);
+    const done = () => {
+      if (downloads.get(key) === entry) downloads.delete(key);
+    };
+    void entry.result.then(done, done);
+  }
+  const entry = download;
+  entry.users++;
+  return new Promise<Blob | undefined>((resolve, reject) => {
+    let finished = false;
+    const leave = () => {
+      if (finished) return;
+      finished = true;
+      signal.removeEventListener("abort", abort);
+      if (--entry.users === 0 && downloads.get(key) === entry) {
+        downloads.delete(key);
+        entry.abort.abort();
       }
-    },
-  };
+    };
+    const abort = () => {
+      leave();
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    void entry.result.then(
+      (blob) => {
+        leave();
+        resolve(blob);
+      },
+      (error) => {
+        leave();
+        reject(error);
+      },
+    );
+  });
 }
 /** Plans are requested at display time, never for the complete off-screen gallery. */
 export async function resolveMediaImage(
@@ -155,6 +282,54 @@ export async function resolveMediaImage(
   if (item.mode === "oss") {
     if (url.protocol !== "https:" || url.hostname !== OSS_HOST || url.port)
       throw new ResponseCryptoError();
+    const identity = responseCrypto.imageCacheIdentity();
+    if (
+      identity &&
+      typeof item.cache_key === "string" &&
+      /^[a-f0-9]{64}$/.test(item.cache_key)
+    ) {
+      const key = JSON.stringify([
+        identity,
+        reference.id,
+        reference.variant,
+        item.cache_key,
+      ]);
+      const download = sharedProductBytes(
+        JSON.stringify([epoch, key]),
+        (abort) =>
+          productBytes(
+            key,
+            url,
+            item.mime_type,
+            requestedAt + lifetime,
+            epoch,
+            reference.variant === "thumb",
+            abort,
+          ),
+        signal,
+      );
+      let blob: Blob | undefined;
+      try {
+        blob = await download;
+      } catch (error) {
+        if (
+          error instanceof UnsupportedThumbnail &&
+          epoch === responseCrypto.epoch()
+        ) {
+          // Historical images can exceed OSS processing dimension limits. An
+          // explicitly authorized original has its own budget, MIME and cache key.
+          const original = new URL(src, window.location.href);
+          original.pathname = `/api/v1/media/${reference.id}/file`;
+          original.searchParams.set("variant", "original");
+          return resolveMediaImage(original.href, signal, scope);
+        }
+        throw error;
+      }
+      signal.throwIfAborted();
+      if (epoch !== responseCrypto.epoch())
+        throw new DOMException("登录状态已变更", "AbortError");
+      if (blob) return blobImage(blob, "oss-blob", key);
+    }
     return {
       url: url.href,
       mode: "oss",

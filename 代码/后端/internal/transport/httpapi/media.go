@@ -9,6 +9,7 @@ import (
 	"net/url"
 	service "qingye/backend/internal/application/media"
 	securityapp "qingye/backend/internal/application/security"
+	"qingye/backend/internal/domain/fault"
 	domain "qingye/backend/internal/domain/media"
 	securitydomain "qingye/backend/internal/domain/security"
 	"qingye/backend/internal/infrastructure/cache"
@@ -154,6 +155,11 @@ func (a *App) serveMedia(w http.ResponseWriter, r *http.Request) {
 		before = func(m domain.Upload) error {
 			if err := checkVersion(); err != nil {
 				return err
+			}
+			if a.directProductImage(m) {
+				// This endpoint carries response-key headers and cannot safely
+				// redirect a fetch to a different origin. Old tabs can re-plan.
+				return fault.New(fault.Conflict, "MEDIA_PLAN_REQUIRED", "请重新获取图片访问链接")
 			}
 			var e error
 			if grant := r.URL.Query().Get("grant"); grant != "" {

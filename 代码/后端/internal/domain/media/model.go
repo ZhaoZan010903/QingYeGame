@@ -25,7 +25,7 @@ type Upload struct {
 	Size                                   int64
 	Valid                                  bool
 	Public                                 bool
-	PublishedProduct, SingleProductImage   bool
+	PublishedProduct                       bool
 	Purpose                                string
 	Resumable                              bool
 	Offset, SecurityVersion                int64
@@ -33,6 +33,11 @@ type Upload struct {
 	ProcessingToken                        string
 	ResumeValid                            bool
 	ProcessingValid                        bool
+}
+
+// SignedImage contains only the delivery capability and public representation metadata.
+type SignedImage struct {
+	URL, MIME, CacheKey string
 }
 type ManagedObject struct {
 	Variant, Key, MIME, SHA256 string

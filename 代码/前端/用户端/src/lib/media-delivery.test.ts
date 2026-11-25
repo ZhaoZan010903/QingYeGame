@@ -8,6 +8,7 @@ import {
   fixtureLocalImage,
 } from '../../../共享/response-crypto-fixture';
 import { safetyRequest } from '../../../共享/media-access-client';
+import * as disk from '../../../共享/product-image-cache';
 
 beforeEach(() => {
   const location = new URL('https://qingye.test/accounts/a');
@@ -272,5 +273,157 @@ describe('R24 图片访问计划', () => {
     await expect(safetyRequest('challenges/verify', { token: 'synthetic' })).rejects.toThrow(
       '验证已过期',
     );
+  });
+});
+
+describe('公开商品图片的本地缓存', () => {
+  const key = 'b'.repeat(64);
+  const src = '/api/v1/media/image-1/file';
+  const imageBlob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+  const signal = () => new AbortController().signal;
+  function harness() {
+    responseCrypto.setIdentity('anonymous');
+    const data = new Map<string, Blob>();
+    const read = vi
+      .spyOn(disk, 'readProductImage')
+      .mockImplementation(async (key) => data.get(key));
+    vi.spyOn(disk, 'storeProductImage').mockImplementation(async (key, blob) => {
+      data.set(key, blob);
+    });
+    const network = vi.fn(async (_url: string, _options: RequestInit) => new Response(imageBlob));
+    let plans = 0;
+    let denied = false;
+    let stamp = key;
+    const references: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
+      if (input.includes('/response-crypto/init')) return fixtureInit();
+      if (input.includes('/media/access-plan')) {
+        plans++;
+        const [ref] = JSON.parse(String(init.body)).items;
+        references.push(ref);
+        if (denied) return fixtureEncrypted(input, init, { message: '已下架' }, { status: 403 });
+        return fixtureEncrypted(input, init, {
+          data: {
+            server_time: '2026-11-15T00:00:00Z',
+            items: [
+              source('oss', {
+                cache_key: stamp,
+                variant: ref.variant,
+                url:
+                  'https://qingye-images-20261.oss-cn-beijing.aliyuncs.com/photo?signature=' +
+                  plans,
+              }),
+            ],
+          },
+        });
+      }
+      return network(input, init);
+    });
+    return {
+      references,
+      data,
+      read,
+      network,
+      plans: () => plans,
+      deny: () => {
+        denied = true;
+      },
+      change: () => {
+        stamp = 'a'.repeat(64);
+      },
+    };
+  }
+  it('每次检查访问权限，临时链接轮换仍只下载一次，存储键不含签名', async () => {
+    const h = harness();
+    const first = await resolveMediaImage(src, signal());
+    const second = await resolveMediaImage(src, signal());
+    expect(first.mode).toBe('oss-blob');
+    expect(second.mode).toBe('oss-blob');
+    expect(h.plans()).toBe(2);
+    expect(h.network).toHaveBeenCalledTimes(1);
+    expect(h.network.mock.calls[0][1]).toMatchObject({
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    });
+    expect(h.network.mock.calls[0][1].headers).toBeUndefined();
+    expect([...h.data.keys()][0]).not.toContain('signature');
+    h.deny();
+    await expect(resolveMediaImage(src, signal())).rejects.toMatchObject({ status: 403 });
+    expect(h.read).toHaveBeenCalledTimes(2);
+    first.dispose();
+    second.dispose();
+  });
+  it('不同身份或内容版本分别读取图片', async () => {
+    const h = harness();
+    (await resolveMediaImage(src, signal())).dispose();
+    responseCrypto.setIdentity('member-2');
+    (await resolveMediaImage(src, signal())).dispose();
+    h.change();
+    (await resolveMediaImage(src, signal())).dispose();
+    expect(h.network).toHaveBeenCalledTimes(3);
+    expect(h.data.size).toBe(3);
+  });
+  it('OSS 无法处理超大尺寸缩略图时单独申请同一商品的原图，缓存两种规格不混用', async () => {
+    const h = harness();
+    h.network.mockResolvedValueOnce(new Response(null, { status: 400 }));
+    const thumb = '/api/v1/media/image-1/preview?product_id=p&version=3';
+    const fallback = await resolveMediaImage(thumb, signal());
+    fallback.dispose();
+    expect(h.references).toEqual(
+      ['thumb', 'original'].map((variant) => ({
+        id: 'image-1',
+        product_id: 'p',
+        product_version: 3,
+        variant,
+      })),
+    );
+    expect(h.data.size).toBe(1);
+    expect(JSON.parse([...h.data.keys()][0])[2]).toBe('original');
+    (await resolveMediaImage(src + '?product_id=p&version=3', signal())).dispose();
+    expect(h.network).toHaveBeenCalledTimes(2);
+  });
+  it('OSS 拒绝缩略图凭证时不尝试读取原图', async () => {
+    const h = harness();
+    h.network.mockResolvedValueOnce(new Response(null, { status: 403 }));
+    await expect(resolveMediaImage('/api/v1/media/image-1/preview', signal())).rejects.toThrow();
+    expect(h.references).toHaveLength(1);
+    expect(h.data.size).toBe(0);
+  });
+  it('两个展示点共享一次下载，一个卸载不会中断另一张图片', async () => {
+    const h = harness();
+    let supply!: (r: Response) => void;
+    h.network.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          supply = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const first = resolveMediaImage(src, controller.signal).catch((error) => error);
+    const second = resolveMediaImage(src, signal());
+    await vi.waitFor(() => {
+      expect(h.plans()).toBe(2);
+      expect(h.network).toHaveBeenCalledOnce();
+    });
+    controller.abort();
+    supply(new Response(imageBlob));
+    expect((await first).name).toBe('AbortError');
+    (await second).dispose();
+    expect(h.network).toHaveBeenCalledOnce();
+  });
+  it('切换身份后，已获授权的旧页也不会显示在途结果', async () => {
+    const h = harness();
+    let supply!: (r: Response) => void;
+    h.network.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          supply = resolve;
+        }),
+    );
+    const first = resolveMediaImage(src, signal()).catch((error) => error);
+    await vi.waitFor(() => expect(h.network).toHaveBeenCalledOnce());
+    responseCrypto.setIdentity('member-3');
+    supply(new Response(imageBlob));
+    expect((await first).name).toBe('AbortError');
   });
 });

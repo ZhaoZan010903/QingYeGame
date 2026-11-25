@@ -13,9 +13,9 @@ type signingFiles struct {
 	signed int
 }
 
-func (f *signingFiles) SignPublished(context.Context, domain.Upload, time.Duration) (string, bool, error) {
+func (f *signingFiles) SignPublished(context.Context, domain.Upload, string, time.Duration) (domain.SignedImage, bool, error) {
 	f.signed++
-	return "https://example.invalid", true, nil
+	return domain.SignedImage{URL: "https://example.invalid"}, true, nil
 }
 
 func TestMediaDeliveryAuthorizationDoesNotReadAndPrivateMediaNeverSigns(t *testing.T) {
@@ -31,13 +31,13 @@ func TestMediaDeliveryAuthorizationDoesNotReadAndPrivateMediaNeverSigns(t *testi
 	for _, purpose := range []string{"product", "chat", "avatar", "contact"} {
 		u.Purpose = purpose
 		u.PublishedProduct = purpose != "product"
-		if _, found, err := s.SignPublished(context.Background(), u, 5*time.Second); err != nil || found {
+		if _, found, err := s.SignPublished(context.Background(), u, "original", 5*time.Second); err != nil || found {
 			t.Fatal("private/nonproduct signed", purpose, err)
 		}
 	}
 	u.Purpose = "product"
 	u.PublishedProduct = true
-	if _, found, err := s.SignPublished(context.Background(), u, 5*time.Second); err != nil || !found || signer.signed != 1 {
+	if _, found, err := s.SignPublished(context.Background(), u, "original", 5*time.Second); err != nil || !found || signer.signed != 1 {
 		t.Fatal("published image not signed", err)
 	}
 	r.upload.Public = false

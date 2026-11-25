@@ -24,7 +24,7 @@ type backend interface {
 	put(context.Context, string, io.ReadSeeker, int64, string, string) error
 	open(context.Context, string) (io.ReadCloser, error)
 	remove(context.Context, string) error
-	sign(context.Context, string, time.Duration) (string, error)
+	sign(context.Context, string, string, time.Duration) (string, error)
 }
 type Store struct {
 	backend           backend
@@ -191,13 +191,17 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return safe(ctx, s.backend.remove(ctx, key))
 }
 func (s *Store) SignedURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	return s.signedImageURL(ctx, key, "", ttl)
+}
+
+func (s *Store) signedImageURL(ctx context.Context, key, process string, ttl time.Duration) (string, error) {
 	if err := s.check(ctx, key); err != nil {
 		return "", err
 	}
 	if ttl <= 0 || ttl > time.Minute {
 		return "", errors.New("invalid signed URL lifetime")
 	}
-	u, err := s.backend.sign(ctx, key, ttl)
+	u, err := s.backend.sign(ctx, key, process, ttl)
 	if err != nil {
 		return "", safe(ctx, err)
 	}

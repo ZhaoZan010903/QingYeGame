@@ -63,7 +63,7 @@ func (b *s3Backend) remove(ctx context.Context, key string) error {
 	_, err := b.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &b.bucket, Key: &key})
 	return err
 }
-func (b *s3Backend) sign(context.Context, string, time.Duration) (string, error) {
+func (b *s3Backend) sign(context.Context, string, string, time.Duration) (string, error) {
 	return "", errors.New("private staging has no browser URL")
 }
 
@@ -102,8 +102,12 @@ func (b *ossBackend) remove(ctx context.Context, key string) error {
 	_, e := b.client.DeleteObject(ctx, &oss.DeleteObjectRequest{Bucket: &b.bucket, Key: &key})
 	return e
 }
-func (b *ossBackend) sign(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	r, e := b.signer.Presign(ctx, &oss.GetObjectRequest{Bucket: &b.bucket, Key: &key}, oss.PresignExpires(ttl))
+func (b *ossBackend) sign(ctx context.Context, key, process string, ttl time.Duration) (string, error) {
+	request := &oss.GetObjectRequest{Bucket: &b.bucket, Key: &key}
+	if process != "" {
+		request.Process = &process
+	}
+	r, e := b.signer.Presign(ctx, request, oss.PresignExpires(ttl))
 	if e != nil {
 		return "", e
 	}
