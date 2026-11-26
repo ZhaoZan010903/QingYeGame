@@ -245,7 +245,8 @@ class Suite(AdminAccountsChecks, RecommendationBoostChecks):
         path = f"/api/v1/media/{media_id}/file?variant=thumb"
         if self.args.response_crypto and not self.args.no_oss_delivery:
             item = {"id": media_id, "variant": "thumb", "product_id": product["id"], "product_version": product["version"]}
-            plan = self.call("anonymous", "POST", "/api/v1/media/access-plan", {"items": [item]}).data["items"][0]
+            plan = self.call("anonymous", "POST", "/api/v1/media/access-plan", {"items": [item]},
+                             extra_headers={"X-QY-Media-Plan-Version": "2"}).data["items"][0]
             self.check("visible product thumbnail receives an OSS plan", plan["id"] == media_id and plan["variant"] == "thumb"
                        and plan["mode"] == "oss" and len(plan.get("cache_key", "")) == 64 and plan["mime_type"] == "image/webp")
             denied = self.call("anonymous", "GET", path, status=409)

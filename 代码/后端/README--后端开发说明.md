@@ -32,7 +32,7 @@ go build -tags=nomsgpack -trimpath -ldflags="-s -w" -o qingye ./cmd/qingye
 
 ## 环境配置
 
-`RESPONSE_CRYPTO_ENABLED` 和 `MEDIA_DELIVERY_ENABLED` 在示例中默认关闭。正式部署启用时，双端前端须支持访问计划。响应加密包装 HTTP 业务正文与实时聊天下行，每会话密钥签发后 3600 秒轮换，保留旧密钥 120 秒。图片直连同时依赖响应加密与媒体保护。所有已上架商品图片在资源鉴权、商品版本及预算检查后，由 `POST /api/v1/media/access-plan` 发放 5 秒有效的 OSS 链接。缩略图由 OSS 等比缩放至 720 像素以内，常规静态图输出 WebP，GIF 保留原格式，超过基础处理大小限制的原件沿用原格式直链。浏览器只在计划返回相同 `cache_key` 时复用本地内容。缺失已验证对象映射会返回不可用。私有媒体仍按会话和用途权限读取。
+`RESPONSE_CRYPTO_ENABLED` 和 `MEDIA_DELIVERY_ENABLED` 在示例中默认关闭。正式部署启用时，双端前端须支持访问计划。响应加密包装 HTTP 业务正文与实时聊天下行，每会话密钥签发后 3600 秒轮换，保留旧密钥 120 秒。图片直连同时依赖响应加密与媒体保护。所有已上架商品图片在资源鉴权、商品版本及预算检查后，由 `POST /api/v1/media/access-plan` 发放 OSS 链接。请求头 `X-QY-Media-Plan-Version: 2` 使用 60 秒有效期，缺失或不识别的版本沿用 5 秒，兼容已经打开的旧页面。缩略图由 OSS 等比缩放至 720 像素以内，常规静态图输出 WebP，GIF 保留原格式，超过基础处理大小限制的原件沿用原格式直链。浏览器只在计划返回相同 `cache_key` 时复用本地内容。缺失已验证对象映射会返回不可用。私有媒体仍按会话和用途权限读取。
 
 业务请求先通过`GET /api/v1/response-crypto/init`取得当前上下文与密钥，再携带`X-QY-Protocol`、`X-QY-Context`、`X-QY-Key-Id`、`X-QY-Request-Id`；初始化使用`X-QY-Init: 1`，仅该控制响应直接由HTTPS保护。完整范围、失败处理、图片权限与测试边界见[R24设计](../../文档/开发产出文档/SECURITY-R24--响应加密与图片混合分发设计.md)。隔离HTTP验收使用`acceptance_suite.py --response-crypto`，该模式需要Python的`cryptography`包，仍禁止指向业务端口。
 

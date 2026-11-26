@@ -23,6 +23,10 @@ func imageRepresentation(variant, mime string, size int64) (process, outputMIME 
 	return resize + "/format,webp", "image/webp"
 }
 
+func validPublishedImageTTL(ttl time.Duration) bool {
+	return ttl == media.PublishedImageURLTTL || ttl == media.LegacyPublishedImageURLTTL
+}
+
 // Every caller has already resolved current product visibility. Only verified
 // original object mappings may become inputs to this exact OSS representation.
 func (s *Files) SignPublished(ctx context.Context, u media.Upload, variant string, ttl time.Duration) (media.SignedImage, bool, error) {
@@ -30,7 +34,7 @@ func (s *Files) SignPublished(ctx context.Context, u media.Upload, variant strin
 	if !u.Public || !u.PublishedProduct || u.Purpose != "product" {
 		return image, false, nil
 	}
-	if ttl != 5*time.Second || variant != "original" && variant != "thumb" {
+	if !validPublishedImageTTL(ttl) || variant != "original" && variant != "thumb" {
 		return image, true, ErrIntegrity
 	}
 	process, mime := imageRepresentation(variant, u.MIME, u.Size)
@@ -84,7 +88,7 @@ func (s *Files) SignPublished(ctx context.Context, u media.Upload, variant strin
 }
 
 func (d *LegacyReader) SignReplica(ctx context.Context, o media.LegacyReplica, variant string, ttl time.Duration) (string, error) {
-	if ttl != 5*time.Second || variant != "original" && variant != "thumb" || !validLegacyReplica(o) ||
+	if !validPublishedImageTTL(ttl) || variant != "original" && variant != "thumb" || !validLegacyReplica(o) ||
 		o.ObjectKey != d.prefix+o.StorageKey || o.Bucket != d.backend.bucket || (d.legacyOnly && !strings.HasPrefix(o.StorageKey, "legacy/")) {
 		return "", ErrIntegrity
 	}

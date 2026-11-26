@@ -15,15 +15,17 @@ import (
 
 type deliveryTestFiles struct {
 	mediaapp.Files
-	signed int
+	signed  int
+	lastTTL time.Duration
 }
 
 func (f *deliveryTestFiles) SignPublished(_ context.Context, u media.Upload, variant string, ttl time.Duration) (media.SignedImage, bool, error) {
-	if !u.Public || !u.PublishedProduct || u.Purpose != "product" || ttl != 5*time.Second {
+	if !u.Public || !u.PublishedProduct || u.Purpose != "product" {
 		panic("unapproved direct image")
 	}
 	f.signed++
-	return media.SignedImage{URL: "https://isolated-bucket.oss-cn-beijing.aliyuncs.com/fixture?temporary=5", MIME: u.MIME, CacheKey: strings.Repeat("a", 64)}, true, nil
+	f.lastTTL = ttl
+	return media.SignedImage{URL: "https://isolated-bucket.oss-cn-beijing.aliyuncs.com/fixture", MIME: u.MIME, CacheKey: strings.Repeat("a", 64)}, true, nil
 }
 func decodeDelivery(t *testing.T, body []byte) mediaDelivery {
 	t.Helper()
@@ -55,17 +57,36 @@ func TestR24MediaPlanPublishedOSSAndPrivateGoStaySeparate(t *testing.T) {
 	statusIs(t, status, 200)
 	cookies := status.Result().Cookies()
 	body := map[string]any{"items": []map[string]any{{"id": public}}}
-	response := surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, cookies...)
-	statusIs(t, response, 200)
-	out := decodeDelivery(t, response.Body.Bytes())
-	if out.Mode != "oss" || out.ID != public || out.CacheKey != strings.Repeat("a", 64) || out.Variant != "original" || out.ExpiresAt.Before(time.Now()) || out.ExpiresAt.After(time.Now().Add(5*time.Second)) || files.signed != 1 {
-		t.Fatal("published single image not short signed", out.Mode)
+	cases := []struct {
+		versions []string
+		want     time.Duration
+	}{
+		{[]string{"2"}, time.Minute},
+		{nil, 5 * time.Second},
+		{[]string{"60"}, 5 * time.Second},
+		{[]string{"2", "1"}, 5 * time.Second},
+	}
+	for _, c := range cases {
+		withVersion := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			for _, v := range c.versions {
+				r.Header.Add("X-QY-Media-Plan-Version", v)
+			}
+			handler.ServeHTTP(w, r)
+		})
+		before := time.Now().UTC().Truncate(time.Second)
+		response := surfaceRequest(t, withVersion, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, cookies...)
+		statusIs(t, response, 200)
+		out := decodeDelivery(t, response.Body.Bytes())
+		if out.Mode != "oss" || out.ID != public || out.CacheKey != strings.Repeat("a", 64) || out.Variant != "original" ||
+			out.ExpiresAt.Before(before.Add(c.want)) || out.ExpiresAt.After(time.Now().Add(c.want)) || files.lastTTL != c.want {
+			t.Fatalf("unexpected plan or signing lifetime for versions %q: mode=%s, TTL=%v", c.versions, out.Mode, files.lastTTL)
+		}
 	}
 	for _, suffix := range []string{"/file", "/preview"} {
 		statusIs(t, surfaceRequest(t, handler, "GET", "/api/v1/media/"+public+suffix, "", nil, cookies...), 409)
 	}
 	_, metrics, err := store.Records(ctx)
-	if err != nil || metrics["oss_plans_issued"] != "1" || metrics["bytes_sent"] != "" {
+	if err != nil || metrics["oss_plans_issued"] != "4" || metrics["bytes_sent"] != "" {
 		t.Fatal("issuance misreported as actual download", err, metrics)
 	}
 	body = map[string]any{"items": []map[string]any{{"id": private}}}
@@ -74,10 +95,10 @@ func TestR24MediaPlanPublishedOSSAndPrivateGoStaySeparate(t *testing.T) {
 	memberStatus := surfaceRequest(t, handler, "GET", "/api/v1/security/media-access", "", nil, memberCookies...)
 	statusIs(t, memberStatus, 200)
 	memberCookies = append(memberCookies, memberStatus.Result().Cookies()...)
-	response = surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, memberCookies...)
+	response := surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, memberCookies...)
 	statusIs(t, response, 200)
-	out = decodeDelivery(t, response.Body.Bytes())
-	if out.Mode != "go" || out.CacheKey != "" || !strings.Contains(out.URL, "grant=") || files.signed != 1 {
+	out := decodeDelivery(t, response.Body.Bytes())
+	if out.Mode != "go" || out.CacheKey != "" || !strings.Contains(out.URL, "grant=") || files.signed != len(cases) {
 		t.Fatal("private image signed directly")
 	}
 	statusIs(t, surfaceRequest(t, handler, "GET", out.URL, "", nil, cookies...), 404)
@@ -100,7 +121,7 @@ func TestR24MediaPlanPublishedOSSAndPrivateGoStaySeparate(t *testing.T) {
 	f.a.MediaFiles = files
 	statusIs(t, surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, cookies...), 404)
 	out = decodeDelivery(t, surfaceRequest(t, handler, "POST", "/api/v1/media/access-plan", "http://qingye.test", body, memberCookies...).Body.Bytes())
-	if out.Mode != "go" || out.CacheKey != "" || files.signed != 1 {
+	if out.Mode != "go" || out.CacheKey != "" || files.signed != len(cases) {
 		t.Fatal("recycled product admitted to public delivery")
 	}
 }

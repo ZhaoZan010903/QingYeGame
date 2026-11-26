@@ -252,7 +252,11 @@ export async function resolveMediaImage(
     method: "POST",
     credentials: "include",
     signal,
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "X-QY-Media-Plan-Version": "2",
+    },
     body: JSON.stringify({ items: [reference] }),
   });
   await requireOK(response);
@@ -271,11 +275,7 @@ export async function resolveMediaImage(
   )
     throw new ResponseCryptoError("图片访问凭据无效，请稍后重试。");
   const lifetime = Date.parse(item.expires_at) - Date.parse(data.server_time);
-  if (
-    !Number.isFinite(lifetime) ||
-    lifetime <= 0 ||
-    lifetime > (item.mode === "oss" ? 10000 : 60000)
-  )
+  if (!Number.isFinite(lifetime) || lifetime <= 0 || lifetime > 60_000)
     throw new ResponseCryptoError();
   const url = new URL(item.url, window.location.origin);
   if (url.username || url.password || url.hash) throw new ResponseCryptoError();

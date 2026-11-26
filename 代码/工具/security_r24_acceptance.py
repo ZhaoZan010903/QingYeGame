@@ -12,7 +12,10 @@ import uuid
 from response_crypto_acceptance import INIT_PATH, request_headers
 
 
-def signed_public_plan(plan, media_id, variant, server_time):
+OSS_LINK_LIFETIME_SECONDS = 60
+
+
+def signed_public_plan(plan, media_id, variant, server_time, ttl=OSS_LINK_LIFETIME_SECONDS):
     parsed = urllib.parse.urlsplit(plan["url"])
     query = urllib.parse.parse_qs(parsed.query)
     stamp = lambda raw: datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
@@ -20,7 +23,7 @@ def signed_public_plan(plan, media_id, variant, server_time):
     return (plan["mode"] == "oss" and plan["id"] == media_id and plan["variant"] == variant
             and parsed.scheme == "https" and parsed.hostname and parsed.hostname.endswith(".oss-cn-beijing.aliyuncs.com")
             and not parsed.username and not parsed.password and not parsed.fragment and parsed.port in (None, 443)
-            and 0 < lifetime <= 5 and query.get("x-oss-expires") == ["5"]
+            and 0 < lifetime <= ttl and query.get("x-oss-expires") == [str(ttl)]
             and bool(re.fullmatch(r"[0-9a-f]{64}", query.get("x-oss-signature", [""])[0]))
             and bool(re.fullmatch(r"[0-9a-f]{64}", plan.get("cache_key", "")))
             and ((variant == "original" and plan["mime_type"] == "image/png" and "x-oss-process" not in query)
@@ -34,7 +37,8 @@ class SecurityR24Checks:
         return super(type(client), client).request(method, path, body, **kwargs)
 
     def r24_plan(self, actor, items, status=200):
-        return self.call(actor, "POST", "/api/v1/media/access-plan", {"items": items}, status=status)
+        return self.call(actor, "POST", "/api/v1/media/access-plan", {"items": items}, status=status,
+                         extra_headers={"X-QY-Media-Plan-Version": "2"})
 
     def r24_functional(self):
         for actor, surface in (("anonymous", "public"), ("admin", "admin")):
@@ -72,9 +76,14 @@ class SecurityR24Checks:
             return
         denied = self.call("anonymous", "GET", f"/api/v1/media/{media}/file", status=409)
         self.check("public original bytes require an OSS plan", denied.json.get("code") == "MEDIA_PLAN_REQUIRED")
+        legacy = self.call("anonymous", "POST", "/api/v1/media/access-plan", {"items": [item]}).data
+        self.check("unversioned clients still receive a five-second OSS signature",
+                   signed_public_plan(legacy["items"][0], media, "original", legacy["server_time"], ttl=5))
         fresh = self.r24_plan("anonymous", [item, dict(item, variant="thumb")]).data
+        # Starting at receipt allows for server clock skew and whole-second OSS timestamps.
+        check_expired_at = time.monotonic() + OSS_LINK_LIFETIME_SECONDS + 1
         plan, thumb = fresh["items"]
-        self.check("direct original is five-second OSS representation", signed_public_plan(plan, media, "original", fresh["server_time"]))
+        self.check("direct original has a one-minute OSS signature", signed_public_plan(plan, media, "original", fresh["server_time"]))
         self.check("direct thumbnail is a separate signed representation", signed_public_plan(thumb, media, "thumb", fresh["server_time"])
                    and thumb["cache_key"] != plan["cache_key"])
         class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -93,8 +102,7 @@ class SecurityR24Checks:
             preview = response.read(1024 * 1024)
             self.check("OSS returns the requested WebP rendition", response.status == 200 and
                        preview[:4] == b"RIFF" and preview[8:12] == b"WEBP")
-        expiry = datetime.datetime.fromisoformat(plan["expires_at"].replace("Z", "+00:00")).timestamp()
-        time.sleep(max(0, min(7, expiry - time.time() + 1)))
+        time.sleep(max(0, check_expired_at - time.monotonic()))
         try:
             with opener.open(plan["url"], timeout=10) as response:
                 expired_status = response.status

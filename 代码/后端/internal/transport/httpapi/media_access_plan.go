@@ -130,8 +130,13 @@ func (a *App) mediaAccessPlan(w http.ResponseWriter, r *http.Request) {
 		uploads[i] = u
 	}
 	results := make([]mediaDelivery, 0, len(items))
+	// Already-open clients using v1 reject OSS plans longer than ten seconds.
+	ossTTL := media.LegacyPublishedImageURLTTL
+	if versions := r.Header.Values("X-QY-Media-Plan-Version"); len(versions) == 1 && versions[0] == "2" {
+		ossTTL = media.PublishedImageURLTTL
+	}
 	for i, item := range items {
-		out, decision, err := a.issueMediaPlan(r.Context(), who, deliveryStore, item, uploads[i])
+		out, decision, err := a.issueMediaPlan(r.Context(), who, deliveryStore, item, uploads[i], ossTTL)
 		if err != nil {
 			if errors.Is(err, securitydomain.ErrUnavailable) {
 				a.mediaSafetyError(w, err)
@@ -150,7 +155,7 @@ func (a *App) mediaAccessPlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"data": map[string]any{"server_time": time.Now().UTC(), "items": results}})
 }
 
-func (a *App) issueMediaPlan(ctx context.Context, who securitydomain.ReadSubject, store securityapp.DeliveryStore, item mediaPlanItem, u media.Upload) (mediaDelivery, securitydomain.ReadDecision, error) {
+func (a *App) issueMediaPlan(ctx context.Context, who securitydomain.ReadSubject, store securityapp.DeliveryStore, item mediaPlanItem, u media.Upload, ossTTL time.Duration) (mediaDelivery, securitydomain.ReadDecision, error) {
 	out := mediaDelivery{ID: item.ID, Variant: item.Variant, Mode: "go", MIME: u.MIME}
 	allowed := securitydomain.AllowedRead()
 	lease := newID()
@@ -178,13 +183,13 @@ func (a *App) issueMediaPlan(ctx context.Context, who securitydomain.ReadSubject
 		if store == nil {
 			return out, allowed, securitydomain.ErrUnavailable
 		}
-		image, found, err := a.mediaService().SignPublished(ctx, u, item.Variant, 5*time.Second)
+		image, found, err := a.mediaService().SignPublished(ctx, u, item.Variant, ossTTL)
 		if err != nil || !found {
 			return out, allowed, fault.New(fault.Unavailable, "MEDIA_UNAVAILABLE", "图片暂不可用，请稍后重试")
 		}
 		out.Mode = "oss"
 		out.URL, out.MIME, out.CacheKey = image.URL, image.MIME, image.CacheKey
-		out.ExpiresAt = started.Add(5 * time.Second)
+		out.ExpiresAt = started.Add(ossTTL)
 	}
 	token := randomToken()
 	if out.Mode == "go" {

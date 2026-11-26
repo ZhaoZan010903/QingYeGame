@@ -10,6 +10,8 @@ import (
 
 const MaxImagePixels int64 = 16000000
 const ThumbnailEdge = 720
+const PublishedImageURLTTL = time.Minute
+const LegacyPublishedImageURLTTL = 5 * time.Second
 
 type Actor struct{ ID, Role, Surface string }
 type CreateInput struct {

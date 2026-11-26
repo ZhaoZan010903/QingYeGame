@@ -31,7 +31,7 @@ function source(mode = 'oss', changes: Record<string, unknown> = {}) {
       mode === 'oss'
         ? 'https://qingye-images-20261.oss-cn-beijing.aliyuncs.com/test-image?signature=short'
         : '/api/v1/media/image-1/file?grant=opaque',
-    expires_at: '2026-11-15T00:00:05Z',
+    expires_at: '2026-11-15T00:01:00Z',
     mime_type: 'image/png',
     ...changes,
   };
@@ -90,21 +90,25 @@ describe('R24 图片访问计划', () => {
       }),
     ).toThrow();
   });
-  it('OSS分支仅请求当前图的计划，浏览器img直连且不发送Go头到OSS', async () => {
-    const fetcher = server(source());
-    const result = await resolveMediaImage(
-      '/api/v1/media/image-1/file',
-      new AbortController().signal,
-    );
-    expect(result.mode).toBe('oss');
-    expect(result.url).toContain('qingye-images-20261.oss-cn-beijing.aliyuncs.com');
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    const call = fetcher.mock.calls.find(([url]) => url.includes('access-plan'))!;
-    expect(JSON.parse(String(call[1]?.body))).toEqual({
-      items: [{ id: 'image-1', variant: 'original' }],
-    });
-    result.dispose();
-  });
+  it.each(['2026-11-15T00:00:05Z', '2026-11-15T00:01:00Z'])(
+    '声明图片计划版本，并接受新旧服务签发的当前图片链接 %s',
+    async (expires_at) => {
+      const fetcher = server(source('oss', { expires_at }));
+      const result = await resolveMediaImage(
+        '/api/v1/media/image-1/file',
+        new AbortController().signal,
+      );
+      expect(result.mode).toBe('oss');
+      expect(result.url).toContain('qingye-images-20261.oss-cn-beijing.aliyuncs.com');
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      const call = fetcher.mock.calls.find(([url]) => url.includes('access-plan'))!;
+      expect(new Headers(call[1]?.headers).get('X-QY-Media-Plan-Version')).toBe('2');
+      expect(JSON.parse(String(call[1]?.body))).toEqual({
+        items: [{ id: 'image-1', variant: 'original' }],
+      });
+      result.dispose();
+    },
+  );
   it('Go分支解密原始字节后创建Blob，释放必须幂等', async () => {
     const bytes = new Uint8Array([137, 80, 78, 71, 0, 255]);
     server(source('go', { expires_at: '2026-11-15T00:00:30Z' }), bytes);
@@ -199,12 +203,12 @@ describe('R24 图片访问计划', () => {
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
-  it('计划有效期减去请求等待，慢网不会把收到响应当作5秒起点', async () => {
+  it('从发起请求时计时，慢网收到的一分钟链接不会额外续期', async () => {
     let now = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => now);
     vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
       if (input.includes('/response-crypto/init')) return fixtureInit();
-      now = 8000;
+      now = 60_001;
       return fixtureEncrypted(input, init, {
         data: { server_time: '2026-11-15T00:00:00Z', items: [source()] },
       });
@@ -213,13 +217,14 @@ describe('R24 图片访问计划', () => {
       '/api/v1/media/image-1/file',
       new AbortController().signal,
     );
-    expect(image.expiresAt).toBe(5000);
+    expect(image.expiresAt).toBe(60_000);
     expect(image.expiresAt! < performance.now()).toBe(true);
   });
   it.each([
     { url: 'https://other.test/photo.png' },
     { id: 'wrong-image' },
-    { expires_at: '2026-11-15T01:00:00Z' },
+    { expires_at: '2026-11-15T00:01:00.001Z' },
+    { expires_at: '2026-11-15T00:00:00Z' },
     { mime_type: 'image/svg+xml' },
   ])('拒绝不匹配或过宽的访问计划 %j', async (changes) => {
     server(source('oss', changes));
